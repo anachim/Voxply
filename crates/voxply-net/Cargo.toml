@@ -1,0 +1,28 @@
+[package]
+name = "voxply-net"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+
+# libp2p — the P2P networking stack. We enable the features we need:
+# - tcp: transport layer
+# - noise: encrypted connections
+# - yamux: multiplexing multiple streams over one connection
+# - gossipsub: pub/sub messaging (for chat, world state)
+# - mdns: discover peers on the local network
+# - kad: distributed hash table for peer discovery
+libp2p = { version = "0.54", features = [
+    "tcp",
+    "noise",
+    "yamux",
+    "gossipsub",
+    "mdns",
+    "kad",
+    "tokio",
+    "macros",
+] }

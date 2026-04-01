@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/voxply-app",
+    "crates/voxply-net",
+    "crates/voxply-voice",
+    "crates/voxply-render",
+    "crates/voxply-script",
+    "crates/voxply-identity",
+    "crates/voxply-world",
+]
+
+# Shared dependency versions — crates inherit these with `workspace = true`
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

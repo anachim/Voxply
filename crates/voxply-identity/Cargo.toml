@@ -1,0 +1,15 @@
+[package]
+name = "voxply-identity"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+
+# ed25519-dalek — cryptographic signing for decentralized identity
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+
+# rand — random number generation (needed to create new keypairs)
+rand = "0.8"

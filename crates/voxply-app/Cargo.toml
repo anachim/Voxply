@@ -1,0 +1,23 @@
+[package]
+name = "voxply-app"
+version = "0.1.0"
+edition = "2021"
+
+# This is the main binary — it pulls in all the other crates
+[[bin]]
+name = "voxply"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+# Internal crates
+voxply-net = { path = "../voxply-net" }
+voxply-voice = { path = "../voxply-voice" }
+voxply-render = { path = "../voxply-render" }
+voxply-script = { path = "../voxply-script" }
+voxply-identity = { path = "../voxply-identity" }
+voxply-world = { path = "../voxply-world" }

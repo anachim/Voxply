@@ -8,6 +8,7 @@ members = [
     "crates/voxply-script",
     "crates/voxply-identity",
     "crates/voxply-world",
+    "crates/voxply-hub",
 ]
 
 # Shared dependency versions — crates inherit these with `workspace = true`
@@ -18,3 +19,7 @@ tracing-subscriber = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+uuid = { version = "1", features = ["v4"] }

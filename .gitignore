@@ -14,5 +14,8 @@ Thumbs.db
 # Environment
 .env
 
+# Runtime data
+*.db
+
 # Claude files
 .claude

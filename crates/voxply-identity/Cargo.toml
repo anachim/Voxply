@@ -7,9 +7,16 @@ edition = "2021"
 tracing = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 # ed25519-dalek — cryptographic signing for decentralized identity
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 
 # rand — random number generation (needed to create new keypairs)
 rand = "0.8"
+
+# hex — converts raw bytes to readable hex strings (like BitConverter.ToString in C#)
+hex = "0.4"
+
+# dirs — finds platform-specific directories (like Environment.GetFolderPath in C#)
+dirs = "6"

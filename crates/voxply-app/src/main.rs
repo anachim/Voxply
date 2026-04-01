@@ -5,17 +5,26 @@
 //! and runs the application loop.
 
 use anyhow::Result;
+use voxply_identity::Identity;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Set up logging so we can see what's happening in the terminal.
-    // `tracing_subscriber` collects log messages from all our crates.
     tracing_subscriber::fmt::init();
 
     tracing::info!("Starting Voxply...");
 
-    // TODO: Initialize subsystems
-    // - voxply_identity::init()  — load or create keypair
+    // Load existing identity or create a new one
+    let path = Identity::default_path()?;
+    let (identity, is_new) = Identity::load_or_create(&path)?;
+
+    if is_new {
+        tracing::info!("Generated new identity: {}", identity);
+    } else {
+        tracing::info!("Loaded existing identity: {}", identity);
+    }
+
+    // TODO: Initialize other subsystems
     // - voxply_net::init()       — start libp2p node
     // - voxply_voice::init()     — set up WebRTC
     // - voxply_world::init()     — create game world

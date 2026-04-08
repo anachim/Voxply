@@ -7,6 +7,7 @@ use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::{broadcast, RwLock};
 use voxply_hub::auth::models::{ChallengeResponse, VerifyResponse};
 use voxply_hub::db;
+use voxply_hub::federation::client::FederationClient;
 use voxply_hub::routes::me::MeResponse;
 use voxply_hub::server;
 use voxply_hub::state::AppState;
@@ -25,9 +26,12 @@ async fn setup() -> TestServer {
 
     let state = Arc::new(AppState {
         hub_name: "test-hub".to_string(),
+        hub_identity: Identity::generate(),
         db,
         pending_challenges: RwLock::new(HashMap::new()),
         chat_tx,
+        federation_client: FederationClient::new(),
+        peer_tokens: RwLock::new(HashMap::new()),
     });
 
     let app = server::create_router(state);

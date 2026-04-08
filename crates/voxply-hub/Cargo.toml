@@ -23,6 +23,7 @@ tower-http = { workspace = true }
 hex = "0.4"
 rand = "0.8"
 voxply-identity = { path = "../voxply-identity" }
+reqwest = { version = "0.12", features = ["json"] }
 sqlx = { workspace = true }
 futures-util = "0.3"
 uuid = { workspace = true }
@@ -30,3 +31,4 @@ uuid = { workspace = true }
 [dev-dependencies]
 axum-test = "19"
 tokio = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }

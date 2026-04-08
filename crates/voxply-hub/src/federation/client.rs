@@ -1,0 +1,94 @@
+use anyhow::{Context, Result};
+
+use crate::auth::models::{ChallengeResponse, VerifyResponse};
+use crate::routes::chat_models::{ChannelResponse, MessageResponse};
+use crate::routes::health::InfoResponse;
+use voxply_identity::Identity;
+
+pub struct FederationClient {
+    http: reqwest::Client,
+}
+
+impl FederationClient {
+    pub fn new() -> Self {
+        Self {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    pub async fn get_info(&self, base_url: &str) -> Result<InfoResponse> {
+        self.http
+            .get(format!("{base_url}/info"))
+            .send()
+            .await
+            .context("Failed to connect to peer")?
+            .json()
+            .await
+            .context("Invalid info response")
+    }
+
+    pub async fn authenticate(&self, base_url: &str, identity: &Identity) -> Result<String> {
+        let pub_key = identity.public_key_hex();
+
+        let challenge: ChallengeResponse = self
+            .http
+            .post(format!("{base_url}/auth/challenge"))
+            .json(&serde_json::json!({ "public_key": pub_key }))
+            .send()
+            .await
+            .context("Failed to request challenge from peer")?
+            .json()
+            .await
+            .context("Invalid challenge response")?;
+
+        let challenge_bytes = hex::decode(&challenge.challenge)
+            .context("Invalid challenge hex from peer")?;
+        let signature = identity.sign(&challenge_bytes);
+
+        let verify: VerifyResponse = self
+            .http
+            .post(format!("{base_url}/auth/verify"))
+            .json(&serde_json::json!({
+                "public_key": pub_key,
+                "challenge": challenge.challenge,
+                "signature": hex::encode(signature.to_bytes()),
+            }))
+            .send()
+            .await
+            .context("Failed to verify with peer")?
+            .json()
+            .await
+            .context("Invalid verify response")?;
+
+        Ok(verify.token)
+    }
+
+    pub async fn get_channels(&self, base_url: &str, token: &str) -> Result<Vec<ChannelResponse>> {
+        self.http
+            .get(format!("{base_url}/channels"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .context("Failed to fetch channels from peer")?
+            .json()
+            .await
+            .context("Invalid channels response")
+    }
+
+    pub async fn get_messages(
+        &self,
+        base_url: &str,
+        token: &str,
+        channel_id: &str,
+    ) -> Result<Vec<MessageResponse>> {
+        self.http
+            .get(format!("{base_url}/channels/{channel_id}/messages"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .context("Failed to fetch messages from peer")?
+            .json()
+            .await
+            .context("Invalid messages response")
+    }
+}

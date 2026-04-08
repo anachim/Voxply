@@ -23,6 +23,29 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS channels (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            created_by  TEXT NOT NULL REFERENCES users(public_key),
+            created_at  TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS messages (
+            id          TEXT PRIMARY KEY,
+            channel_id  TEXT NOT NULL REFERENCES channels(id),
+            sender      TEXT NOT NULL REFERENCES users(public_key),
+            content     TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

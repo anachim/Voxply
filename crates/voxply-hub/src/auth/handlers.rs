@@ -100,7 +100,7 @@ pub async fn verify(
     Ok(Json(VerifyResponse { token }))
 }
 
-fn unix_timestamp() -> String {
+pub fn unix_timestamp() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

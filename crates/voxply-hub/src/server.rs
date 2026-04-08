@@ -14,6 +14,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/auth/challenge", post(auth::handlers::challenge))
         .route("/auth/verify", post(auth::handlers::verify))
         .route("/me", get(routes::me::me))
+        .route("/channels", post(routes::channels::create_channel))
+        .route("/channels", get(routes::channels::list_channels))
+        .route("/channels/{channel_id}/messages", post(routes::messages::send_message))
+        .route("/channels/{channel_id}/messages", get(routes::messages::get_messages))
+        .route("/ws", get(routes::ws::ws_handler))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

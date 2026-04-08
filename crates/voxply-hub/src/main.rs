@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use voxply_hub::db;
 use voxply_hub::server;
 use voxply_hub::state::AppState;
@@ -19,10 +19,13 @@ async fn main() -> Result<()> {
 
     db::migrations::run(&db).await?;
 
+    let (chat_tx, _) = broadcast::channel(256);
+
     let state = Arc::new(AppState {
         hub_name: "my-hub".to_string(),
         db,
         pending_challenges: RwLock::new(HashMap::new()),
+        chat_tx,
     });
 
     let app = server::create_router(state);

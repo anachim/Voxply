@@ -24,6 +24,7 @@ hex = "0.4"
 rand = "0.8"
 voxply-identity = { path = "../voxply-identity" }
 sqlx = { workspace = true }
+futures-util = "0.3"
 uuid = { workspace = true }
 
 [dev-dependencies]

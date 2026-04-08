@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum_test::TestServer;
 use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use voxply_hub::auth::models::{ChallengeResponse, VerifyResponse};
 use voxply_hub::db;
 use voxply_hub::routes::me::MeResponse;
@@ -21,10 +21,13 @@ async fn setup() -> TestServer {
 
     db::migrations::run(&db).await.unwrap();
 
+    let (chat_tx, _) = broadcast::channel(256);
+
     let state = Arc::new(AppState {
         hub_name: "test-hub".to_string(),
         db,
         pending_challenges: RwLock::new(HashMap::new()),
+        chat_tx,
     });
 
     let app = server::create_router(state);

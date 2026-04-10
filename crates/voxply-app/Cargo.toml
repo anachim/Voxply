@@ -2,26 +2,29 @@
 name = "voxply-app"
 version = "0.1.0"
 edition = "2021"
+default-run = "voxply"
 
-# This is the main binary — it pulls in all the other crates
 [[bin]]
 name = "voxply"
 path = "src/main.rs"
 
+[[bin]]
+name = "voxply-seed"
+path = "src/seed.rs"
+
 [dependencies]
 tokio = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
 hex = "0.4"
-
-# Internal crates
-voxply-net = { path = "../voxply-net" }
-voxply-voice = { path = "../voxply-voice" }
-voxply-render = { path = "../voxply-render" }
-voxply-script = { path = "../voxply-script" }
 voxply-identity = { path = "../voxply-identity" }
-voxply-world = { path = "../voxply-world" }
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# WebSocket client
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"

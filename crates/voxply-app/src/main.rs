@@ -1,116 +1,49 @@
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+mod app;
+mod hub_client;
+mod input;
+mod protocol;
+mod ui;
+
+use std::io;
+
+use anyhow::Result;
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use voxply_identity::Identity;
+
+use app::App;
+use hub_client::HubClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
-    tracing::info!("Starting Voxply...");
+    // Hub URL from command line or default
+    let hub_url = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "http://localhost:3000".to_string());
 
+    // Load identity
     let path = Identity::default_path()?;
-    let (identity, is_new) = Identity::load_or_create(&path)?;
+    let (identity, _) = Identity::load_or_create(&path)?;
 
-    if is_new {
-        tracing::info!("Generated new identity: {}", identity);
-    } else {
-        tracing::info!("Loaded existing identity: {}", identity);
-    }
+    // Connect and authenticate
+    let hub_client = HubClient::connect(&hub_url, &identity).await?;
+    let channels = hub_client.list_channels().await?;
 
-    let hub_url = "http://localhost:3000";
-    match authenticate(&identity, hub_url).await {
-        Ok(token) => {
-            tracing::info!("Authenticated to hub! Token: {}...", &token[..16]);
+    // Setup terminal
+    terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-            let me = get_me(hub_url, &token).await?;
-            tracing::info!("Hub confirms identity: {}", me.public_key);
-        }
-        Err(e) => {
-            tracing::warn!("Could not connect to hub: {e}");
-            tracing::info!("Running in offline mode.");
-        }
-    }
+    // Run the TUI
+    let mut app = App::new(hub_client, channels);
+    let result = app.run(&mut terminal).await;
 
-    tracing::info!("Voxply shut down cleanly.");
-    Ok(())
-}
+    // Restore terminal (always, even on error)
+    terminal::disable_raw_mode()?;
+    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
-async fn authenticate(identity: &Identity, hub_url: &str) -> Result<String> {
-    let client = reqwest::Client::new();
-    let pub_key = identity.public_key_hex();
-
-    let challenge_resp: ChallengeResponse = client
-        .post(format!("{hub_url}/auth/challenge"))
-        .json(&ChallengeRequest {
-            public_key: pub_key.clone(),
-        })
-        .send()
-        .await
-        .context("Failed to connect to hub")?
-        .json()
-        .await
-        .context("Invalid challenge response")?;
-
-    tracing::info!("Received challenge from hub");
-
-    let challenge_bytes = hex::decode(&challenge_resp.challenge)
-        .context("Invalid challenge hex")?;
-    let signature = identity.sign(&challenge_bytes);
-    let signature_hex = hex::encode(signature.to_bytes());
-
-    let verify_resp: VerifyResponse = client
-        .post(format!("{hub_url}/auth/verify"))
-        .json(&VerifyRequest {
-            public_key: pub_key,
-            challenge: challenge_resp.challenge,
-            signature: signature_hex,
-        })
-        .send()
-        .await
-        .context("Failed to verify with hub")?
-        .json()
-        .await
-        .context("Invalid verify response")?;
-
-    Ok(verify_resp.token)
-}
-
-async fn get_me(hub_url: &str, token: &str) -> Result<MeResponse> {
-    let client = reqwest::Client::new();
-    let resp: MeResponse = client
-        .get(format!("{hub_url}/me"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .context("Failed to call /me")?
-        .json()
-        .await
-        .context("Invalid /me response")?;
-    Ok(resp)
-}
-
-#[derive(Serialize)]
-struct ChallengeRequest {
-    public_key: String,
-}
-
-#[derive(Deserialize)]
-struct ChallengeResponse {
-    challenge: String,
-}
-
-#[derive(Serialize)]
-struct VerifyRequest {
-    public_key: String,
-    challenge: String,
-    signature: String,
-}
-
-#[derive(Deserialize)]
-struct VerifyResponse {
-    token: String,
-}
-
-#[derive(Deserialize)]
-struct MeResponse {
-    public_key: String,
+    result
 }

@@ -16,6 +16,7 @@ Thumbs.db
 
 # Runtime data
 *.db
+hub_identity.json
 
 # Claude files
 .claude

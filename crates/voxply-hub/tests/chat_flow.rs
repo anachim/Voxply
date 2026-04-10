@@ -9,6 +9,7 @@ use voxply_hub::auth::models::{ChallengeResponse, VerifyResponse};
 use voxply_hub::db;
 use voxply_hub::federation::client::FederationClient;
 use voxply_hub::routes::chat_models::{ChannelResponse, MessageResponse};
+use voxply_hub::routes::me::MeResponse;
 use voxply_hub::server;
 use voxply_hub::state::AppState;
 use voxply_identity::Identity;
@@ -157,6 +158,56 @@ async fn send_and_get_messages() {
     assert_eq!(messages[0].content, "message 3");
     assert_eq!(messages[2].content, "message 1");
     assert_eq!(messages[0].sender, identity.public_key_hex());
+    assert!(messages[0].sender_name.is_none());
+
+    // Set display name and send another message
+    server
+        .patch("/me")
+        .authorization_bearer(&token)
+        .json(&json!({ "display_name": "Alice" }))
+        .await;
+
+    server
+        .post(&format!("/channels/{}/messages", channel.id))
+        .authorization_bearer(&token)
+        .json(&json!({ "content": "message 4" }))
+        .await;
+
+    let resp = server
+        .get(&format!("/channels/{}/messages", channel.id))
+        .authorization_bearer(&token)
+        .await;
+    let messages: Vec<MessageResponse> = resp.json();
+    assert_eq!(messages[0].sender_name, Some("Alice".to_string()));
+}
+
+#[tokio::test]
+async fn set_and_get_display_name() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    // Initially no display name
+    let resp = server.get("/me").authorization_bearer(&token).await;
+    resp.assert_status_ok();
+    let me: MeResponse = resp.json();
+    assert_eq!(me.public_key, identity.public_key_hex());
+    assert!(me.display_name.is_none());
+
+    // Set display name
+    let resp = server
+        .patch("/me")
+        .authorization_bearer(&token)
+        .json(&json!({ "display_name": "Alice" }))
+        .await;
+    resp.assert_status_ok();
+    let me: MeResponse = resp.json();
+    assert_eq!(me.display_name, Some("Alice".to_string()));
+
+    // Verify it persists
+    let resp = server.get("/me").authorization_bearer(&token).await;
+    let me: MeResponse = resp.json();
+    assert_eq!(me.display_name, Some("Alice".to_string()));
 }
 
 #[tokio::test]

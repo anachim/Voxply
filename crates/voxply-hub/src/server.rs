@@ -14,7 +14,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/info", get(routes::health::info))
         .route("/auth/challenge", post(auth::handlers::challenge))
         .route("/auth/verify", post(auth::handlers::verify))
-        .route("/me", get(routes::me::me))
+        .route("/me", get(routes::me::me).patch(routes::me::update_me))
         .route("/channels", post(routes::channels::create_channel))
         .route("/channels", get(routes::channels::list_channels))
         .route("/channels/{channel_id}/messages", post(routes::messages::send_message))
@@ -24,7 +24,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/federation/peers", post(federation::handlers::add_peer))
         .route("/federation/peers/{peer_key}/channels", get(federation::handlers::peer_channels))
         .route("/federation/channels", get(federation::handlers::all_federated_channels))
-        .route("/federation/channels/{fed_channel_id}/messages", get(federation::handlers::federated_messages))
+        .route("/federation/channels/{fed_channel_id}/messages", get(federation::handlers::federated_messages)
+            .post(federation::handlers::send_federated_message))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

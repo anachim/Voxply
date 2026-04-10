@@ -43,10 +43,19 @@ pub async fn send_message(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+    let sender_name: Option<String> =
+        sqlx::query_scalar("SELECT display_name FROM users WHERE public_key = ?")
+            .bind(&user.public_key)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+            .flatten();
+
     let message = MessageResponse {
         id,
         channel_id: channel_id.clone(),
         sender: user.public_key,
+        sender_name,
         content: req.content,
         created_at: now,
     };
@@ -69,9 +78,10 @@ pub async fn get_messages(
 
     let rows = if let Some(before_id) = &params.before {
         sqlx::query_as::<_, MessageRow>(
-            "SELECT id, channel_id, sender, content, created_at FROM messages
-             WHERE channel_id = ? AND rowid < (SELECT rowid FROM messages WHERE id = ?)
-             ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.created_at
+             FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+             WHERE m.channel_id = ? AND m.rowid < (SELECT rowid FROM messages WHERE id = ?)
+             ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
         )
         .bind(&channel_id)
         .bind(before_id)
@@ -80,9 +90,10 @@ pub async fn get_messages(
         .await
     } else {
         sqlx::query_as::<_, MessageRow>(
-            "SELECT id, channel_id, sender, content, created_at FROM messages
-             WHERE channel_id = ?
-             ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.created_at
+             FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+             WHERE m.channel_id = ?
+             ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
         )
         .bind(&channel_id)
         .bind(limit)
@@ -97,6 +108,7 @@ pub async fn get_messages(
             id: r.id,
             channel_id: r.channel_id,
             sender: r.sender,
+            sender_name: r.sender_name,
             content: r.content,
             created_at: r.created_at,
         })
@@ -110,6 +122,7 @@ struct MessageRow {
     id: String,
     channel_id: String,
     sender: String,
+    sender_name: Option<String>,
     content: String,
     created_at: String,
 }

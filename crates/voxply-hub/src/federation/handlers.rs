@@ -226,6 +226,42 @@ pub async fn federated_messages(
     Ok(Json(result))
 }
 
+pub async fn send_federated_message(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Path(fed_channel_id): Path<String>,
+    Json(req): Json<crate::routes::chat_models::SendMessageRequest>,
+) -> Result<(StatusCode, Json<FederatedMessageResponse>), (StatusCode, String)> {
+    let fed_ch = sqlx::query_as::<_, FedChannelRow>(
+        "SELECT id, peer_public_key, remote_id, name, created_at FROM federated_channels WHERE id = ?",
+    )
+    .bind(&fed_channel_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .ok_or((StatusCode::NOT_FOUND, "Federated channel not found".to_string()))?;
+
+    let peer = get_peer(&state, &fed_ch.peer_public_key).await?;
+    let token = get_peer_token(&state, &fed_ch.peer_public_key).await?;
+
+    let msg = state
+        .federation_client
+        .send_message(&peer.url, &token, &fed_ch.remote_id, &req.content)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Failed to send message: {e}")))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(FederatedMessageResponse {
+            id: msg.id.clone(),
+            remote_id: msg.id,
+            sender: msg.sender,
+            content: msg.content,
+            created_at: msg.created_at,
+        }),
+    ))
+}
+
 // Helpers
 
 async fn get_peer(state: &AppState, peer_key: &str) -> Result<PeerRow, (StatusCode, String)> {

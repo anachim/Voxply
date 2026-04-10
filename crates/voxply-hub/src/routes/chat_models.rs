@@ -23,6 +23,7 @@ pub struct MessageResponse {
     pub id: String,
     pub channel_id: String,
     pub sender: String,
+    pub sender_name: Option<String>,
     pub content: String,
     pub created_at: String,
 }

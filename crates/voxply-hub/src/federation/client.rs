@@ -75,6 +75,25 @@ impl FederationClient {
             .context("Invalid channels response")
     }
 
+    pub async fn send_message(
+        &self,
+        base_url: &str,
+        token: &str,
+        channel_id: &str,
+        content: &str,
+    ) -> Result<MessageResponse> {
+        self.http
+            .post(format!("{base_url}/channels/{channel_id}/messages"))
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "content": content }))
+            .send()
+            .await
+            .context("Failed to send message to peer")?
+            .json()
+            .await
+            .context("Invalid message response")
+    }
+
     pub async fn get_messages(
         &self,
         base_url: &str,

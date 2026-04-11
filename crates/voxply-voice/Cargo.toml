@@ -6,7 +6,17 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 
-# webrtc — pure Rust WebRTC implementation for voice chat
-webrtc = "0.12"
+# Audio capture/playback (WASAPI on Windows, CoreAudio on macOS, ALSA on Linux)
+cpal = "0.15"
+
+# Opus voice codec (bundles libopus — no system install needed)
+audiopus = "0.2"
+
+# Lock-free ring buffer (bridges real-time audio thread ↔ async tokio thread)
+ringbuf = "0.4"
+
+# Packet serialization
+byteorder = "1"

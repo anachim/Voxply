@@ -1,9 +1,7 @@
-//! voxply-voice — WebRTC voice chat
-//!
-//! Manages voice channels: capturing audio from the mic, encoding it,
-//! sending it over WebRTC peer connections, and playing back received audio.
+pub mod capture;
+pub mod codec;
+pub mod pipeline;
+pub mod playback;
+pub mod protocol;
 
-/// Placeholder — will set up WebRTC peer connections for voice
-pub fn init() {
-    tracing::info!("voxply-voice: initialized");
-}
+pub use pipeline::AudioPipeline;

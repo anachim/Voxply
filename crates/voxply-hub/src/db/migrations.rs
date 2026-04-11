@@ -85,6 +85,61 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS roles (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            priority    INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS role_permissions (
+            role_id    TEXT NOT NULL REFERENCES roles(id),
+            permission TEXT NOT NULL,
+            PRIMARY KEY (role_id, permission)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS user_roles (
+            user_public_key TEXT NOT NULL REFERENCES users(public_key),
+            role_id         TEXT NOT NULL REFERENCES roles(id),
+            assigned_at     TEXT NOT NULL,
+            PRIMARY KEY (user_public_key, role_id)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Seed built-in roles
+    sqlx::query(
+        "INSERT OR IGNORE INTO roles (id, name, priority, created_at)
+         VALUES ('builtin-everyone', '@everyone', 0, '0')",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO roles (id, name, priority, created_at)
+         VALUES ('builtin-owner', 'Owner', 999999, '0')",
+    )
+    .execute(pool)
+    .await?;
+
+    // Seed permissions for built-in roles
+    sqlx::query("INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES ('builtin-everyone', 'send_messages')")
+        .execute(pool).await?;
+    sqlx::query("INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES ('builtin-everyone', 'read_messages')")
+        .execute(pool).await?;
+    sqlx::query("INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES ('builtin-owner', 'admin')")
+        .execute(pool).await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

@@ -95,6 +95,45 @@ pub async fn verify(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+    // Assign roles for new users
+    let has_roles: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_roles WHERE user_public_key = ?",
+    )
+    .bind(&req.public_key)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if has_roles == 0 {
+        // Check if anyone already has the Owner role
+        let owner_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM user_roles WHERE role_id = 'builtin-owner'",
+        )
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+        if owner_exists == 0 {
+            sqlx::query(
+                "INSERT INTO user_roles (user_public_key, role_id, assigned_at) VALUES (?, 'builtin-owner', ?)",
+            )
+            .bind(&req.public_key)
+            .bind(&now)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+        }
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO user_roles (user_public_key, role_id, assigned_at) VALUES (?, 'builtin-everyone', ?)",
+        )
+        .bind(&req.public_key)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
+
     tracing::info!("User authenticated: {}", &req.public_key[..16]);
 
     Ok(Json(VerifyResponse { token }))

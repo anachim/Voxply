@@ -6,6 +6,7 @@ use axum::Json;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::permissions;
 use crate::routes::chat_models::{ChannelResponse, CreateChannelRequest};
 use crate::state::AppState;
 
@@ -14,6 +15,9 @@ pub async fn create_channel(
     user: AuthUser,
     Json(req): Json<CreateChannelRequest>,
 ) -> Result<(StatusCode, Json<ChannelResponse>), (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(permissions::MANAGE_CHANNELS)?;
+
     let id = Uuid::new_v4().to_string();
     let now = crate::auth::handlers::unix_timestamp();
 

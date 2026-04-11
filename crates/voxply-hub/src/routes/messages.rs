@@ -6,6 +6,7 @@ use axum::Json;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::permissions;
 use crate::routes::chat_models::{
     ChatEvent, MessageResponse, PaginationParams, SendMessageRequest,
 };
@@ -17,6 +18,9 @@ pub async fn send_message(
     Path(channel_id): Path<String>,
     Json(req): Json<SendMessageRequest>,
 ) -> Result<(StatusCode, Json<MessageResponse>), (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(permissions::SEND_MESSAGES)?;
+
     let exists: Option<String> =
         sqlx::query_scalar("SELECT id FROM channels WHERE id = ?")
             .bind(&channel_id)

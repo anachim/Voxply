@@ -9,13 +9,17 @@ use crate::auth::middleware::AuthUser;
 use crate::federation::models::{
     AddPeerRequest, FederatedChannelResponse, FederatedMessageResponse, PeerInfo,
 };
+use crate::permissions;
 use crate::state::AppState;
 
 pub async fn add_peer(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Json(req): Json<AddPeerRequest>,
 ) -> Result<(StatusCode, Json<PeerInfo>), (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(permissions::ADMIN)?;
+
     let url = req.url.trim_end_matches('/').to_string();
 
     // Discover the remote hub

@@ -29,6 +29,9 @@ async fn start_hub(name: &str) -> (String, Arc<AppState>) {
         chat_tx,
         federation_client: FederationClient::new(),
         peer_tokens: RwLock::new(HashMap::new()),
+        voice_channels: RwLock::new(HashMap::new()),
+        voice_udp_port: 0,
+        voice_event_tx: broadcast::channel(16).0,
     });
 
     let app = server::create_router(state.clone());

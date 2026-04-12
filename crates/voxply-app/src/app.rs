@@ -10,7 +10,7 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::hub_client::HubClient;
 use crate::input;
-use crate::protocol::{ChannelResponse, MessageResponse, WsServerMessage};
+use crate::protocol::{ChannelResponse, MessageResponse, VoiceParticipantInfo, WsServerMessage};
 use crate::ui;
 
 pub struct App {
@@ -23,6 +23,10 @@ pub struct App {
     pub focus: Focus,
     pub should_quit: bool,
     pub channel_changed: bool,
+    pub voice_channel: Option<String>,
+    pub voice_participants: Vec<VoiceParticipantInfo>,
+    pub voice_hub_port: Option<u16>,
+    pub voice_pipeline: Option<voxply_voice::AudioPipeline>,
 }
 
 #[derive(PartialEq)]
@@ -54,6 +58,10 @@ impl App {
             focus: Focus::Channels,
             should_quit: false,
             channel_changed: false,
+            voice_channel: None,
+            voice_participants: Vec::new(),
+            voice_hub_port: None,
+            voice_pipeline: None,
         }
     }
 
@@ -68,6 +76,10 @@ impl App {
             .unwrap_or("No channels")
     }
 
+    pub fn is_in_voice(&self) -> bool {
+        self.voice_channel.is_some()
+    }
+
     pub async fn load_messages(&mut self) -> Result<()> {
         if let Some(channel_id) = self.current_channel_id().map(|s| s.to_string()) {
             self.messages = self.hub_client.get_messages(&channel_id).await?;
@@ -80,14 +92,11 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> Result<()> {
-        // Load initial messages
         self.load_messages().await?;
 
-        // Connect WebSocket
         let ws_stream = self.hub_client.connect_ws().await?;
         let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
-        // Subscribe to initial channel
         if let Some(channel_id) = self.current_channel_id().map(|s| s.to_string()) {
             ws_tx.send(HubClient::subscribe_msg(&channel_id)).await?;
         }
@@ -102,20 +111,16 @@ impl App {
                 maybe_event = event_stream.next() => {
                     if let Some(Ok(Event::Key(key))) = maybe_event {
                         if key.kind != KeyEventKind::Press { continue; }
-                        // Global: Ctrl+Q to quit
                         if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
                             self.should_quit = true;
                         }
-                        // Global: Tab to cycle focus
                         else if key.code == KeyCode::Tab {
                             self.focus = self.focus.next();
                         }
-                        // Focus-specific handling
                         else {
                             let old_channel = self.selected_channel;
-                            input::handle_key(self, key).await?;
+                            input::handle_key(self, &mut ws_tx, key).await?;
 
-                            // Channel changed — reload messages and update WS subscription
                             if self.selected_channel != old_channel || self.channel_changed {
                                 self.channel_changed = false;
                                 if let Some(old_id) = self.channels.get(old_channel).map(|c| c.id.clone()) {
@@ -133,11 +138,24 @@ impl App {
                 maybe_msg = ws_rx.next() => {
                     if let Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) = maybe_msg {
                         if let Ok(server_msg) = serde_json::from_str::<WsServerMessage>(&text) {
-                            // Only show messages for the current channel
-                            if Some(server_msg.channel_id.as_str()) == self.current_channel_id() {
-                                if !self.seen_message_ids.contains(&server_msg.message.id) {
-                                    self.seen_message_ids.insert(server_msg.message.id.clone());
-                                    self.messages.push(server_msg.message);
+                            match server_msg {
+                                WsServerMessage::ChatMessage { channel_id, message } => {
+                                    if Some(channel_id.as_str()) == self.current_channel_id() {
+                                        if !self.seen_message_ids.contains(&message.id) {
+                                            self.seen_message_ids.insert(message.id.clone());
+                                            self.messages.push(message);
+                                        }
+                                    }
+                                }
+                                WsServerMessage::VoiceJoined { hub_udp_port, participants, .. } => {
+                                    self.voice_hub_port = Some(hub_udp_port);
+                                    self.voice_participants = participants;
+                                }
+                                WsServerMessage::VoiceParticipantJoined { participant, .. } => {
+                                    self.voice_participants.push(participant);
+                                }
+                                WsServerMessage::VoiceParticipantLeft { public_key, .. } => {
+                                    self.voice_participants.retain(|p| p.public_key != public_key);
                                 }
                             }
                         }
@@ -148,6 +166,9 @@ impl App {
             }
 
             if self.should_quit {
+                if let Some(pipeline) = self.voice_pipeline.take() {
+                    pipeline.stop().await;
+                }
                 break;
             }
         }

@@ -63,8 +63,14 @@ pub fn draw(f: &mut Frame, app: &App) {
         })
         .collect();
 
+    let voice_indicator = if app.is_in_voice() {
+        format!(" | Voice: {} users", app.voice_participants.len())
+    } else {
+        String::new()
+    };
+
     let messages_block = Block::default()
-        .title(format!(" #{} ", app.current_channel_name()))
+        .title(format!(" #{}{} ", app.current_channel_name(), voice_indicator))
         .borders(Borders::ALL)
         .border_style(if app.focus == Focus::Messages {
             Style::default().fg(Color::Cyan)
@@ -94,7 +100,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         });
 
     let input_text = if app.input_buffer.is_empty() && app.focus != Focus::Input {
-        Paragraph::new("Tab to type | /create <name> to add channel").style(Style::default().fg(Color::DarkGray))
+        Paragraph::new("Tab to type | /create <name> | /voice join | /voice leave").style(Style::default().fg(Color::DarkGray))
     } else {
         Paragraph::new(app.input_buffer.as_str())
     };

@@ -6507,7 +6507,9 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "tracing",
  "voxply-identity",
+ "voxply-voice",
 ]
 
 [[package]]

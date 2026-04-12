@@ -58,12 +58,40 @@ pub enum WsClientMessage {
     Subscribe { channel_id: String },
     #[serde(rename = "unsubscribe")]
     Unsubscribe { channel_id: String },
+    #[serde(rename = "voice_join")]
+    VoiceJoin { channel_id: String, udp_port: u16 },
+    #[serde(rename = "voice_leave")]
+    VoiceLeave { channel_id: String },
 }
 
 #[derive(Deserialize)]
-pub struct WsServerMessage {
-    #[serde(rename = "type")]
-    pub msg_type: String,
-    pub channel_id: String,
-    pub message: MessageResponse,
+#[serde(tag = "type")]
+pub enum WsServerMessage {
+    #[serde(rename = "message")]
+    ChatMessage {
+        channel_id: String,
+        message: MessageResponse,
+    },
+    #[serde(rename = "voice_joined")]
+    VoiceJoined {
+        channel_id: String,
+        hub_udp_port: u16,
+        participants: Vec<VoiceParticipantInfo>,
+    },
+    #[serde(rename = "voice_participant_joined")]
+    VoiceParticipantJoined {
+        channel_id: String,
+        participant: VoiceParticipantInfo,
+    },
+    #[serde(rename = "voice_participant_left")]
+    VoiceParticipantLeft {
+        channel_id: String,
+        public_key: String,
+    },
+}
+
+#[derive(Deserialize, Clone)]
+pub struct VoiceParticipantInfo {
+    pub public_key: String,
+    pub display_name: Option<String>,
 }

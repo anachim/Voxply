@@ -17,14 +17,17 @@ use hub_client::HubClient;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Hub URL from command line or default
-    let hub_url = std::env::args()
-        .nth(1)
+    // Args: [hub_url] [identity_path]
+    let args: Vec<String> = std::env::args().collect();
+    let hub_url = args.get(1)
+        .cloned()
         .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let identity_path = match args.get(2) {
+        Some(p) => std::path::PathBuf::from(p),
+        None => Identity::default_path()?,
+    };
 
-    // Load identity
-    let path = Identity::default_path()?;
-    let (identity, _) = Identity::load_or_create(&path)?;
+    let (identity, _) = Identity::load_or_create(&identity_path)?;
 
     // Connect and authenticate
     let hub_client = HubClient::connect(&hub_url, &identity).await?;

@@ -17,6 +17,7 @@ pub struct AudioPipeline {
     _capture: AudioCapture,
     _playback: AudioPlayback,
     tasks: Vec<JoinHandle<()>>,
+    pub local_udp_port: u16,
 }
 
 fn resolve_opus_rate(device_rate: u32) -> u32 {
@@ -78,6 +79,7 @@ impl AudioPipeline {
             _capture: capture,
             _playback: playback,
             tasks: vec![task],
+            local_udp_port: 0,
         })
     }
 
@@ -97,6 +99,7 @@ impl AudioPipeline {
         let frame_size = codec::frame_size_for_rate(opus_rate);
 
         let mut socket = VoiceSocket::bind(local_port).await?;
+        let actual_local_port = socket.local_addr()?.port();
         socket.set_remote(remote_addr);
         let socket = Arc::new(socket);
 
@@ -164,6 +167,7 @@ impl AudioPipeline {
             _capture: capture,
             _playback: playback,
             tasks: vec![send_task, recv_task],
+            local_udp_port: actual_local_port,
         })
     }
 

@@ -1,3 +1,5 @@
+mod pow;
+
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
@@ -6,14 +8,22 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub use pow::{compute_security_level, verify_security_level, leading_zero_bits};
+
 pub struct Identity {
     signing_key: SigningKey,
+    pub security_nonce: u64,
+    pub security_level: u32,
 }
 
 impl Identity {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut OsRng);
-        Self { signing_key }
+        Self {
+            signing_key,
+            security_nonce: 0,
+            security_level: 0,
+        }
     }
 
     pub fn public_key_hex(&self) -> String {
@@ -24,6 +34,8 @@ impl Identity {
     pub fn save(&self, path: &Path) -> Result<()> {
         let data = SavedIdentity {
             secret_key: hex::encode(self.signing_key.to_bytes()),
+            security_nonce: Some(self.security_nonce),
+            security_level: Some(self.security_level),
         };
         let json = serde_json::to_string_pretty(&data)?;
 
@@ -46,7 +58,11 @@ impl Identity {
             .map_err(|_| anyhow::anyhow!("Secret key must be exactly 32 bytes"))?;
 
         let signing_key = SigningKey::from_bytes(&secret_array);
-        Ok(Self { signing_key })
+        Ok(Self {
+            signing_key,
+            security_nonce: data.security_nonce.unwrap_or(0),
+            security_level: data.security_level.unwrap_or(0),
+        })
     }
 
     pub fn load_or_create(path: &Path) -> Result<(Self, bool)> {
@@ -66,6 +82,17 @@ impl Identity {
 
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
+    }
+
+    /// Improve security level by computing more proof-of-work.
+    /// Starts from current nonce and tries to find a higher level.
+    /// Returns the new level reached.
+    pub fn improve_security_level(&mut self, target_level: u32) -> u32 {
+        let pub_key = self.public_key_hex();
+        let (nonce, level) = compute_security_level(&pub_key, self.security_nonce, target_level);
+        self.security_nonce = nonce;
+        self.security_level = level;
+        level
     }
 
     pub fn default_path() -> Result<PathBuf> {
@@ -102,15 +129,16 @@ pub fn verify_signature(public_key_hex: &str, message: &[u8], signature_bytes: &
 #[derive(Serialize, Deserialize)]
 struct SavedIdentity {
     secret_key: String,
+    #[serde(default)]
+    security_nonce: Option<u64>,
+    #[serde(default)]
+    security_level: Option<u32>,
 }
 
-// #[cfg(test)] = "only compile this when running tests"
-// Like [TestClass] in C# — the test runner discovers these automatically.
 #[cfg(test)]
 mod tests {
-    use super::*; // import everything from the parent module
+    use super::*;
 
-    // #[test] = [TestMethod] in C#
     #[test]
     fn sign_and_verify() {
         let identity = Identity::generate();
@@ -119,7 +147,6 @@ mod tests {
         let signature = identity.sign(message);
         let pub_key_hex = identity.public_key_hex();
 
-        // Should succeed
         let result = verify_signature(&pub_key_hex, message, &signature.to_bytes());
         assert!(result.is_ok());
     }
@@ -130,8 +157,32 @@ mod tests {
         let signature = identity.sign(b"correct message");
         let pub_key_hex = identity.public_key_hex();
 
-        // Should fail — signed "correct message" but verifying against "wrong message"
         let result = verify_signature(&pub_key_hex, b"wrong message", &signature.to_bytes());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn proof_of_work_computes_and_verifies() {
+        let mut identity = Identity::generate();
+        assert_eq!(identity.security_level, 0);
+
+        let level = identity.improve_security_level(8);
+        assert!(level >= 8);
+
+        // Verify it
+        let valid = verify_security_level(
+            &identity.public_key_hex(),
+            identity.security_nonce,
+            identity.security_level,
+        );
+        assert!(valid);
+    }
+
+    #[test]
+    fn proof_of_work_rejects_fake_nonce() {
+        let identity = Identity::generate();
+        // Fake nonce should not verify at level 20
+        let valid = verify_security_level(&identity.public_key_hex(), 12345, 20);
+        assert!(!valid);
     }
 }

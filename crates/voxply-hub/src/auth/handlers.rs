@@ -71,6 +71,35 @@ pub async fn verify(
         return Err((StatusCode::FORBIDDEN, "User is banned".to_string()));
     }
 
+    // Check security level requirement
+    let min_level: u32 = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM hub_settings WHERE key = 'min_security_level'",
+    )
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(0);
+
+    if min_level > 0 {
+        let nonce = req.security_nonce.unwrap_or(0);
+        let claimed_level = req.security_level.unwrap_or(0);
+
+        if claimed_level < min_level {
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!("Security level {claimed_level} is below minimum {min_level}"),
+            ));
+        }
+
+        if !voxply_identity::verify_security_level(&req.public_key, nonce, claimed_level) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Invalid security level proof".to_string(),
+            ));
+        }
+    }
+
     let now = unix_timestamp();
 
     sqlx::query(

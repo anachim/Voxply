@@ -20,3 +20,6 @@ hex = "0.4"
 
 # dirs — finds platform-specific directories (like Environment.GetFolderPath in C#)
 dirs = "6"
+
+# SHA256 for proof-of-work security levels
+sha2 = "0.10"

@@ -184,8 +184,12 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .await?;
 
     // Default: hub is open (no invite required)
+    sqlx::query("INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('invite_only', 'false')")
+        .execute(pool)
+        .await?;
+
     sqlx::query(
-        "INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('invite_only', 'false')",
+        "INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('min_security_level', '0')",
     )
     .execute(pool)
     .await?;

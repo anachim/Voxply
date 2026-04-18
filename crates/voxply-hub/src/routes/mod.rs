@@ -1,3 +1,5 @@
+pub mod alliance_models;
+pub mod alliances;
 pub mod channels;
 pub mod chat_models;
 pub mod health;

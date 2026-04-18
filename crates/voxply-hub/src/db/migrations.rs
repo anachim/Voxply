@@ -194,6 +194,41 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS alliances (
+            id         TEXT PRIMARY KEY,
+            name       TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS alliance_members (
+            alliance_id    TEXT NOT NULL REFERENCES alliances(id),
+            hub_public_key TEXT NOT NULL,
+            hub_name       TEXT NOT NULL,
+            hub_url        TEXT NOT NULL,
+            joined_at      INTEGER NOT NULL,
+            PRIMARY KEY (alliance_id, hub_public_key)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS alliance_shared_channels (
+            alliance_id TEXT NOT NULL REFERENCES alliances(id),
+            channel_id  TEXT NOT NULL REFERENCES channels(id),
+            shared_at   INTEGER NOT NULL,
+            PRIMARY KEY (alliance_id, channel_id)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

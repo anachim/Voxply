@@ -40,3 +40,37 @@ pub struct MuteResponse {
 pub struct KickRequest {
     pub target_public_key: String,
 }
+
+#[derive(Deserialize)]
+pub struct ChannelBanRequest {
+    pub target_public_key: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChannelBanResponse {
+    pub channel_id: String,
+    pub target_public_key: String,
+    pub banned_by: String,
+    pub reason: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Deserialize)]
+pub struct VoiceMuteRequest {
+    pub target_public_key: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct VoiceMuteResponse {
+    pub target_public_key: String,
+    pub muted_by: String,
+    pub reason: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Deserialize)]
+pub struct SetTalkPowerRequest {
+    pub min_talk_power: i64,
+}

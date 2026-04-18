@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::Json;
 
 use crate::auth::middleware::AuthUser;
-use crate::permissions::{self, BAN_MEMBERS, KICK_MEMBERS, MUTE_MEMBERS, TIMEOUT_MEMBERS};
+use crate::permissions::{self, ADMIN, BAN_MEMBERS, KICK_MEMBERS, MUTE_MEMBERS, TIMEOUT_MEMBERS};
 use crate::routes::moderation_models::*;
 use crate::state::AppState;
 
@@ -257,6 +257,135 @@ pub async fn kick_user(
     Ok(StatusCode::OK)
 }
 
+// --- Channel Ban ---
+
+pub async fn channel_ban(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(channel_id): Path<String>,
+    Json(req): Json<ChannelBanRequest>,
+) -> Result<(StatusCode, Json<ChannelBanResponse>), (StatusCode, String)> {
+    require_can_moderate(&state, &user.public_key, &req.target_public_key, MUTE_MEMBERS).await?;
+
+    let now = crate::auth::handlers::unix_timestamp();
+
+    sqlx::query(
+        "INSERT OR REPLACE INTO channel_bans (channel_id, target_public_key, banned_by, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&channel_id)
+    .bind(&req.target_public_key)
+    .bind(&user.public_key)
+    .bind(&req.reason)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(ChannelBanResponse {
+            channel_id,
+            target_public_key: req.target_public_key,
+            banned_by: user.public_key,
+            reason: req.reason,
+            created_at: now,
+        }),
+    ))
+}
+
+pub async fn channel_unban(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((channel_id, target_key)): Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(MUTE_MEMBERS)?;
+
+    sqlx::query("DELETE FROM channel_bans WHERE channel_id = ? AND target_public_key = ?")
+        .bind(&channel_id)
+        .bind(&target_key)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// --- Voice Mute ---
+
+pub async fn voice_mute(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<VoiceMuteRequest>,
+) -> Result<(StatusCode, Json<VoiceMuteResponse>), (StatusCode, String)> {
+    require_can_moderate(&state, &user.public_key, &req.target_public_key, MUTE_MEMBERS).await?;
+
+    let now = crate::auth::handlers::unix_timestamp();
+
+    sqlx::query(
+        "INSERT OR REPLACE INTO voice_mutes (target_public_key, muted_by, reason, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&req.target_public_key)
+    .bind(&user.public_key)
+    .bind(&req.reason)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(VoiceMuteResponse {
+            target_public_key: req.target_public_key,
+            muted_by: user.public_key,
+            reason: req.reason,
+            created_at: now,
+        }),
+    ))
+}
+
+pub async fn voice_unmute(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(target_key): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(MUTE_MEMBERS)?;
+
+    sqlx::query("DELETE FROM voice_mutes WHERE target_public_key = ?")
+        .bind(&target_key)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// --- Talk Power ---
+
+pub async fn set_talk_power(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(channel_id): Path<String>,
+    Json(req): Json<SetTalkPowerRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(ADMIN)?;
+
+    sqlx::query(
+        "INSERT INTO channel_settings (channel_id, min_talk_power) VALUES (?, ?)
+         ON CONFLICT(channel_id) DO UPDATE SET min_talk_power = ?",
+    )
+    .bind(&channel_id)
+    .bind(req.min_talk_power)
+    .bind(req.min_talk_power)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(StatusCode::OK)
+}
+
 // DB row types
 
 #[derive(sqlx::FromRow)]
@@ -299,6 +428,38 @@ pub async fn is_muted(db: &sqlx::SqlitePool, public_key: &str) -> Result<bool, (
     )
     .bind(public_key)
     .bind(&now)
+    .fetch_one(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(count > 0)
+}
+
+pub async fn is_channel_banned(
+    db: &sqlx::SqlitePool,
+    channel_id: &str,
+    public_key: &str,
+) -> Result<bool, (StatusCode, String)> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM channel_bans WHERE channel_id = ? AND target_public_key = ?",
+    )
+    .bind(channel_id)
+    .bind(public_key)
+    .fetch_one(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(count > 0)
+}
+
+pub async fn is_voice_muted(
+    db: &sqlx::SqlitePool,
+    public_key: &str,
+) -> Result<bool, (StatusCode, String)> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM voice_mutes WHERE target_public_key = ?",
+    )
+    .bind(public_key)
     .fetch_one(db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;

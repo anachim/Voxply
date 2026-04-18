@@ -244,3 +244,61 @@ async fn list_bans() {
     assert_eq!(bans[0].target_public_key, user2.public_key_hex());
     assert_eq!(bans[0].reason, Some("testing".to_string()));
 }
+
+#[tokio::test]
+async fn channel_ban_blocks_messages() {
+    let server = setup().await;
+
+    let owner = Identity::generate();
+    let owner_token = authenticate(&server, &owner).await;
+
+    let user2 = Identity::generate();
+    let token2 = authenticate(&server, &user2).await;
+
+    // Create channel
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&owner_token)
+        .json(&json!({ "name": "general" }))
+        .await;
+    let channel: ChannelResponse = resp.json();
+
+    // user2 can send before channel ban
+    server
+        .post(&format!("/channels/{}/messages", channel.id))
+        .authorization_bearer(&token2)
+        .json(&json!({ "content": "hello" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    // Ban user2 from channel
+    server
+        .post(&format!("/moderation/channels/{}/bans", channel.id))
+        .authorization_bearer(&owner_token)
+        .json(&json!({ "target_public_key": user2.public_key_hex() }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    // user2 can't send to that channel
+    server
+        .post(&format!("/channels/{}/messages", channel.id))
+        .authorization_bearer(&token2)
+        .json(&json!({ "content": "blocked" }))
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+
+    // Unban
+    server
+        .delete(&format!("/moderation/channels/{}/bans/{}", channel.id, user2.public_key_hex()))
+        .authorization_bearer(&owner_token)
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    // user2 can send again
+    server
+        .post(&format!("/channels/{}/messages", channel.id))
+        .authorization_bearer(&token2)
+        .json(&json!({ "content": "im back" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+}

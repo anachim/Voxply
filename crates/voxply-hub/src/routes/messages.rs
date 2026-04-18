@@ -25,6 +25,10 @@ pub async fn send_message(
         return Err((StatusCode::FORBIDDEN, "You are muted".to_string()));
     }
 
+    if crate::routes::moderation::is_channel_banned(&state.db, &channel_id, &user.public_key).await? {
+        return Err((StatusCode::FORBIDDEN, "You are banned from this channel".to_string()));
+    }
+
     let exists: Option<String> =
         sqlx::query_scalar("SELECT id FROM channels WHERE id = ?")
             .bind(&channel_id)

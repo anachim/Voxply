@@ -229,6 +229,41 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS channel_bans (
+            channel_id TEXT NOT NULL REFERENCES channels(id),
+            target_public_key TEXT NOT NULL REFERENCES users(public_key),
+            banned_by TEXT NOT NULL,
+            reason TEXT,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (channel_id, target_public_key)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS voice_mutes (
+            target_public_key TEXT PRIMARY KEY REFERENCES users(public_key),
+            muted_by TEXT NOT NULL,
+            reason TEXT,
+            created_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Add min_talk_power column to channels (0 = anyone can talk)
+    // Using a separate table since ALTER TABLE IF NOT EXISTS isn't clean in SQLite
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS channel_settings (
+            channel_id      TEXT PRIMARY KEY REFERENCES channels(id),
+            min_talk_power  INTEGER NOT NULL DEFAULT 0
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

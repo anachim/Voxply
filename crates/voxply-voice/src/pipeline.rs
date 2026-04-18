@@ -9,6 +9,7 @@ use tokio::task::JoinHandle;
 
 use crate::capture::AudioCapture;
 use crate::codec::{self, VoiceDecoder, VoiceEncoder};
+use crate::denoise::Denoiser;
 use crate::playback::AudioPlayback;
 use crate::protocol::{VoicePacket, RING_BUFFER_SIZE};
 use crate::transport::VoiceSocket;
@@ -49,6 +50,7 @@ impl AudioPipeline {
         let task = tokio::spawn(async move {
             let mut encoder = VoiceEncoder::new(opus_rate).expect("Failed to create encoder");
             let mut decoder = VoiceDecoder::new(opus_rate).expect("Failed to create decoder");
+            let mut denoiser = Denoiser::new();
             let mut read_buf = vec![0.0f32; frame_size];
             let mut interval = tokio::time::interval(Duration::from_millis(10));
 
@@ -60,7 +62,9 @@ impl AudioPipeline {
                     continue;
                 }
 
-                let packets = encoder.encode(&read_buf[..count]);
+                // Denoise → encode → decode → playback
+                let denoised = denoiser.process(&read_buf[..count]);
+                let packets = encoder.encode(&denoised);
 
                 for packet in &packets {
                     match decoder.decode(packet) {
@@ -107,6 +111,7 @@ impl AudioPipeline {
         let send_socket = socket.clone();
         let send_task = tokio::spawn(async move {
             let mut encoder = VoiceEncoder::new(opus_rate).expect("Failed to create encoder");
+            let mut denoiser = Denoiser::new();
             let mut read_buf = vec![0.0f32; frame_size];
             let mut interval = tokio::time::interval(Duration::from_millis(10));
             let mut sequence: u16 = 0;
@@ -120,7 +125,8 @@ impl AudioPipeline {
                     continue;
                 }
 
-                let packets = encoder.encode(&read_buf[..count]);
+                let denoised = denoiser.process(&read_buf[..count]);
+                let packets = encoder.encode(&denoised);
 
                 for opus_data in packets {
                     let packet = VoicePacket {

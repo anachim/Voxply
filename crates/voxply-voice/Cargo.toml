@@ -20,3 +20,6 @@ ringbuf = "0.4"
 
 # Packet serialization
 byteorder = "1"
+
+# Noise suppression (RNNoise neural network, pure Rust)
+nnnoiseless = "0.5"

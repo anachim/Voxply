@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod codec;
+pub mod denoise;
 pub mod pipeline;
 pub mod playback;
 pub mod protocol;

@@ -34,6 +34,7 @@ async fn main() -> Result<()> {
 
     let (chat_tx, _) = broadcast::channel(256);
     let (voice_event_tx, _) = broadcast::channel(256);
+    let (dm_tx, _) = broadcast::channel(256);
 
     let state = Arc::new(AppState {
         hub_name: "my-hub".to_string(),
@@ -46,6 +47,7 @@ async fn main() -> Result<()> {
         voice_channels: RwLock::new(HashMap::new()),
         voice_udp_port: VOICE_UDP_PORT,
         voice_event_tx,
+        dm_tx,
     });
 
     // Bind voice UDP socket and start forwarding task

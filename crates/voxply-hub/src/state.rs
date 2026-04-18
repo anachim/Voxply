@@ -9,6 +9,15 @@ use voxply_identity::Identity;
 use crate::federation::client::FederationClient;
 use crate::routes::chat_models::{ChatEvent, WsServerMessage};
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DmEvent {
+    pub conversation_id: String,
+    pub sender: String,
+    pub sender_name: Option<String>,
+    pub content: String,
+    pub timestamp: i64,
+}
+
 pub struct AppState {
     pub hub_name: String,
     pub hub_identity: Identity,
@@ -21,6 +30,8 @@ pub struct AppState {
     pub voice_channels: RwLock<HashMap<String, HashMap<String, SocketAddr>>>,
     pub voice_udp_port: u16,
     pub voice_event_tx: broadcast::Sender<(String, WsServerMessage)>,
+    // DM relay: broadcast DMs to all WS clients (they filter by conversation membership)
+    pub dm_tx: broadcast::Sender<DmEvent>,
 }
 
 pub struct PendingChallenge {

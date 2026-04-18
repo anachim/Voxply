@@ -264,6 +264,40 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Conversations (DM / group DM) — only tracks members, NOT message content
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS conversations (
+            id         TEXT PRIMARY KEY,
+            conv_type  TEXT NOT NULL DEFAULT 'dm',
+            created_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS conversation_members (
+            conversation_id TEXT NOT NULL REFERENCES conversations(id),
+            public_key      TEXT NOT NULL REFERENCES users(public_key),
+            joined_at       INTEGER NOT NULL,
+            PRIMARY KEY (conversation_id, public_key)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS friends (
+            user_a TEXT NOT NULL REFERENCES users(public_key),
+            user_b TEXT NOT NULL REFERENCES users(public_key),
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (user_a, user_b)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

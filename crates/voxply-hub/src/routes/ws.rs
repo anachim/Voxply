@@ -36,8 +36,20 @@ pub async fn ws_handler(
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: String) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let mut chat_rx = state.chat_tx.subscribe();
+    let mut dm_rx = state.dm_tx.subscribe();
     let mut subscribed: HashSet<String> = HashSet::new();
     let mut voice_channel: Option<String> = None;
+
+    // Load this user's conversation IDs for DM filtering
+    let my_conversations: HashSet<String> = sqlx::query_scalar::<_, String>(
+        "SELECT conversation_id FROM conversation_members WHERE public_key = ?",
+    )
+    .bind(&public_key)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .collect();
 
     loop {
         tokio::select! {
@@ -130,6 +142,26 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
+                }
+            }
+
+            // DM relay
+            dm_result = dm_rx.recv() => {
+                if let Ok(dm) = dm_result {
+                    // Only relay to members of this conversation (and not back to sender)
+                    if dm.sender != public_key && my_conversations.contains(&dm.conversation_id) {
+                        let msg = WsServerMessage::DirectMessage {
+                            conversation_id: dm.conversation_id,
+                            sender: dm.sender,
+                            sender_name: dm.sender_name,
+                            content: dm.content,
+                            timestamp: dm.timestamp,
+                        };
+                        let json = serde_json::to_string(&msg).unwrap();
+                        if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         }

@@ -33,6 +33,7 @@ async fn setup() -> TestServer {
         voice_channels: RwLock::new(HashMap::new()),
         voice_udp_port: 0,
         voice_event_tx,
+        dm_tx: broadcast::channel(16).0,
     });
     let app = server::create_router(state);
     TestServer::new(app)

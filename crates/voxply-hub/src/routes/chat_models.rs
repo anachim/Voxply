@@ -82,6 +82,14 @@ pub enum WsServerMessage {
         channel_id: String,
         public_key: String,
     },
+    #[serde(rename = "dm")]
+    DirectMessage {
+        conversation_id: String,
+        sender: String,
+        sender_name: Option<String>,
+        content: String,
+        timestamp: i64,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone)]

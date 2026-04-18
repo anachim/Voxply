@@ -1,16 +1,11 @@
 [package]
-name = "voxply-app"
+name = "voxply-tui"
 version = "0.1.0"
 edition = "2021"
-default-run = "voxply"
 
 [[bin]]
 name = "voxply"
 path = "src/main.rs"
-
-[[bin]]
-name = "voxply-seed"
-path = "src/seed.rs"
 
 [dependencies]
 tokio = { workspace = true }
@@ -19,8 +14,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { version = "0.12", features = ["json"] }
 hex = "0.4"
-voxply-identity = { path = "../voxply-identity" }
-voxply-voice = { path = "../voxply-voice" }
+voxply-identity = { path = "../../shared/voxply-identity" }
+voxply-voice = { path = "../../shared/voxply-voice" }
 tracing = { workspace = true }
 
 # TUI

@@ -1,17 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/voxply-app",
-    "crates/voxply-net",
-    "crates/voxply-voice",
-    "crates/voxply-render",
-    "crates/voxply-script",
-    "crates/voxply-identity",
-    "crates/voxply-world",
-    "crates/voxply-hub",
+    # Server
+    "server/voxply-hub",
+    "server/voxply-seed",
+
+    # Client
+    "client/voxply-tui",
+
+    # Shared
+    "shared/voxply-identity",
+    "shared/voxply-voice",
 ]
 
-# Shared dependency versions — crates inherit these with `workspace = true`
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"

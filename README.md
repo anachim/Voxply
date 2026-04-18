@@ -4,34 +4,50 @@ A decentralized platform where players can hang out, talk, and play together. Vo
 
 ## Features
 
-- **Voice & Text Chat** — Real-time voice channels and text messaging over WebRTC
-- **Community Games** — Create, share, and play games built by the community
-- **Decentralized** — No central servers. Peers connect directly via libp2p
-- **Game Scripting** — Build games using Lua (Luau) or WASM modules
+- **Voice & Text Chat** — Real-time voice channels and text messaging with Opus codec
+- **Hub Federation** — Self-hosted hubs that can form alliances for cross-hub collaboration
 - **Identity** — Cryptographic keypair-based identity (no accounts, no passwords)
-- **Cross-Platform Rendering** — Native GPU rendering with wgpu
+- **Roles & Permissions** — Custom roles with priority ordering, channel-level moderation
+- **Anti-Spam** — Proof-of-work security levels (TeamSpeak-style)
+- **Direct Messages** — Privacy-first DMs (hub-routed, not stored)
+- **Friend System** — Send/accept friend requests, friend list
 
 ## Architecture
 
 ```
-crates/
-├── voxply-app/         Main binary — ties everything together
-├── voxply-net/         P2P networking (libp2p)
-├── voxply-voice/       Voice chat (WebRTC)
-├── voxply-render/      GPU rendering (wgpu + winit)
-├── voxply-script/      Game scripting (Lua/Luau + WASM)
-├── voxply-identity/    Decentralized identity (Ed25519 keypairs)
-└── voxply-world/       Game world state
+server/
+├── voxply-hub/          Hub server (axum, SQLite, WebSocket, UDP voice)
+└── voxply-seed/         Seed tool for test data
+
+client/
+└── voxply-tui/          Terminal UI client (ratatui)
+
+shared/
+├── voxply-identity/     Ed25519 keypairs, signing, recovery phrases, proof-of-work
+└── voxply-voice/        Audio pipeline (cpal, Opus, RNNoise noise suppression)
 ```
 
-## Usage
+## Quick Start
 
-*Coming soon.*
+```bash
+# Start the hub server
+cargo run -p voxply-hub
+
+# Seed with test data (channels + messages)
+cargo run -p voxply-seed
+
+# Start the TUI client
+cargo run -p voxply-tui
+
+# Start a second client (different identity)
+cargo run -p voxply-tui -- http://localhost:3000 /tmp/identity2.json
+```
 
 ## Building
 
 ```bash
 cargo build
+cargo test
 ```
 
 ## License

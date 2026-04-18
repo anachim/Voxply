@@ -140,6 +140,29 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     sqlx::query("INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES ('builtin-owner', 'admin')")
         .execute(pool).await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS bans (
+            target_public_key TEXT PRIMARY KEY REFERENCES users(public_key),
+            banned_by TEXT NOT NULL,
+            reason TEXT,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS mutes (
+            target_public_key TEXT PRIMARY KEY REFERENCES users(public_key),
+            muted_by TEXT NOT NULL,
+            reason TEXT,
+            expires_at TEXT,
+            created_at TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

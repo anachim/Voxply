@@ -66,6 +66,11 @@ pub async fn verify(
     voxply_identity::verify_signature(&req.public_key, &challenge_bytes, &signature_bytes)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid signature".to_string()))?;
 
+    // Check if user is banned
+    if crate::routes::moderation::is_banned(&state.db, &req.public_key).await? {
+        return Err((StatusCode::FORBIDDEN, "User is banned".to_string()));
+    }
+
     let now = unix_timestamp();
 
     sqlx::query(

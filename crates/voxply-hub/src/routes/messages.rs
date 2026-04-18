@@ -21,6 +21,10 @@ pub async fn send_message(
     let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
     perms.require(permissions::SEND_MESSAGES)?;
 
+    if crate::routes::moderation::is_muted(&state.db, &user.public_key).await? {
+        return Err((StatusCode::FORBIDDEN, "You are muted".to_string()));
+    }
+
     let exists: Option<String> =
         sqlx::query_scalar("SELECT id FROM channels WHERE id = ?")
             .bind(&channel_id)

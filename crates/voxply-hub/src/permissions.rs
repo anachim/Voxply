@@ -8,6 +8,10 @@ pub const READ_MESSAGES: &str = "read_messages";
 pub const MANAGE_CHANNELS: &str = "manage_channels";
 pub const MANAGE_MESSAGES: &str = "manage_messages";
 pub const MANAGE_ROLES: &str = "manage_roles";
+pub const KICK_MEMBERS: &str = "kick_members";
+pub const BAN_MEMBERS: &str = "ban_members";
+pub const MUTE_MEMBERS: &str = "mute_members";
+pub const TIMEOUT_MEMBERS: &str = "timeout_members";
 pub const ADMIN: &str = "admin";
 
 #[derive(sqlx::FromRow)]

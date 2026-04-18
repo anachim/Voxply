@@ -1,0 +1,100 @@
+/* styles.css — Global styles for Voxply desktop client */
+/* CSS works the same as in Blazor — no differences here */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: #1a1a2e;
+  color: #e0e0e0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+}
+
+/* Connect screen */
+.connect-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 16px;
+}
+
+.connect-screen h1 {
+  font-size: 48px;
+  color: #7c3aed;
+}
+
+.connect-form {
+  display: flex;
+  gap: 8px;
+}
+
+.connect-form input {
+  padding: 10px 16px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #16213e;
+  color: #e0e0e0;
+  font-size: 14px;
+  width: 300px;
+}
+
+.connect-form button {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 6px;
+  background: #7c3aed;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.connect-form button:hover {
+  background: #6d28d9;
+}
+
+/* Main layout — Discord-like */
+.main-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.sidebar {
+  width: 240px;
+  background: #16213e;
+  padding: 16px;
+  border-right: 1px solid #333;
+}
+
+.sidebar h3 {
+  color: #7c3aed;
+  margin-bottom: 12px;
+}
+
+.content {
+  flex: 1;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.content h3 {
+  color: #7c3aed;
+  margin-bottom: 12px;
+}

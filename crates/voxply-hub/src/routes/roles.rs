@@ -384,5 +384,5 @@ struct RoleRow {
     id: String,
     name: String,
     priority: i64,
-    created_at: String,
+    created_at: i64,
 }

@@ -27,6 +27,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/roles/{role_id}/members", get(routes::roles::list_role_members))
         .route("/users/{public_key}/roles", get(routes::roles::get_user_roles))
         .route("/users/{public_key}/roles/{role_id}", put(routes::roles::assign_role).delete(routes::roles::remove_role))
+        .route("/invites", get(routes::invites::list_invites).post(routes::invites::create_invite))
+        .route("/invites/{code}", axum::routing::delete(routes::invites::revoke_invite))
         .route("/moderation/bans", get(routes::moderation::list_bans).post(routes::moderation::ban_user))
         .route("/moderation/bans/{target_key}", axum::routing::delete(routes::moderation::unban_user))
         .route("/moderation/mutes", get(routes::moderation::list_mutes).post(routes::moderation::mute_user))

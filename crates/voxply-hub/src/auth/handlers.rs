@@ -100,6 +100,32 @@ pub async fn verify(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+    // Check invite requirement for new users
+    let has_roles: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM user_roles WHERE user_public_key = ?",
+    )
+    .bind(&req.public_key)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if has_roles == 0 {
+        // New user — check if hub requires an invite
+        if crate::routes::invites::is_invite_only(&state.db).await? {
+            match &req.invite_code {
+                Some(code) => {
+                    crate::routes::invites::validate_and_use_invite(&state.db, code).await?;
+                }
+                None => {
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        "This hub requires an invite code".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
     // Assign roles for new users
     let has_roles: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_roles WHERE user_public_key = ?",
@@ -144,10 +170,9 @@ pub async fn verify(
     Ok(Json(VerifyResponse { token }))
 }
 
-pub fn unix_timestamp() -> String {
-    let secs = std::time::SystemTime::now()
+pub fn unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_secs();
-    format!("{secs}")
+        .as_secs() as i64
 }

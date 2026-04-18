@@ -204,8 +204,7 @@ pub async fn timeout_user(
         .await?;
 
     let now = crate::auth::handlers::unix_timestamp();
-    let now_secs: u64 = now.parse().unwrap_or(0);
-    let expires_at = format!("{}", now_secs + req.duration_seconds);
+    let expires_at = now + req.duration_seconds as i64;
 
     sqlx::query(
         "INSERT OR REPLACE INTO mutes (target_public_key, muted_by, reason, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -265,7 +264,7 @@ struct BanRow {
     target_public_key: String,
     banned_by: String,
     reason: Option<String>,
-    created_at: String,
+    created_at: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -273,8 +272,8 @@ struct MuteRow {
     target_public_key: String,
     muted_by: String,
     reason: Option<String>,
-    expires_at: Option<String>,
-    created_at: String,
+    expires_at: Option<i64>,
+    created_at: i64,
 }
 
 // --- Helpers for enforcement (used by other modules) ---

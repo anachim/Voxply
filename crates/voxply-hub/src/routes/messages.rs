@@ -132,5 +132,5 @@ struct MessageRow {
     sender: String,
     sender_name: Option<String>,
     content: String,
-    created_at: String,
+    created_at: i64,
 }

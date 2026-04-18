@@ -3,6 +3,8 @@ pub mod chat_models;
 pub mod health;
 pub mod me;
 pub mod messages;
+pub mod invite_models;
+pub mod invites;
 pub mod moderation;
 pub mod moderation_models;
 pub mod role_models;

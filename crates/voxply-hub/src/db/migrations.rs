@@ -4,10 +4,10 @@ use sqlx::SqlitePool;
 pub async fn run(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS users (
-            public_key  TEXT PRIMARY KEY,
-            display_name TEXT,
-            first_seen_at TEXT NOT NULL,
-            last_seen_at  TEXT NOT NULL
+            public_key    TEXT PRIMARY KEY,
+            display_name  TEXT,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at  INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -15,9 +15,9 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS sessions (
-            token       TEXT PRIMARY KEY,
-            public_key  TEXT NOT NULL REFERENCES users(public_key),
-            created_at  TEXT NOT NULL
+            token      TEXT PRIMARY KEY,
+            public_key TEXT NOT NULL REFERENCES users(public_key),
+            created_at INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -25,10 +25,10 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS channels (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL UNIQUE,
-            created_by  TEXT NOT NULL REFERENCES users(public_key),
-            created_at  TEXT NOT NULL
+            id         TEXT PRIMARY KEY,
+            name       TEXT NOT NULL UNIQUE,
+            created_by TEXT NOT NULL REFERENCES users(public_key),
+            created_at INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -36,11 +36,11 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS messages (
-            id          TEXT PRIMARY KEY,
-            channel_id  TEXT NOT NULL REFERENCES channels(id),
-            sender      TEXT NOT NULL REFERENCES users(public_key),
-            content     TEXT NOT NULL,
-            created_at  TEXT NOT NULL
+            id         TEXT PRIMARY KEY,
+            channel_id TEXT NOT NULL REFERENCES channels(id),
+            sender     TEXT NOT NULL REFERENCES users(public_key),
+            content    TEXT NOT NULL,
+            created_at INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -48,10 +48,10 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS peers (
-            public_key  TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            url         TEXT NOT NULL,
-            added_at    TEXT NOT NULL
+            public_key TEXT PRIMARY KEY,
+            name       TEXT NOT NULL,
+            url        TEXT NOT NULL,
+            added_at   INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -63,8 +63,8 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
             peer_public_key TEXT NOT NULL REFERENCES peers(public_key),
             remote_id       TEXT NOT NULL,
             name            TEXT NOT NULL,
-            created_at      TEXT NOT NULL,
-            last_synced_at  TEXT NOT NULL,
+            created_at      INTEGER NOT NULL,
+            last_synced_at  INTEGER NOT NULL,
             UNIQUE(peer_public_key, remote_id)
         )",
     )
@@ -73,12 +73,12 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS federated_messages (
-            id              TEXT PRIMARY KEY,
-            fed_channel_id  TEXT NOT NULL REFERENCES federated_channels(id),
-            remote_id       TEXT NOT NULL,
-            sender          TEXT NOT NULL,
-            content         TEXT NOT NULL,
-            created_at      TEXT NOT NULL,
+            id             TEXT PRIMARY KEY,
+            fed_channel_id TEXT NOT NULL REFERENCES federated_channels(id),
+            remote_id      TEXT NOT NULL,
+            sender         TEXT NOT NULL,
+            content        TEXT NOT NULL,
+            created_at     INTEGER NOT NULL,
             UNIQUE(fed_channel_id, remote_id)
         )",
     )
@@ -87,10 +87,10 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS roles (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL UNIQUE,
-            priority    INTEGER NOT NULL DEFAULT 0,
-            created_at  TEXT NOT NULL
+            id         TEXT PRIMARY KEY,
+            name       TEXT NOT NULL UNIQUE,
+            priority   INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -110,7 +110,7 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS user_roles (
             user_public_key TEXT NOT NULL REFERENCES users(public_key),
             role_id         TEXT NOT NULL REFERENCES roles(id),
-            assigned_at     TEXT NOT NULL,
+            assigned_at     INTEGER NOT NULL,
             PRIMARY KEY (user_public_key, role_id)
         )",
     )
@@ -119,20 +119,17 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     // Seed built-in roles
     sqlx::query(
-        "INSERT OR IGNORE INTO roles (id, name, priority, created_at)
-         VALUES ('builtin-everyone', '@everyone', 0, '0')",
+        "INSERT OR IGNORE INTO roles (id, name, priority, created_at) VALUES ('builtin-everyone', '@everyone', 0, 0)",
     )
     .execute(pool)
     .await?;
 
     sqlx::query(
-        "INSERT OR IGNORE INTO roles (id, name, priority, created_at)
-         VALUES ('builtin-owner', 'Owner', 999999, '0')",
+        "INSERT OR IGNORE INTO roles (id, name, priority, created_at) VALUES ('builtin-owner', 'Owner', 999999, 0)",
     )
     .execute(pool)
     .await?;
 
-    // Seed permissions for built-in roles
     sqlx::query("INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES ('builtin-everyone', 'send_messages')")
         .execute(pool).await?;
     sqlx::query("INSERT OR IGNORE INTO role_permissions (role_id, permission) VALUES ('builtin-everyone', 'read_messages')")
@@ -143,9 +140,9 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS bans (
             target_public_key TEXT PRIMARY KEY REFERENCES users(public_key),
-            banned_by TEXT NOT NULL,
-            reason TEXT,
-            created_at TEXT NOT NULL
+            banned_by  TEXT NOT NULL,
+            reason     TEXT,
+            created_at INTEGER NOT NULL
         )",
     )
     .execute(pool)
@@ -154,11 +151,41 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS mutes (
             target_public_key TEXT PRIMARY KEY REFERENCES users(public_key),
-            muted_by TEXT NOT NULL,
-            reason TEXT,
-            expires_at TEXT,
-            created_at TEXT NOT NULL
+            muted_by   TEXT NOT NULL,
+            reason     TEXT,
+            expires_at INTEGER,
+            created_at INTEGER NOT NULL
         )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS invites (
+            code       TEXT PRIMARY KEY,
+            created_by TEXT NOT NULL,
+            max_uses   INTEGER,
+            uses       INTEGER NOT NULL DEFAULT 0,
+            expires_at INTEGER,
+            created_at INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Hub settings (key-value store for simple config)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS hub_settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Default: hub is open (no invite required)
+    sqlx::query(
+        "INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('invite_only', 'false')",
     )
     .execute(pool)
     .await?;

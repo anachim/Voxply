@@ -6,7 +6,7 @@ pub struct RoleResponse {
     pub name: String,
     pub permissions: Vec<String>,
     pub priority: i64,
-    pub created_at: String,
+    pub created_at: i64,
 }
 
 #[derive(Deserialize)]

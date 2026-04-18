@@ -76,5 +76,5 @@ struct ChannelRow {
     id: String,
     name: String,
     created_by: String,
-    created_at: String,
+    created_at: i64,
 }

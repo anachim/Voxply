@@ -10,7 +10,7 @@ pub struct ChannelResponse {
     pub id: String,
     pub name: String,
     pub created_by: String,
-    pub created_at: String,
+    pub created_at: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub struct MessageResponse {
     pub sender: String,
     pub sender_name: Option<String>,
     pub content: String,
-    pub created_at: String,
+    pub created_at: i64,
 }
 
 #[derive(Clone, Debug)]

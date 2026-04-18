@@ -297,7 +297,7 @@ struct PeerRow {
     public_key: String,
     name: String,
     url: String,
-    added_at: String,
+    added_at: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -306,5 +306,5 @@ struct FedChannelRow {
     peer_public_key: String,
     remote_id: String,
     name: String,
-    created_at: String,
+    created_at: i64,
 }

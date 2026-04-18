@@ -15,6 +15,7 @@ pub struct VerifyRequest {
     pub public_key: String,
     pub challenge: String,
     pub signature: String,
+    pub invite_code: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

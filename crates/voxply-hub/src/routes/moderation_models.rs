@@ -11,7 +11,7 @@ pub struct BanResponse {
     pub target_public_key: String,
     pub banned_by: String,
     pub reason: Option<String>,
-    pub created_at: String,
+    pub created_at: i64,
 }
 
 #[derive(Deserialize)]
@@ -32,8 +32,8 @@ pub struct MuteResponse {
     pub target_public_key: String,
     pub muted_by: String,
     pub reason: Option<String>,
-    pub expires_at: Option<String>,
-    pub created_at: String,
+    pub expires_at: Option<i64>,
+    pub created_at: i64,
 }
 
 #[derive(Deserialize)]

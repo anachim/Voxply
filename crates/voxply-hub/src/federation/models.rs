@@ -5,7 +5,7 @@ pub struct PeerInfo {
     pub public_key: String,
     pub name: String,
     pub url: String,
-    pub added_at: String,
+    pub added_at: i64,
 }
 
 #[derive(Deserialize)]
@@ -19,7 +19,7 @@ pub struct FederatedChannelResponse {
     pub peer_public_key: String,
     pub remote_id: String,
     pub name: String,
-    pub created_at: String,
+    pub created_at: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -28,5 +28,5 @@ pub struct FederatedMessageResponse {
     pub remote_id: String,
     pub sender: String,
     pub content: String,
-    pub created_at: String,
+    pub created_at: i64,
 }

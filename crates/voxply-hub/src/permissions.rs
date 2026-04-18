@@ -19,7 +19,7 @@ pub struct RoleRow {
     pub id: String,
     pub name: String,
     pub priority: i64,
-    pub created_at: String,
+    pub created_at: i64,
 }
 
 pub struct UserPermissions {

@@ -21,6 +21,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/channels", get(routes::channels::list_channels))
         .route("/channels/{channel_id}/messages", post(routes::messages::send_message))
         .route("/channels/{channel_id}/messages", get(routes::messages::get_messages))
+        .route("/users", get(routes::users::list_users))
+        .route("/channels/{channel_id}/members", get(routes::users::channel_members))
         .route("/ws", get(routes::ws::ws_handler))
         .route("/conversations", get(routes::dms::list_conversations).post(routes::dms::create_conversation))
         .route("/conversations/{conversation_id}/messages", post(routes::dms::send_dm))

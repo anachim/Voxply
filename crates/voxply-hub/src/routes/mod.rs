@@ -14,4 +14,5 @@ pub mod moderation;
 pub mod moderation_models;
 pub mod role_models;
 pub mod roles;
+pub mod users;
 pub mod ws;

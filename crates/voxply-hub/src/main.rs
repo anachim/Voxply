@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
         voice_udp_port: VOICE_UDP_PORT,
         voice_event_tx,
         dm_tx,
+        online_users: RwLock::new(std::collections::HashSet::new()),
     });
 
     // Bind voice UDP socket and start forwarding task

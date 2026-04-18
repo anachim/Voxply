@@ -32,6 +32,8 @@ pub struct AppState {
     pub voice_event_tx: broadcast::Sender<(String, WsServerMessage)>,
     // DM relay: broadcast DMs to all WS clients (they filter by conversation membership)
     pub dm_tx: broadcast::Sender<DmEvent>,
+    // Online users: public_key set (updated by WS connect/disconnect)
+    pub online_users: RwLock<std::collections::HashSet<String>>,
 }
 
 pub struct PendingChallenge {

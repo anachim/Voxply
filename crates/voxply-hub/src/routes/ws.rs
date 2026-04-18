@@ -34,6 +34,9 @@ pub async fn ws_handler(
 }
 
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: String) {
+    // Track online status
+    state.online_users.write().await.insert(public_key.clone());
+
     let (mut ws_tx, mut ws_rx) = socket.split();
     let mut chat_rx = state.chat_tx.subscribe();
     let mut dm_rx = state.dm_tx.subscribe();
@@ -167,10 +170,11 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
         }
     }
 
-    // Clean up voice on disconnect
+    // Clean up on disconnect
     if let Some(ch_id) = voice_channel {
         leave_voice(&state, &public_key, &ch_id).await;
     }
+    state.online_users.write().await.remove(&public_key);
 
     tracing::info!("WebSocket disconnected: {}", &public_key[..16]);
 }

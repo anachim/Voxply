@@ -1,4 +1,5 @@
 mod pow;
+mod recovery;
 
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -176,6 +177,23 @@ mod tests {
             identity.security_level,
         );
         assert!(valid);
+    }
+
+    #[test]
+    fn recovery_phrase_roundtrip() {
+        let identity = Identity::generate();
+        let phrase = identity.recovery_phrase();
+        let words: Vec<&str> = phrase.split_whitespace().collect();
+        assert_eq!(words.len(), 24);
+
+        let restored = Identity::from_recovery_phrase(&phrase).unwrap();
+        assert_eq!(identity.public_key_hex(), restored.public_key_hex());
+    }
+
+    #[test]
+    fn recovery_phrase_rejects_invalid() {
+        let result = Identity::from_recovery_phrase("not a valid recovery phrase");
+        assert!(result.is_err());
     }
 
     #[test]

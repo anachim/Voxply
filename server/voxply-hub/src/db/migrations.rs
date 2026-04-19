@@ -31,6 +31,7 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
             parent_id     TEXT REFERENCES channels(id),
             is_category   INTEGER NOT NULL DEFAULT 0,
             display_order INTEGER NOT NULL DEFAULT 0,
+            description   TEXT,
             created_at    INTEGER NOT NULL
         )",
     )
@@ -45,6 +46,9 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await;
     let _ = sqlx::query("ALTER TABLE channels ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE channels ADD COLUMN description TEXT")
         .execute(pool)
         .await;
 

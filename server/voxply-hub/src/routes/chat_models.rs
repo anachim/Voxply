@@ -7,6 +7,8 @@ pub struct CreateChannelRequest {
     pub parent_id: Option<String>,
     #[serde(default)]
     pub is_category: bool,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -17,7 +19,14 @@ pub struct ChannelResponse {
     pub parent_id: Option<String>,
     pub is_category: bool,
     pub display_order: i64,
+    pub description: Option<String>,
     pub created_at: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UpdateChannelRequest {
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

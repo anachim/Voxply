@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
 use crate::permissions;
-use crate::routes::chat_models::{ChannelResponse, CreateChannelRequest};
+use crate::routes::chat_models::{ChannelResponse, CreateChannelRequest, UpdateChannelRequest};
 use crate::state::AppState;
 
 pub async fn create_channel(
@@ -48,8 +48,8 @@ pub async fn create_channel(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
     sqlx::query(
-        "INSERT INTO channels (id, name, created_by, parent_id, is_category, display_order, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO channels (id, name, created_by, parent_id, is_category, display_order, description, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&req.name)
@@ -57,6 +57,7 @@ pub async fn create_channel(
     .bind(&req.parent_id)
     .bind(is_category_int)
     .bind(next_order)
+    .bind(&req.description)
     .bind(now)
     .execute(&state.db)
     .await
@@ -77,9 +78,38 @@ pub async fn create_channel(
             parent_id: req.parent_id,
             is_category: req.is_category,
             display_order: next_order,
+            description: req.description,
             created_at: now,
         }),
     ))
+}
+
+pub async fn update_channel(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(channel_id): Path<String>,
+    Json(req): Json<UpdateChannelRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(permissions::MANAGE_CHANNELS)?;
+
+    let exists: Option<String> = sqlx::query_scalar("SELECT id FROM channels WHERE id = ?")
+        .bind(&channel_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    if exists.is_none() {
+        return Err((StatusCode::NOT_FOUND, "Channel not found".to_string()));
+    }
+
+    sqlx::query("UPDATE channels SET description = ? WHERE id = ?")
+        .bind(&req.description)
+        .bind(&channel_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn list_channels(
@@ -87,7 +117,7 @@ pub async fn list_channels(
     _user: AuthUser,
 ) -> Result<Json<Vec<ChannelResponse>>, (StatusCode, String)> {
     let rows = sqlx::query_as::<_, ChannelRow>(
-        "SELECT id, name, created_by, parent_id, is_category, display_order, created_at
+        "SELECT id, name, created_by, parent_id, is_category, display_order, description, created_at
          FROM channels
          ORDER BY display_order, created_at",
     )
@@ -104,6 +134,7 @@ pub async fn list_channels(
             parent_id: r.parent_id,
             is_category: r.is_category != 0,
             display_order: r.display_order,
+            description: r.description,
             created_at: r.created_at,
         })
         .collect();
@@ -217,5 +248,6 @@ struct ChannelRow {
     parent_id: Option<String>,
     is_category: i64,
     display_order: i64,
+    description: Option<String>,
     created_at: i64,
 }

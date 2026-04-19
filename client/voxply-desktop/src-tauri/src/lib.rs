@@ -99,6 +99,7 @@ struct ChannelInfo {
     parent_id: Option<String>,
     is_category: bool,
     display_order: i64,
+    description: Option<String>,
     created_at: i64,
 }
 
@@ -608,6 +609,7 @@ async fn create_channel(
     name: String,
     parent_id: Option<String>,
     is_category: bool,
+    description: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ChannelInfo, String> {
     let (hub_url, token) = active_session(&state)?;
@@ -619,6 +621,7 @@ async fn create_channel(
             "name": name,
             "parent_id": parent_id,
             "is_category": is_category,
+            "description": description,
         }))
         .send()
         .await
@@ -628,6 +631,27 @@ async fn create_channel(
         return Err(resp.text().await.unwrap_or_default());
     }
     resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn update_channel_description(
+    channel_id: String,
+    description: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/channels/{channel_id}"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "description": description }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1284,6 +1308,7 @@ pub fn run() {
             auto_connect_saved,
             list_channels,
             create_channel,
+            update_channel_description,
             delete_channel,
             reorder_channels,
             list_users,

@@ -31,6 +31,7 @@ interface Channel {
   parent_id: string | null;
   is_category: boolean;
   display_order: number;
+  description: string | null;
   created_at: number;
 }
 
@@ -165,6 +166,199 @@ function SortableCategoryItem({
   );
 }
 
+/** Format a public key for display: 12 hex chars in groups of 4, separated
+ * by dashes, followed by the last 4 chars. Full key still copied/sent under
+ * the hood — this is purely visual. */
+function formatPubkey(key: string | null | undefined): string {
+  if (!key) return "";
+  if (key.length < 20) return key;
+  const head = key.slice(0, 12).match(/.{1,4}/g)!.join("-");
+  const tail = key.slice(-4);
+  return `${head}…${tail}`;
+}
+
+type SettingsTab = "account" | "voice" | "security" | "about";
+
+interface SettingsPageProps {
+  tab: SettingsTab;
+  onTab: (t: SettingsTab) => void;
+  onClose: () => void;
+  displayName: string;
+  onDisplayNameChange: (v: string) => void;
+  onSaveDisplayName: () => void;
+  publicKey: string | null;
+  copiedKey: boolean;
+  onCopyKey: () => void;
+  audioInputs: string[];
+  audioOutputs: string[];
+  voiceInputDevice: string;
+  voiceOutputDevice: string;
+  onInputDeviceChange: (v: string) => void;
+  onOutputDeviceChange: (v: string) => void;
+  vadThreshold: number;
+  onVadChange: (v: number) => void;
+  micTesting: boolean;
+  onToggleMicTest: () => void;
+  recoveryPhrase: string | null;
+  onShowRecovery: () => void;
+}
+
+function SettingsPage(props: SettingsPageProps) {
+  const tabs: { id: SettingsTab; label: string }[] = [
+    { id: "account", label: "Account" },
+    { id: "voice", label: "Voice & Video" },
+    { id: "security", label: "Security" },
+    { id: "about", label: "About" },
+  ];
+
+  return (
+    <div className="settings-page">
+      <aside className="settings-nav">
+        <h2>Settings</h2>
+        <ul>
+          {tabs.map((t) => (
+            <li key={t.id}>
+              <button
+                className={`settings-nav-item ${props.tab === t.id ? "active" : ""}`}
+                onClick={() => props.onTab(t.id)}
+              >
+                {t.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button className="settings-nav-close" onClick={props.onClose}>
+          Close (ESC)
+        </button>
+      </aside>
+      <main className="settings-content">
+        <button className="settings-close-x" onClick={props.onClose} title="Close">
+          ×
+        </button>
+        {props.tab === "account" && (
+          <section>
+            <h1>Account</h1>
+            <div className="settings-section">
+              <label className="settings-label">Display name</label>
+              <p className="muted">
+                How you appear on hubs you've joined. Same name everywhere for now.
+              </p>
+              <div className="settings-row">
+                <input
+                  type="text"
+                  value={props.displayName}
+                  onChange={(e) => props.onDisplayNameChange(e.target.value)}
+                  placeholder="Your display name"
+                />
+                <button onClick={props.onSaveDisplayName}>Save</button>
+              </div>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Your public key</label>
+              <p className="muted">
+                Share this with someone to send you a friend request.
+              </p>
+              <div className="settings-row">
+                <code className="pubkey-display" title={props.publicKey ?? ""}>
+                  {formatPubkey(props.publicKey)}
+                </code>
+                <button onClick={props.onCopyKey}>
+                  {props.copiedKey ? "Copied" : "Copy full key"}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+        {props.tab === "voice" && (
+          <section>
+            <h1>Voice & Video</h1>
+            <div className="settings-section">
+              <label className="settings-label">Microphone</label>
+              <select
+                value={props.voiceInputDevice}
+                onChange={(e) => props.onInputDeviceChange(e.target.value)}
+              >
+                <option value="">System default</option>
+                {props.audioInputs.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Speaker</label>
+              <select
+                value={props.voiceOutputDevice}
+                onChange={(e) => props.onOutputDeviceChange(e.target.value)}
+              >
+                <option value="">System default</option>
+                {props.audioOutputs.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">
+                Mic sensitivity — threshold {props.vadThreshold.toFixed(3)}
+              </label>
+              <p className="muted">
+                Lower values trigger the speaking indicator more easily. Changes
+                apply the next time you join a voice channel.
+              </p>
+              <input
+                type="range"
+                min={0.001}
+                max={0.2}
+                step={0.001}
+                value={props.vadThreshold}
+                onChange={(e) => props.onVadChange(Number(e.target.value))}
+              />
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Microphone test</label>
+              <p className="muted">
+                Plays your mic back through your speaker. Use headphones to avoid
+                feedback.
+              </p>
+              <button onClick={props.onToggleMicTest} className="btn-secondary">
+                {props.micTesting ? "Stop test" : "Start mic test"}
+              </button>
+            </div>
+          </section>
+        )}
+        {props.tab === "security" && (
+          <section>
+            <h1>Security</h1>
+            <div className="settings-section">
+              <label className="settings-label">Recovery phrase</label>
+              <p className="muted">
+                24 words you can use to restore your identity. Write them down
+                and keep them safe — anyone with these words can impersonate you.
+              </p>
+              {props.recoveryPhrase ? (
+                <div className="recovery-phrase">{props.recoveryPhrase}</div>
+              ) : (
+                <button onClick={props.onShowRecovery} className="btn-secondary">
+                  Reveal recovery phrase
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+        {props.tab === "about" && (
+          <section>
+            <h1>About</h1>
+            <p className="muted">Voxply — decentralized voice chat + community platform.</p>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function App() {
   // Multi-hub state
   const [hubs, setHubs] = useState<Hub[]>([]);
@@ -194,8 +388,13 @@ function App() {
   // Create channel dialog
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelDescription, setNewChannelDescription] = useState("");
   const [newChannelIsCategory, setNewChannelIsCategory] = useState(false);
   const [newChannelParentId, setNewChannelParentId] = useState<string | null>(null);
+
+  // Edit description dialog
+  const [editDescriptionChannel, setEditDescriptionChannel] = useState<Channel | null>(null);
+  const [editDescriptionValue, setEditDescriptionValue] = useState("");
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null);
@@ -210,8 +409,10 @@ function App() {
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"account" | "voice" | "security" | "about">("account");
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   // Voice settings
   const [audioInputs, setAudioInputs] = useState<string[]>([]);
@@ -256,6 +457,27 @@ function App() {
     const t = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // ESC closes the settings view
+  useEffect(() => {
+    if (!showSettings) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowSettings(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showSettings]);
+
+  async function copyPublicKey() {
+    if (!publicKey) return;
+    try {
+      await navigator.clipboard.writeText(publicKey);
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    } catch (e) {
+      setError("Failed to copy: " + e);
+    }
+  }
 
   // Surface any error as a toast so the user actually sees it
   // (we removed the always-visible connect screen that used to render it).
@@ -838,20 +1060,53 @@ function App() {
   async function handleCreateChannel() {
     const name = newChannelName.trim();
     if (!name) return;
+    const desc = newChannelDescription.trim();
     try {
       const channel = await invoke<Channel>("create_channel", {
         name,
         parentId: newChannelParentId,
         isCategory: newChannelIsCategory,
+        description: desc ? desc : null,
       });
       setChannels((prev) => [...prev, channel]);
       setNewChannelName("");
+      setNewChannelDescription("");
       setNewChannelIsCategory(false);
       setNewChannelParentId(null);
       setShowCreateChannel(false);
       if (!channel.is_category) {
         selectChannel(channel);
       }
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function openEditDescription(channel: Channel) {
+    setEditDescriptionChannel(channel);
+    setEditDescriptionValue(channel.description ?? "");
+    setContextMenu(null);
+  }
+
+  async function handleSaveDescription() {
+    if (!editDescriptionChannel) return;
+    const desc = editDescriptionValue.trim();
+    try {
+      await invoke("update_channel_description", {
+        channelId: editDescriptionChannel.id,
+        description: desc ? desc : null,
+      });
+      setChannels((prev) =>
+        prev.map((c) =>
+          c.id === editDescriptionChannel.id
+            ? { ...c, description: desc ? desc : null }
+            : c
+        )
+      );
+      if (selectedChannel?.id === editDescriptionChannel.id) {
+        setSelectedChannel({ ...selectedChannel, description: desc ? desc : null });
+      }
+      setEditDescriptionChannel(null);
     } catch (e) {
       setError(String(e));
     }
@@ -892,6 +1147,40 @@ function App() {
         </div>
       )}
       <>
+        {showSettings ? (
+          <SettingsPage
+            tab={settingsTab}
+            onTab={setSettingsTab}
+            onClose={() => setShowSettings(false)}
+            displayName={settingsDisplayName}
+            onDisplayNameChange={setSettingsDisplayName}
+            onSaveDisplayName={handleSaveDisplayName}
+            publicKey={publicKey}
+            copiedKey={copiedKey}
+            onCopyKey={copyPublicKey}
+            audioInputs={audioInputs}
+            audioOutputs={audioOutputs}
+            voiceInputDevice={voiceInputDevice}
+            voiceOutputDevice={voiceOutputDevice}
+            onInputDeviceChange={(v) => {
+              setVoiceInputDevice(v);
+              persistVoiceSettings(v, voiceOutputDevice, vadThreshold);
+            }}
+            onOutputDeviceChange={(v) => {
+              setVoiceOutputDevice(v);
+              persistVoiceSettings(voiceInputDevice, v, vadThreshold);
+            }}
+            vadThreshold={vadThreshold}
+            onVadChange={(v) => {
+              setVadThreshold(v);
+              persistVoiceSettings(voiceInputDevice, voiceOutputDevice, v);
+            }}
+            micTesting={micTesting}
+            onToggleMicTest={toggleMicTest}
+            recoveryPhrase={recoveryPhrase}
+            onShowRecovery={handleShowRecovery}
+          />
+        ) : (
         <div className="main-layout">
           <div className="hub-sidebar">
             <button
@@ -950,6 +1239,7 @@ function App() {
           ) : (
             <>
           <div className="sidebar">
+            <div className="sidebar-scroll">
             {view === "channels" ? (
               <>
             <div className="sidebar-header">
@@ -1009,6 +1299,28 @@ function App() {
             {channels.length === 0 && (
               <p className="muted">No channels yet</p>
             )}
+
+            <div className="sidebar-header sidebar-header-users">
+              <h3>Users — {users.length}</h3>
+            </div>
+            <ul className="user-list">
+              {users.filter((u) => u.online).map((u) => (
+                <li key={u.public_key} className="user-list-item">
+                  <span className="status-dot online" />
+                  <span className="user-name">
+                    {u.display_name || u.public_key.slice(0, 16)}
+                  </span>
+                </li>
+              ))}
+              {users.filter((u) => !u.online).map((u) => (
+                <li key={u.public_key} className="user-list-item offline">
+                  <span className="status-dot offline" />
+                  <span className="user-name">
+                    {u.display_name || u.public_key.slice(0, 16)}
+                  </span>
+                </li>
+              ))}
+            </ul>
               </>
             ) : (
               <>
@@ -1049,6 +1361,7 @@ function App() {
                 )}
               </>
             )}
+            </div>
             <div className="user-info">
               {voiceChannelId && (
                 <div className="voice-status">
@@ -1132,7 +1445,14 @@ function App() {
             ) : selectedChannel ? (
               <>
                 <div className="channel-header">
-                  <h3># {selectedChannel.name}</h3>
+                  <div className="channel-header-info">
+                    <h3># {selectedChannel.name}</h3>
+                    {selectedChannel.description && (
+                      <p className="channel-description">
+                        {selectedChannel.description}
+                      </p>
+                    )}
+                  </div>
                   {voiceChannelId === selectedChannel.id ? (
                     <button onClick={handleVoiceLeave} className="btn-voice leave">
                       🔇 Leave Voice
@@ -1193,34 +1513,10 @@ function App() {
             )}
           </div>
 
-          <div className="user-list-sidebar">
-            <h3>Users — {users.length}</h3>
-            <div className="user-section">
-              <p className="user-section-title">Online — {users.filter((u) => u.online).length}</p>
-              <ul className="user-list">
-                {users.filter((u) => u.online).map((u) => (
-                  <li key={u.public_key} className="user-list-item">
-                    <span className="status-dot online" />
-                    <span className="user-name">{u.display_name || u.public_key.slice(0, 16)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="user-section">
-              <p className="user-section-title">Offline — {users.filter((u) => !u.online).length}</p>
-              <ul className="user-list">
-                {users.filter((u) => !u.online).map((u) => (
-                  <li key={u.public_key} className="user-list-item offline">
-                    <span className="status-dot offline" />
-                    <span className="user-name">{u.display_name || u.public_key.slice(0, 16)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
             </>
           )}
         </div>
+        )}
 
         {showCreateChannel && (
           <div className="modal-overlay" onClick={() => setShowCreateChannel(false)}>
@@ -1240,6 +1536,14 @@ function App() {
                 placeholder={newChannelIsCategory ? "category-name" : "channel-name"}
                 autoFocus
               />
+              {!newChannelIsCategory && (
+                <textarea
+                  value={newChannelDescription}
+                  onChange={(e) => setNewChannelDescription(e.target.value)}
+                  placeholder="Channel description (optional) — shown in the channel header"
+                  rows={3}
+                />
+              )}
               {!newChannelParentId && (
                 <label className="checkbox-label">
                   <input
@@ -1364,120 +1668,6 @@ function App() {
           </div>
         )}
 
-        {showSettings && (
-          <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-            <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-              <h3>Settings</h3>
-
-              <div className="settings-section">
-                <label className="settings-label">Display name</label>
-                <div className="settings-row">
-                  <input
-                    type="text"
-                    value={settingsDisplayName}
-                    onChange={(e) => setSettingsDisplayName(e.target.value)}
-                    placeholder="Your display name"
-                  />
-                  <button onClick={handleSaveDisplayName}>Save</button>
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <label className="settings-label">Voice — microphone</label>
-                <select
-                  value={voiceInputDevice}
-                  onChange={(e) => {
-                    setVoiceInputDevice(e.target.value);
-                    persistVoiceSettings(e.target.value, voiceOutputDevice, vadThreshold);
-                  }}
-                >
-                  <option value="">System default</option>
-                  {audioInputs.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="settings-section">
-                <label className="settings-label">Voice — speaker</label>
-                <select
-                  value={voiceOutputDevice}
-                  onChange={(e) => {
-                    setVoiceOutputDevice(e.target.value);
-                    persistVoiceSettings(voiceInputDevice, e.target.value, vadThreshold);
-                  }}
-                >
-                  <option value="">System default</option>
-                  {audioOutputs.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="settings-section">
-                <label className="settings-label">
-                  Mic sensitivity — threshold {vadThreshold.toFixed(3)}
-                </label>
-                <p className="muted">
-                  Lower values trigger the speaking indicator more easily.
-                  Changes apply on the next voice channel you join.
-                </p>
-                <input
-                  type="range"
-                  min={0.001}
-                  max={0.2}
-                  step={0.001}
-                  value={vadThreshold}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    setVadThreshold(v);
-                    persistVoiceSettings(voiceInputDevice, voiceOutputDevice, v);
-                  }}
-                />
-              </div>
-
-              <div className="settings-section">
-                <label className="settings-label">Microphone test</label>
-                <p className="muted">
-                  Plays your mic back through your speaker. Use headphones to
-                  avoid feedback.
-                </p>
-                <button onClick={toggleMicTest} className="btn-secondary">
-                  {micTesting ? "Stop test" : "Start mic test"}
-                </button>
-              </div>
-
-              <div className="settings-section">
-                <label className="settings-label">Recovery phrase</label>
-                <p className="muted">
-                  24 words you can use to restore your identity. Write them down
-                  and keep them safe — anyone with these words can impersonate you.
-                </p>
-                {recoveryPhrase ? (
-                  <div className="recovery-phrase">{recoveryPhrase}</div>
-                ) : (
-                  <button onClick={handleShowRecovery} className="btn-secondary">
-                    Reveal recovery phrase
-                  </button>
-                )}
-              </div>
-
-              <div className="settings-section">
-                <label className="settings-label">Public key</label>
-                <div className="public-key">{publicKey}</div>
-              </div>
-
-              <div className="modal-actions">
-                <button onClick={() => setShowSettings(false)}>Close</button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {contextMenu && (
           <div
             className="context-menu-overlay"
@@ -1489,12 +1679,47 @@ function App() {
               style={{ top: contextMenu.y, left: contextMenu.x }}
               onClick={(e) => e.stopPropagation()}
             >
+              {!contextMenu.channel.is_category && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => openEditDescription(contextMenu.channel)}
+                >
+                  Edit description
+                </button>
+              )}
               <button
                 className="context-menu-item danger"
                 onClick={() => handleDeleteChannel(contextMenu.channel.id)}
               >
                 Delete {contextMenu.channel.is_category ? "category" : "channel"}
               </button>
+            </div>
+          </div>
+        )}
+
+        {editDescriptionChannel && (
+          <div
+            className="modal-overlay"
+            onClick={() => setEditDescriptionChannel(null)}
+          >
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Edit description — #{editDescriptionChannel.name}</h3>
+              <textarea
+                value={editDescriptionValue}
+                onChange={(e) => setEditDescriptionValue(e.target.value)}
+                placeholder="What's this channel for?"
+                rows={4}
+                autoFocus
+              />
+              <div className="modal-actions">
+                <button
+                  onClick={() => setEditDescriptionChannel(null)}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button onClick={handleSaveDescription}>Save</button>
+              </div>
             </div>
           </div>
         )}

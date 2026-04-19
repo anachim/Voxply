@@ -743,11 +743,26 @@ function App() {
       <>
         <div className="main-layout">
           <div className="hub-sidebar">
+            <button
+              className={`hub-icon dm ${view === "dms" ? "active" : ""}`}
+              onClick={() => {
+                setView("dms");
+                if (hasActiveHub) loadConversations();
+              }}
+              disabled={!hasActiveHub}
+              title="Direct Messages"
+            >
+              @
+            </button>
+            <div className="hub-sidebar-divider" />
             {hubs.map((h) => (
               <button
                 key={h.hub_id}
-                className={`hub-icon ${h.hub_id === activeHubId ? "active" : ""}`}
-                onClick={() => handleSwitchHub(h.hub_id)}
+                className={`hub-icon ${h.hub_id === activeHubId && view === "channels" ? "active" : ""}`}
+                onClick={() => {
+                  handleSwitchHub(h.hub_id);
+                  setView("channels");
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   handleRemoveHub(h.hub_id);
@@ -776,26 +791,6 @@ function App() {
           ) : (
             <>
           <div className="sidebar">
-            <div className="view-tabs">
-              <button
-                className={`view-tab ${view === "channels" ? "active" : ""}`}
-                onClick={() => setView("channels")}
-              >
-                Channels
-              </button>
-              <button
-                className={`view-tab ${view === "dms" ? "active" : ""}`}
-                onClick={() => {
-                  setView("dms");
-                  loadConversations();
-                }}
-              >
-                DMs
-                {conversations.length > 0 && (
-                  <span className="badge">{conversations.length}</span>
-                )}
-              </button>
-            </div>
             {view === "channels" ? (
               <>
             <div className="sidebar-header">

@@ -151,8 +151,11 @@ function App() {
         channelId: selectedChannel.id,
         content,
       });
-      // Append to local state (WebSocket would push updates from others too)
-      setMessages((prev) => [...prev, msg]);
+      // Dedup: the WebSocket may have already added this message
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
     } catch (e) {
       setError(String(e));
     }

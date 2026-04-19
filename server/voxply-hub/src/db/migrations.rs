@@ -332,6 +332,23 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await;
 
+    // DM delivery queue — one row per (message, recipient hub) awaiting delivery.
+    // Rows are deleted on successful delivery; rows where attempts >= max are
+    // kept with bounced_at set so senders can see failures (if we add UI for it).
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS dm_outbox (
+            message_id         TEXT NOT NULL REFERENCES dm_messages(id),
+            recipient_hub_url  TEXT NOT NULL,
+            attempts           INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at    INTEGER NOT NULL,
+            last_error         TEXT,
+            bounced_at         INTEGER,
+            PRIMARY KEY (message_id, recipient_hub_url)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

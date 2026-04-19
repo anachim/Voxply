@@ -168,14 +168,27 @@ pub async fn send_dm(
         timestamp: now,
     });
 
-    // Federate to each remote member's delivery hub.
+    // Federate to each remote member's delivery hub. Every remote delivery
+    // goes through the outbox so the retry worker owns redelivery on failure.
     let member_keys: Vec<String> = members.iter().map(|m| m.public_key.clone()).collect();
-    let mut delivery_errors: Vec<String> = Vec::new();
     for m in &members {
         if m.public_key == user.public_key {
             continue;
         }
         let Some(hub_url) = &m.hub_url else { continue };
+
+        // Queue first so failures get retried even if the sync call below succeeds partially.
+        sqlx::query(
+            "INSERT OR IGNORE INTO dm_outbox
+             (message_id, recipient_hub_url, attempts, next_attempt_at)
+             VALUES (?, ?, 0, ?)",
+        )
+        .bind(&message_id)
+        .bind(hub_url)
+        .bind(now)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
         let envelope = FederatedDmRequest {
             message_id: message_id.clone(),
@@ -188,18 +201,36 @@ pub async fn send_dm(
             created_at: now,
         };
 
-        if let Err(e) = deliver_federated_dm(&state, hub_url, &envelope).await {
-            tracing::warn!("DM delivery to {hub_url} failed: {e}");
-            delivery_errors.push(format!("{hub_url}: {e}"));
+        match deliver_federated_dm(&state, hub_url, &envelope).await {
+            Ok(()) => {
+                // Clear the outbox row on immediate success.
+                let _ = sqlx::query(
+                    "DELETE FROM dm_outbox WHERE message_id = ? AND recipient_hub_url = ?",
+                )
+                .bind(&message_id)
+                .bind(hub_url)
+                .execute(&state.db)
+                .await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "DM {} to {} failed immediately, leaving in outbox for retry: {e}",
+                    &message_id[..8],
+                    hub_url
+                );
+                // Bump attempts + schedule retry in 10s.
+                let _ = sqlx::query(
+                    "UPDATE dm_outbox SET attempts = 1, next_attempt_at = ?, last_error = ?
+                     WHERE message_id = ? AND recipient_hub_url = ?",
+                )
+                .bind(now + 10)
+                .bind(&e)
+                .bind(&message_id)
+                .bind(hub_url)
+                .execute(&state.db)
+                .await;
+            }
         }
-    }
-
-    if !delivery_errors.is_empty() {
-        tracing::warn!(
-            "DM {} partially delivered. Failures: {}",
-            &message_id[..8],
-            delivery_errors.join("; ")
-        );
     }
 
     Ok((
@@ -368,6 +399,15 @@ async fn ensure_user_stub(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
     Ok(())
+}
+
+/// Public wrapper around `deliver_federated_dm` for the retry worker.
+pub async fn deliver_federated_dm_public(
+    state: &AppState,
+    hub_url: &str,
+    envelope: &FederatedDmRequest,
+) -> Result<(), String> {
+    deliver_federated_dm(state, hub_url, envelope).await
 }
 
 async fn deliver_federated_dm(

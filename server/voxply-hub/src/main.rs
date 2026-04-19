@@ -7,6 +7,7 @@ use sqlx::sqlite::SqlitePoolOptions;
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, RwLock};
 use voxply_hub::db;
+use voxply_hub::dm_worker;
 use voxply_hub::federation::client::FederationClient;
 use voxply_hub::server;
 use voxply_hub::state::AppState;
@@ -100,6 +101,9 @@ async fn main() -> Result<()> {
             }
         }
     });
+
+    // Retry undelivered federated DMs in the background.
+    dm_worker::spawn(state.clone());
 
     let app = server::create_router(state);
     let addr: std::net::SocketAddr = "0.0.0.0:3000".parse()?;

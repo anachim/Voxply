@@ -281,6 +281,45 @@ async fn authenticate_http(hub_url: &str, identity: &Identity) -> String {
     verify.token
 }
 
+/// Return the AppState together with the URL so tests can drive the worker manually.
+async fn start_real_hub_with_state(name: &str) -> (String, Arc<AppState>) {
+    let db = SqlitePoolOptions::new()
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    db::migrations::run(&db).await.unwrap();
+    let (chat_tx, _) = broadcast::channel(256);
+    let (voice_event_tx, _) = broadcast::channel(16);
+
+    let state = Arc::new(AppState {
+        hub_name: name.to_string(),
+        hub_identity: Identity::generate(),
+        db,
+        pending_challenges: RwLock::new(HashMap::new()),
+        chat_tx,
+        federation_client: FederationClient::new(),
+        peer_tokens: RwLock::new(HashMap::new()),
+        voice_channels: RwLock::new(HashMap::new()),
+        voice_udp_port: 0,
+        voice_event_tx,
+        dm_tx: broadcast::channel(16).0,
+        online_users: RwLock::new(std::collections::HashSet::new()),
+    });
+    let app = server::create_router(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}");
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    (url, state)
+}
+
 #[tokio::test]
 async fn dm_delivered_across_hubs() {
     let hub_a = start_real_hub("hub-a").await;
@@ -339,4 +378,126 @@ async fn dm_delivered_across_hubs() {
     assert_eq!(arr.len(), 1, "Bob should see the federated DM");
     assert_eq!(arr[0]["content"], "hi bob, from across hubs");
     assert_eq!(arr[0]["sender"], alice.public_key_hex());
+}
+
+#[tokio::test]
+async fn dm_retries_when_recipient_hub_comes_online() {
+    use voxply_hub::dm_worker;
+
+    // Hub A is up from the start.
+    let (hub_a, hub_a_state) = start_real_hub_with_state("hub-a").await;
+    let client = reqwest::Client::new();
+
+    let alice = Identity::generate();
+    let bob = Identity::generate();
+    let alice_token = authenticate_http(&hub_a, &alice).await;
+
+    // Pick an address that definitely is not serving anything yet.
+    let dead_port = {
+        let tmp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let p = tmp.local_addr().unwrap().port();
+        drop(tmp);
+        p
+    };
+    let hub_b_url_planned = format!("http://127.0.0.1:{dead_port}");
+
+    // Alice creates a conversation pointing at Hub B's (currently dead) URL.
+    let mut member_hubs = HashMap::new();
+    member_hubs.insert(bob.public_key_hex(), hub_b_url_planned.clone());
+    let resp = client
+        .post(format!("{hub_a}/conversations"))
+        .bearer_auth(&alice_token)
+        .json(&json!({
+            "members": [bob.public_key_hex()],
+            "member_hubs": member_hubs,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let conv: ConversationResponse = resp.json().await.unwrap();
+
+    // Send while Hub B is down. POST still succeeds (Hub A accepts and queues).
+    let resp = client
+        .post(format!("{hub_a}/conversations/{}/messages", conv.id))
+        .bearer_auth(&alice_token)
+        .json(&json!({ "content": "hi from retry land" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // Confirm the message is parked in the outbox.
+    let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dm_outbox")
+        .fetch_one(&hub_a_state.db)
+        .await
+        .unwrap();
+    assert_eq!(queued, 1, "message should be queued while recipient is offline");
+
+    // Bring Hub B up on the previously-chosen port.
+    let hub_b_db = SqlitePoolOptions::new()
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    db::migrations::run(&hub_b_db).await.unwrap();
+    let (chat_tx_b, _) = broadcast::channel(256);
+    let (voice_event_tx_b, _) = broadcast::channel(16);
+    let hub_b_state = Arc::new(AppState {
+        hub_name: "hub-b".to_string(),
+        hub_identity: Identity::generate(),
+        db: hub_b_db,
+        pending_challenges: RwLock::new(HashMap::new()),
+        chat_tx: chat_tx_b,
+        federation_client: FederationClient::new(),
+        peer_tokens: RwLock::new(HashMap::new()),
+        voice_channels: RwLock::new(HashMap::new()),
+        voice_udp_port: 0,
+        voice_event_tx: voice_event_tx_b,
+        dm_tx: broadcast::channel(16).0,
+        online_users: RwLock::new(std::collections::HashSet::new()),
+    });
+    let app_b = server::create_router(hub_b_state.clone());
+    let listener_b = tokio::net::TcpListener::bind(format!("127.0.0.1:{dead_port}"))
+        .await
+        .expect("Hub B should be able to claim the chosen port");
+    tokio::spawn(async move {
+        axum::serve(
+            listener_b,
+            app_b.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+
+    // Force next_attempt_at to now so the worker picks the row up immediately.
+    sqlx::query("UPDATE dm_outbox SET next_attempt_at = 0")
+        .execute(&hub_a_state.db)
+        .await
+        .unwrap();
+
+    // Run one worker pass.
+    dm_worker::tick(&hub_a_state).await.unwrap();
+
+    // Outbox should be empty now.
+    let queued_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM dm_outbox")
+        .fetch_one(&hub_a_state.db)
+        .await
+        .unwrap();
+    assert_eq!(queued_after, 0, "worker should have delivered and cleared the outbox");
+
+    // Hub B should have stored the message.
+    let bob_token = authenticate_http(&format!("http://127.0.0.1:{dead_port}"), &bob).await;
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{dead_port}/conversations/{}/messages",
+            conv.id
+        ))
+        .bearer_auth(&bob_token)
+        .send()
+        .await
+        .unwrap();
+    let messages: serde_json::Value = resp.json().await.unwrap();
+    let arr = messages.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["content"], "hi from retry land");
 }

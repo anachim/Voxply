@@ -88,6 +88,9 @@ body {
   background: #16213e;
   padding: 16px;
   border-right: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* let children flex shrink for the scroll container */
 }
 
 .sidebar h3 {
@@ -120,6 +123,9 @@ body {
   list-style: none;
   padding: 0;
   margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .channel-item {
@@ -425,7 +431,7 @@ body {
 }
 
 .hub-sidebar {
-  width: 64px;
+  width: 72px;
   background: #0f1729;
   display: flex;
   flex-direction: column;
@@ -434,6 +440,8 @@ body {
   gap: 8px;
   border-right: 1px solid #1a1a2e;
   overflow-y: auto;
+  overflow-x: hidden;
+  flex-shrink: 0;
 }
 
 .hub-icon {
@@ -513,22 +521,58 @@ body {
 
 .hub-unread-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 20px;
-  height: 20px;
+  top: -2px;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
   padding: 0 5px;
-  border-radius: 10px;
+  border-radius: 9px;
   background: #ef4444;
   color: white;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 2px solid #0f1729;
-  box-sizing: content-box;
+  box-sizing: border-box;
   pointer-events: none;
+}
+
+.user-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.user-footer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e0e0e0;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.btn-icon-gear {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: #1e2a47;
+  color: #a3a3a3;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.btn-icon-gear:hover {
+  background: #2a3050;
+  color: #e0e0e0;
 }
 
 .channel-item,

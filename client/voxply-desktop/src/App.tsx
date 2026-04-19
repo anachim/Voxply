@@ -479,9 +479,15 @@ function App() {
     }
   }
 
-  // Auto-connect saved hubs on app start
+  // Auto-connect saved hubs on app start + load our own public key once
   useEffect(() => {
     (async () => {
+      try {
+        const key = await invoke<string>("get_my_public_key");
+        setPublicKey(key);
+      } catch (e) {
+        console.error("Failed to load identity:", e);
+      }
       try {
         const allHubs = await invoke<Hub[]>("auto_connect_saved");
         if (allHubs.length > 0) {
@@ -1008,6 +1014,13 @@ function App() {
               <>
                 <div className="sidebar-header">
                   <h3>Direct Messages</h3>
+                  <button
+                    className="btn-icon"
+                    onClick={openFriends}
+                    title="Friends"
+                  >
+                    👥
+                  </button>
                 </div>
                 <ul className="channel-list">
                   {conversations.map((c) => {
@@ -1048,13 +1061,21 @@ function App() {
                   </button>
                 </div>
               )}
-              <p className="muted">You: {publicKey?.slice(0, 16)}...</p>
-              <div className="user-info-buttons">
-                <button onClick={openFriends} className="btn-small">
-                  Friends
-                </button>
-                <button onClick={openSettings} className="btn-small">
-                  Settings
+              <div className="user-footer">
+                <span
+                  className="user-footer-name"
+                  title={publicKey ?? undefined}
+                >
+                  {users.find((u) => u.public_key === publicKey)?.display_name
+                    || publicKey?.slice(0, 12)
+                    || "You"}
+                </span>
+                <button
+                  onClick={openSettings}
+                  className="btn-icon-gear"
+                  title="Settings"
+                >
+                  ⚙
                 </button>
               </div>
             </div>

@@ -677,24 +677,129 @@ async fn list_users(state: State<'_, AppState>, app: AppHandle) -> Result<Vec<Us
         .await
         .map_err(|e| format!("Failed: {e}"))?;
 
+    // On 401 the session token is stale (hub restarted, kicked, etc). Try to
+    // re-authenticate transparently. Only if re-auth itself fails do we treat
+    // this as a terminal session loss and notify the UI.
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        // Session was revoked server-side (ban or kick). Notify UI.
-        if let Some(active_id) = state.active_hub.lock().unwrap().clone() {
-            let hubs = state.hubs.lock().unwrap();
-            if let Some(session) = hubs.get(&active_id) {
-                let _ = app.emit(
-                    "hub-session-lost",
-                    serde_json::json!({
-                        "hub_id": session.hub_id,
-                        "hub_name": session.hub_name,
-                    }),
-                );
+        let active_id = state.active_hub.lock().unwrap().clone();
+        if let Some(hub_id) = active_id {
+            match reauth_session(&state, &app, &hub_id).await {
+                Ok(new_token) => {
+                    let retry = client
+                        .get(format!("{hub_url}/users"))
+                        .bearer_auth(&new_token)
+                        .send()
+                        .await
+                        .map_err(|e| format!("Failed: {e}"))?;
+                    return retry.json().await.map_err(|e| format!("Invalid: {e}"))
+                }
+                Err(e) => {
+                    // Auth refused — likely banned, or the hub identity changed.
+                    let hubs = state.hubs.lock().unwrap();
+                    if let Some(session) = hubs.get(&hub_id) {
+                        let _ = app.emit(
+                            "hub-session-lost",
+                            serde_json::json!({
+                                "hub_id": session.hub_id,
+                                "hub_name": session.hub_name,
+                            }),
+                        );
+                    }
+                    return Err(format!("Session lost: {e}"));
+                }
             }
         }
         return Err("Session lost".to_string());
     }
 
     resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+/// Re-authenticate the identity against the hub_id's url and, on success,
+/// swap in the fresh session token + restart the WS subscription so real-time
+/// events keep flowing. Returns the new token.
+async fn reauth_session(
+    state: &State<'_, AppState>,
+    app: &AppHandle,
+    hub_id: &str,
+) -> Result<String, String> {
+    let hub_url = {
+        let hubs = state.hubs.lock().unwrap();
+        let s = hubs.get(hub_id).ok_or("Hub not connected")?;
+        s.hub_url.clone()
+    };
+
+    let path = Identity::default_path().map_err(|e| e.to_string())?;
+    let (identity, _) = Identity::load_or_create(&path).map_err(|e| e.to_string())?;
+    let pub_key = identity.public_key_hex();
+
+    let client = reqwest::Client::new();
+
+    let challenge: ChallengeResponse = client
+        .post(format!("{hub_url}/auth/challenge"))
+        .json(&serde_json::json!({ "public_key": pub_key }))
+        .send()
+        .await
+        .map_err(|e| format!("re-challenge: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("re-challenge decode: {e}"))?;
+
+    let challenge_bytes =
+        hex::decode(&challenge.challenge).map_err(|e| format!("bad challenge hex: {e}"))?;
+    let signature = identity.sign(&challenge_bytes);
+
+    let verify_resp = client
+        .post(format!("{hub_url}/auth/verify"))
+        .json(&serde_json::json!({
+            "public_key": pub_key,
+            "challenge": challenge.challenge,
+            "signature": hex::encode(signature.to_bytes()),
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("re-verify: {e}"))?;
+
+    if !verify_resp.status().is_success() {
+        return Err(format!(
+            "re-verify rejected ({}): {}",
+            verify_resp.status(),
+            verify_resp.text().await.unwrap_or_default()
+        ));
+    }
+
+    let verify: VerifyResponse = verify_resp
+        .json()
+        .await
+        .map_err(|e| format!("re-verify decode: {e}"))?;
+    let new_token = verify.token.clone();
+
+    // Restart the WS task with the new token. Abort the stale one first.
+    let (old_task, hub_id_clone) = {
+        let mut hubs = state.hubs.lock().unwrap();
+        let session = hubs.get_mut(hub_id).ok_or("Hub vanished mid-reauth")?;
+        session.token = new_token.clone();
+        let old_task =
+            std::mem::replace(&mut session.ws_task, tokio::spawn(async {}));
+        (old_task, session.hub_id.clone())
+    };
+    old_task.abort();
+
+    let (new_cmd_tx, new_task) =
+        spawn_ws_task(hub_id_clone.clone(), hub_url, new_token.clone(), app.clone())
+            .await
+            .map_err(|e| format!("ws reconnect: {e}"))?;
+
+    {
+        let mut hubs = state.hubs.lock().unwrap();
+        if let Some(session) = hubs.get_mut(hub_id) {
+            session.ws_tx = new_cmd_tx;
+            session.ws_task = new_task;
+        }
+    }
+
+    println!("Re-authenticated with hub {}", &hub_id_clone[..16]);
+    Ok(new_token)
 }
 
 #[tauri::command]
@@ -773,13 +878,20 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
     let host = hub_url
         .trim_start_matches("http://")
         .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("")
         .split(':')
         .next()
         .unwrap_or("127.0.0.1")
         .to_string();
-    let hub_addr: std::net::SocketAddr = format!("{host}:3001")
-        .parse()
-        .map_err(|e| format!("Bad hub address: {e}"))?;
+
+    // Resolve the hostname (works for both "localhost" and raw IPs).
+    let hub_addr = tokio::net::lookup_host(format!("{host}:3001"))
+        .await
+        .map_err(|e| format!("Cannot resolve {host}: {e}"))?
+        .next()
+        .ok_or_else(|| format!("No addresses for {host}"))?;
 
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u16, String>>();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
@@ -984,6 +1096,13 @@ fn get_recovery_phrase() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_my_public_key() -> Result<String, String> {
+    let path = Identity::default_path().map_err(|e| e.to_string())?;
+    let (identity, _) = Identity::load_or_create(&path).map_err(|e| e.to_string())?;
+    Ok(identity.public_key_hex())
+}
+
+#[tauri::command]
 async fn list_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
@@ -1181,6 +1300,7 @@ pub fn run() {
             mic_test_stop,
             update_display_name,
             get_recovery_phrase,
+            get_my_public_key,
             list_friends,
             list_pending_friends,
             send_friend_request,

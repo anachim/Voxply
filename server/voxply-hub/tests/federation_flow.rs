@@ -44,7 +44,12 @@ async fn start_hub(name: &str) -> (String, Arc<AppState>) {
     let url = format!("http://127.0.0.1:{port}");
 
     tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
 
     (url, state)

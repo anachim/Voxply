@@ -1,35 +1,61 @@
 use std::sync::Arc;
 
+use axum::middleware::from_fn;
 use axum::routing::{get, post, put};
 use axum::Router;
 use tower_http::trace::TraceLayer;
 
 use crate::auth;
 use crate::federation;
+use crate::rate_limit::{self, Config, RateLimiter};
 use crate::routes;
 use crate::state::AppState;
 
 pub fn create_router(state: Arc<AppState>) -> Router {
+    let auth_limiter = RateLimiter::new(Config::AUTH);
+    let write_limiter = RateLimiter::new(Config::WRITE);
+
+    // Rate-limited auth sub-router (strict, because anyone can hit these).
+    let auth_routes = Router::new()
+        .route("/auth/challenge", post(auth::handlers::challenge))
+        .route("/auth/verify", post(auth::handlers::verify))
+        .layer(from_fn(move |req, next| {
+            let l = auth_limiter.clone();
+            async move { rate_limit::enforce(l, req, next).await }
+        }));
+
+    // Rate-limited write sub-router (channels, messages, DMs, etc.).
+    let write_routes = Router::new()
+        .route("/channels", post(routes::channels::create_channel))
+        .route("/channels/{channel_id}/messages", post(routes::messages::send_message))
+        .route("/conversations", post(routes::dms::create_conversation))
+        .route(
+            "/conversations/{conversation_id}/messages",
+            post(routes::dms::send_dm),
+        )
+        .layer(from_fn(move |req, next| {
+            let l = write_limiter.clone();
+            async move { rate_limit::enforce(l, req, next).await }
+        }));
+
     Router::new()
         .route("/health", get(routes::health::health))
         .route("/info", get(routes::health::info))
-        .route("/auth/challenge", post(auth::handlers::challenge))
-        .route("/auth/verify", post(auth::handlers::verify))
+        .merge(auth_routes)
+        .merge(write_routes)
         .route("/me", get(routes::me::me).patch(routes::me::update_me))
         .route("/me/roles", get(routes::roles::my_roles))
-        .route("/channels", post(routes::channels::create_channel))
         .route("/channels", get(routes::channels::list_channels))
         .route("/channels/{channel_id}", axum::routing::delete(routes::channels::delete_channel))
         .route("/channels/reorder", post(routes::channels::reorder_channels))
-        .route("/channels/{channel_id}/messages", post(routes::messages::send_message))
         .route("/channels/{channel_id}/messages", get(routes::messages::get_messages))
         .route("/users", get(routes::users::list_users))
         .route("/channels/{channel_id}/members", get(routes::users::channel_members))
         .route("/ws", get(routes::ws::ws_handler))
-        .route("/conversations", get(routes::dms::list_conversations).post(routes::dms::create_conversation))
+        .route("/conversations", get(routes::dms::list_conversations))
         .route(
             "/conversations/{conversation_id}/messages",
-            get(routes::dms::list_dm_messages).post(routes::dms::send_dm),
+            get(routes::dms::list_dm_messages),
         )
         .route("/federation/dm", post(routes::dms::receive_federated_dm))
         .route("/friends", get(routes::friends::list_friends).post(routes::friends::send_friend_request))

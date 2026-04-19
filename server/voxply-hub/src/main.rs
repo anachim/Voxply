@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::net::UdpSocket;
 use tokio::sync::{broadcast, RwLock};
@@ -13,6 +13,22 @@ use voxply_hub::state::AppState;
 use voxply_identity::Identity;
 
 const VOICE_UDP_PORT: u16 = 3001;
+
+/// TLS configuration read from the environment.
+/// Both VOXPLY_TLS_CERT and VOXPLY_TLS_KEY must be set to enable HTTPS.
+struct TlsConfig {
+    cert: PathBuf,
+    key: PathBuf,
+}
+
+fn tls_config_from_env() -> Option<TlsConfig> {
+    let cert = std::env::var("VOXPLY_TLS_CERT").ok()?;
+    let key = std::env::var("VOXPLY_TLS_KEY").ok()?;
+    Some(TlsConfig {
+        cert: PathBuf::from(cert),
+        key: PathBuf::from(key),
+    })
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -86,11 +102,23 @@ async fn main() -> Result<()> {
     });
 
     let app = server::create_router(state);
+    let addr: std::net::SocketAddr = "0.0.0.0:3000".parse()?;
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    tracing::info!("Hub server listening on http://localhost:3000");
-
-    axum::serve(listener, app).await?;
+    if let Some(tls) = tls_config_from_env() {
+        let rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key)
+            .await
+            .with_context(|| format!("Failed to load TLS cert/key from {:?} / {:?}", tls.cert, tls.key))?;
+        tracing::info!("Hub server listening on https://0.0.0.0:3000 (TLS enabled)");
+        axum_server::bind_rustls(addr, rustls_config)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        tracing::info!(
+            "Hub server listening on http://0.0.0.0:3000 (plaintext — set VOXPLY_TLS_CERT and VOXPLY_TLS_KEY to enable TLS)"
+        );
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, app).await?;
+    }
 
     Ok(())
 }

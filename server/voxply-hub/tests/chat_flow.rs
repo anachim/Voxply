@@ -228,3 +228,126 @@ async fn message_to_nonexistent_channel_returns_404() {
         .await;
     resp.assert_status(axum::http::StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn create_category_and_nested_channel() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    // Create a category
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "games", "is_category": true }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let category: ChannelResponse = resp.json();
+    assert!(category.is_category);
+    assert!(category.parent_id.is_none());
+
+    // Create a channel inside the category
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "chess", "parent_id": category.id }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let child: ChannelResponse = resp.json();
+    assert!(!child.is_category);
+    assert_eq!(child.parent_id, Some(category.id.clone()));
+
+    // List shows both
+    let resp = server.get("/channels").authorization_bearer(&token).await;
+    let channels: Vec<ChannelResponse> = resp.json();
+    assert_eq!(channels.len(), 2);
+}
+
+#[tokio::test]
+async fn cannot_nest_under_non_category() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    // Create a regular channel
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "general" }))
+        .await;
+    let channel: ChannelResponse = resp.json();
+
+    // Try to nest under it (should fail — not a category)
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "sub", "parent_id": channel.id }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn delete_channel() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "temp" }))
+        .await;
+    let channel: ChannelResponse = resp.json();
+
+    server
+        .delete(&format!("/channels/{}", channel.id))
+        .authorization_bearer(&token)
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    // Channel gone from list
+    let resp = server.get("/channels").authorization_bearer(&token).await;
+    let channels: Vec<ChannelResponse> = resp.json();
+    assert_eq!(channels.len(), 0);
+}
+
+#[tokio::test]
+async fn cannot_delete_non_empty_category() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    // Category with a child
+    let resp = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "games", "is_category": true }))
+        .await;
+    let category: ChannelResponse = resp.json();
+
+    server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "chess", "parent_id": category.id }))
+        .await;
+
+    // Can't delete category while it has children
+    server
+        .delete(&format!("/channels/{}", category.id))
+        .authorization_bearer(&token)
+        .await
+        .assert_status(axum::http::StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn delete_channel_nonexistent_returns_404() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    server
+        .delete("/channels/nonexistent-id")
+        .authorization_bearer(&token)
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+}

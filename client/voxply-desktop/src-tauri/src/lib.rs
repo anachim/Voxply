@@ -51,6 +51,13 @@ struct ChannelInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct UserInfo {
+    public_key: String,
+    display_name: Option<String>,
+    online: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -279,6 +286,26 @@ async fn delete_channel(
 }
 
 #[tauri::command]
+async fn list_users(state: State<'_, AppState>) -> Result<Vec<UserInfo>, String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/users"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch users: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid users response: {e}"))
+}
+
+#[tauri::command]
 async fn get_messages(
     channel_id: String,
     state: State<'_, AppState>,
@@ -377,6 +404,7 @@ pub fn run() {
             list_channels,
             create_channel,
             delete_channel,
+            list_users,
             get_messages,
             send_message,
             subscribe_channel,

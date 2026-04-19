@@ -28,6 +28,12 @@ interface Message {
   created_at: number;
 }
 
+interface User {
+  public_key: string;
+  display_name: string | null;
+  online: boolean;
+}
+
 function App() {
   // Connection state
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
@@ -50,6 +56,9 @@ function App() {
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null);
+
+  // Hub users
+  const [users, setUsers] = useState<User[]>([]);
 
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -104,6 +113,8 @@ function App() {
       setPublicKey(pubKey);
       const ch = await invoke<Channel[]>("list_channels");
       setChannels(ch);
+      const u = await invoke<User[]>("list_users");
+      setUsers(u);
       setConnected(true);
     } catch (e) {
       setError(String(e));
@@ -112,11 +123,24 @@ function App() {
     }
   }
 
+  // Refresh users every 10 seconds while connected (cheap polling for online status)
+  useEffect(() => {
+    if (!connected) return;
+    const interval = setInterval(async () => {
+      try {
+        const u = await invoke<User[]>("list_users");
+        setUsers(u);
+      } catch {}
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [connected]);
+
   async function handleDisconnect() {
     await invoke("disconnect");
     setConnected(false);
     setChannels([]);
     setMessages([]);
+    setUsers([]);
     setSelectedChannel(null);
     setPublicKey(null);
   }
@@ -354,6 +378,32 @@ function App() {
                 <p>Select a channel to start chatting</p>
               </div>
             )}
+          </div>
+
+          <div className="user-list-sidebar">
+            <h3>Users — {users.length}</h3>
+            <div className="user-section">
+              <p className="user-section-title">Online — {users.filter((u) => u.online).length}</p>
+              <ul className="user-list">
+                {users.filter((u) => u.online).map((u) => (
+                  <li key={u.public_key} className="user-list-item">
+                    <span className="status-dot online" />
+                    <span className="user-name">{u.display_name || u.public_key.slice(0, 16)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="user-section">
+              <p className="user-section-title">Offline — {users.filter((u) => !u.online).length}</p>
+              <ul className="user-list">
+                {users.filter((u) => !u.online).map((u) => (
+                  <li key={u.public_key} className="user-list-item offline">
+                    <span className="status-dot offline" />
+                    <span className="user-name">{u.display_name || u.public_key.slice(0, 16)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
 

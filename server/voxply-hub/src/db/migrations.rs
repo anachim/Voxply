@@ -36,6 +36,14 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Additive migrations for pre-existing databases (ignore errors — columns may already exist)
+    let _ = sqlx::query("ALTER TABLE channels ADD COLUMN parent_id TEXT REFERENCES channels(id)")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE channels ADD COLUMN is_category INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS messages (
             id         TEXT PRIMARY KEY,

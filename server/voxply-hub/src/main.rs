@@ -35,6 +35,20 @@ fn tls_config_from_env() -> Option<TlsConfig> {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    // Subcommand dispatch. `voxply-hub migrate` runs migrations and exits
+    // without starting the HTTP server or UDP listener. Useful for CI,
+    // one-off schema upgrades, or running against a prod DB over SSH.
+    let subcommand = std::env::args().nth(1);
+    if subcommand.as_deref() == Some("migrate") {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite:hub.db?mode=rwc")
+            .await?;
+        db::migrations::run(&db).await?;
+        println!("Migrations applied to hub.db");
+        return Ok(());
+    }
+
     let (hub_identity, is_new) = Identity::load_or_create(Path::new("hub_identity.json"))?;
     if is_new {
         tracing::info!("Generated new hub identity: {}", hub_identity);

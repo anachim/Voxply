@@ -312,6 +312,26 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Persisted DM messages (both local and federated deliveries land here)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS dm_messages (
+            id              TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            sender          TEXT NOT NULL,
+            content         TEXT NOT NULL,
+            signature       TEXT,
+            created_at      INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Per-member delivery hub for cross-hub DM routing.
+    // Nullable: NULL means the member lives on this hub.
+    let _ = sqlx::query("ALTER TABLE conversation_members ADD COLUMN hub_url TEXT")
+        .execute(pool)
+        .await;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

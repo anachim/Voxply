@@ -110,6 +110,16 @@ struct ConversationInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct DmMessageInfo {
+    id: String,
+    conversation_id: String,
+    sender: String,
+    sender_name: Option<String>,
+    content: String,
+    created_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -892,13 +902,20 @@ async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<Conversati
 }
 
 #[tauri::command]
-async fn create_conversation(members: Vec<String>, state: State<'_, AppState>) -> Result<ConversationInfo, String> {
+async fn create_conversation(
+    members: Vec<String>,
+    member_hubs: Option<HashMap<String, String>>,
+    state: State<'_, AppState>,
+) -> Result<ConversationInfo, String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{hub_url}/conversations"))
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "members": members }))
+        .json(&serde_json::json!({
+            "members": members,
+            "member_hubs": member_hubs.unwrap_or_default(),
+        }))
         .send()
         .await
         .map_err(|e| format!("Failed: {e}"))?;
@@ -906,6 +923,24 @@ async fn create_conversation(members: Vec<String>, state: State<'_, AppState>) -
         return Err(resp.text().await.unwrap_or_default());
     }
     resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn get_dm_messages(
+    conversation_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<DmMessageInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/conversations/{conversation_id}/messages"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]
@@ -972,6 +1007,7 @@ pub fn run() {
             remove_friend,
             list_conversations,
             create_conversation,
+            get_dm_messages,
             send_dm,
             disconnect_all,
         ])

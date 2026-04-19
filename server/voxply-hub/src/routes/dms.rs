@@ -39,8 +39,8 @@ pub async fn create_conversation(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    // Add the creator
-    sqlx::query("INSERT INTO conversation_members (conversation_id, public_key, joined_at) VALUES (?, ?, ?)")
+    // Add the creator (always local)
+    sqlx::query("INSERT INTO conversation_members (conversation_id, public_key, joined_at, hub_url) VALUES (?, ?, ?, NULL)")
         .bind(&id)
         .bind(&user.public_key)
         .bind(now)
@@ -48,12 +48,17 @@ pub async fn create_conversation(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    // Add other members
+    // Add other members with their (optional) delivery hub URL.
+    // Remote members may not yet exist in our users table — insert a stub so
+    // the FK holds. We only track public_key for these; they never sign in here.
     for member_key in &req.members {
-        sqlx::query("INSERT INTO conversation_members (conversation_id, public_key, joined_at) VALUES (?, ?, ?)")
+        let hub_url = req.member_hubs.get(member_key).cloned();
+        ensure_user_stub(&state.db, member_key, now).await?;
+        sqlx::query("INSERT INTO conversation_members (conversation_id, public_key, joined_at, hub_url) VALUES (?, ?, ?, ?)")
             .bind(&id)
             .bind(member_key)
             .bind(now)
+            .bind(&hub_url)
             .execute(&state.db)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
@@ -115,8 +120,106 @@ pub async fn send_dm(
     user: AuthUser,
     Path(conversation_id): Path<String>,
     Json(req): Json<SendDmRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    // Verify user is a member of this conversation
+) -> Result<(StatusCode, Json<DmMessageResponse>), (StatusCode, String)> {
+    let members = load_members(&state, &conversation_id).await?;
+    if !members.iter().any(|m| m.public_key == user.public_key) {
+        return Err((StatusCode::FORBIDDEN, "Not a member of this conversation".to_string()));
+    }
+
+    let conv_type: String = sqlx::query_scalar("SELECT conv_type FROM conversations WHERE id = ?")
+        .bind(&conversation_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+        .ok_or((StatusCode::NOT_FOUND, "Conversation not found".to_string()))?;
+
+    let message_id = Uuid::new_v4().to_string();
+    let now = crate::auth::handlers::unix_timestamp();
+
+    // Persist locally on the sender's hub so both sides eventually have the message.
+    sqlx::query(
+        "INSERT INTO dm_messages (id, conversation_id, sender, content, signature, created_at)
+         VALUES (?, ?, ?, ?, NULL, ?)",
+    )
+    .bind(&message_id)
+    .bind(&conversation_id)
+    .bind(&user.public_key)
+    .bind(&req.content)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    // Broadcast to local WS subscribers (other members on this same hub).
+    let sender_name: Option<String> = sqlx::query_scalar(
+        "SELECT display_name FROM users WHERE public_key = ?",
+    )
+    .bind(&user.public_key)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .flatten();
+
+    let _ = state.dm_tx.send(DmEvent {
+        conversation_id: conversation_id.clone(),
+        sender: user.public_key.clone(),
+        sender_name: sender_name.clone(),
+        content: req.content.clone(),
+        timestamp: now,
+    });
+
+    // Federate to each remote member's delivery hub.
+    let member_keys: Vec<String> = members.iter().map(|m| m.public_key.clone()).collect();
+    let mut delivery_errors: Vec<String> = Vec::new();
+    for m in &members {
+        if m.public_key == user.public_key {
+            continue;
+        }
+        let Some(hub_url) = &m.hub_url else { continue };
+
+        let envelope = FederatedDmRequest {
+            message_id: message_id.clone(),
+            conversation_id: conversation_id.clone(),
+            conv_type: conv_type.clone(),
+            sender: user.public_key.clone(),
+            members: member_keys.clone(),
+            content: req.content.clone(),
+            signature: None,
+            created_at: now,
+        };
+
+        if let Err(e) = deliver_federated_dm(&state, hub_url, &envelope).await {
+            tracing::warn!("DM delivery to {hub_url} failed: {e}");
+            delivery_errors.push(format!("{hub_url}: {e}"));
+        }
+    }
+
+    if !delivery_errors.is_empty() {
+        tracing::warn!(
+            "DM {} partially delivered. Failures: {}",
+            &message_id[..8],
+            delivery_errors.join("; ")
+        );
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(DmMessageResponse {
+            id: message_id,
+            conversation_id,
+            sender: user.public_key,
+            sender_name,
+            content: req.content,
+            created_at: now,
+        }),
+    ))
+}
+
+pub async fn list_dm_messages(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(conversation_id): Path<String>,
+) -> Result<Json<Vec<DmMessageResponse>>, (StatusCode, String)> {
     let is_member: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ? AND public_key = ?",
     )
@@ -130,28 +233,238 @@ pub async fn send_dm(
         return Err((StatusCode::FORBIDDEN, "Not a member of this conversation".to_string()));
     }
 
-    // Get sender display name
+    let rows = sqlx::query_as::<_, DmMessageRow>(
+        "SELECT m.id, m.conversation_id, m.sender, u.display_name as sender_name,
+                m.content, m.created_at
+         FROM dm_messages m
+         LEFT JOIN users u ON u.public_key = m.sender
+         WHERE m.conversation_id = ?
+         ORDER BY m.created_at ASC",
+    )
+    .bind(&conversation_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| DmMessageResponse {
+                id: r.id,
+                conversation_id: r.conversation_id,
+                sender: r.sender,
+                sender_name: r.sender_name,
+                content: r.content,
+                created_at: r.created_at,
+            })
+            .collect(),
+    ))
+}
+
+/// Hub-to-hub DM delivery endpoint. The caller is an authenticated peer hub.
+pub async fn receive_federated_dm(
+    State(state): State<Arc<AppState>>,
+    _peer: AuthUser,
+    Json(req): Json<FederatedDmRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let now = crate::auth::handlers::unix_timestamp();
+
+    // Idempotent: if we've already stored this message, succeed without double-broadcast.
+    let exists: Option<String> = sqlx::query_scalar("SELECT id FROM dm_messages WHERE id = ?")
+        .bind(&req.message_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    if exists.is_some() {
+        return Ok(StatusCode::OK);
+    }
+
+    // Auto-create the conversation on this hub if this is the first time we've seen it.
+    let conv_exists: Option<String> = sqlx::query_scalar("SELECT id FROM conversations WHERE id = ?")
+        .bind(&req.conversation_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if conv_exists.is_none() {
+        sqlx::query("INSERT INTO conversations (id, conv_type, created_at) VALUES (?, ?, ?)")
+            .bind(&req.conversation_id)
+            .bind(&req.conv_type)
+            .bind(req.created_at)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+        for member in &req.members {
+            ensure_user_stub(&state.db, member, req.created_at).await?;
+            sqlx::query(
+                "INSERT OR IGNORE INTO conversation_members
+                 (conversation_id, public_key, joined_at, hub_url) VALUES (?, ?, ?, NULL)",
+            )
+            .bind(&req.conversation_id)
+            .bind(member)
+            .bind(req.created_at)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+        }
+    }
+
+    // Make sure the sender has a user row too, since the message FK references it.
+    ensure_user_stub(&state.db, &req.sender, req.created_at).await?;
+
+    // Store the message.
+    sqlx::query(
+        "INSERT INTO dm_messages (id, conversation_id, sender, content, signature, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&req.message_id)
+    .bind(&req.conversation_id)
+    .bind(&req.sender)
+    .bind(&req.content)
+    .bind(&req.signature)
+    .bind(req.created_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    // Broadcast to any local members connected via WS.
     let sender_name: Option<String> = sqlx::query_scalar(
         "SELECT display_name FROM users WHERE public_key = ?",
     )
-    .bind(&user.public_key)
+    .bind(&req.sender)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .ok()
     .flatten();
 
-    let now = crate::auth::handlers::unix_timestamp();
-
-    // Broadcast via dm_tx — NOT stored in DB
     let _ = state.dm_tx.send(DmEvent {
-        conversation_id,
-        sender: user.public_key,
+        conversation_id: req.conversation_id,
+        sender: req.sender,
         sender_name,
         content: req.content,
-        timestamp: now,
+        timestamp: req.created_at.max(now),
     });
 
     Ok(StatusCode::OK)
+}
+
+// --- Helpers ---
+
+/// Ensure a user row exists for `public_key` so FKs into the users table hold.
+/// For remote users we only know their key; the stub is created with no display name.
+async fn ensure_user_stub(
+    db: &sqlx::SqlitePool,
+    public_key: &str,
+    now: i64,
+) -> Result<(), (StatusCode, String)> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO users (public_key, display_name, first_seen_at, last_seen_at)
+         VALUES (?, NULL, ?, ?)",
+    )
+    .bind(public_key)
+    .bind(now)
+    .bind(now)
+    .execute(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    Ok(())
+}
+
+async fn deliver_federated_dm(
+    state: &AppState,
+    hub_url: &str,
+    envelope: &FederatedDmRequest,
+) -> Result<(), String> {
+    // Ensure we have a session token for this remote hub — authenticate once if not cached.
+    let token = {
+        // Look up peer by URL to find its public key, then check the token cache.
+        let peer_key: Option<String> =
+            sqlx::query_scalar("SELECT public_key FROM peers WHERE url = ?")
+                .bind(hub_url)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| format!("peer lookup: {e}"))?;
+
+        let cached = if let Some(ref key) = peer_key {
+            state.peer_tokens.read().await.get(key).cloned()
+        } else {
+            None
+        };
+
+        if let Some(t) = cached {
+            t
+        } else {
+            // Authenticate on-demand.
+            let fresh = state
+                .federation_client
+                .authenticate(hub_url, &state.hub_identity)
+                .await
+                .map_err(|e| format!("authenticate: {e}"))?;
+
+            // Record the peer if brand-new so future lookups find it.
+            let info = state
+                .federation_client
+                .get_info(hub_url)
+                .await
+                .map_err(|e| format!("get_info: {e}"))?;
+            let now = crate::auth::handlers::unix_timestamp();
+            let _ = sqlx::query(
+                "INSERT INTO peers (public_key, name, url, added_at) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(public_key) DO UPDATE SET name = ?, url = ?",
+            )
+            .bind(&info.public_key)
+            .bind(&info.name)
+            .bind(hub_url)
+            .bind(now)
+            .bind(&info.name)
+            .bind(hub_url)
+            .execute(&state.db)
+            .await;
+            state
+                .peer_tokens
+                .write()
+                .await
+                .insert(info.public_key, fresh.clone());
+            fresh
+        }
+    };
+
+    let resp = state
+        .federation_client
+        .post_federated_dm(hub_url, &token, envelope)
+        .await
+        .map_err(|e| format!("deliver: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("remote hub returned {}", resp.status()));
+    }
+    Ok(())
+}
+
+struct ConvMember {
+    public_key: String,
+    hub_url: Option<String>,
+}
+
+async fn load_members(
+    state: &AppState,
+    conversation_id: &str,
+) -> Result<Vec<ConvMember>, (StatusCode, String)> {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT public_key, hub_url FROM conversation_members WHERE conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(pk, url)| ConvMember {
+            public_key: pk,
+            hub_url: url,
+        })
+        .collect())
 }
 
 async fn find_existing_dm(
@@ -206,5 +519,15 @@ async fn find_existing_dm(
 struct ConvRow {
     id: String,
     conv_type: String,
+    created_at: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct DmMessageRow {
+    id: String,
+    conversation_id: String,
+    sender: String,
+    sender_name: Option<String>,
+    content: String,
     created_at: i64,
 }

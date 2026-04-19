@@ -175,7 +175,7 @@ async fn cannot_send_to_conversation_youre_not_in() {
         .authorization_bearer(&alice_token)
         .json(&json!({ "content": "hi bob" }))
         .await
-        .assert_status_ok();
+        .assert_status(axum::http::StatusCode::CREATED);
 
     // Bob can send
     server
@@ -183,7 +183,7 @@ async fn cannot_send_to_conversation_youre_not_in() {
         .authorization_bearer(&bob_token)
         .json(&json!({ "content": "hi alice" }))
         .await
-        .assert_status_ok();
+        .assert_status(axum::http::StatusCode::CREATED);
 
     // Charlie cannot
     server
@@ -206,4 +206,132 @@ async fn cannot_create_empty_conversation() {
         .json(&json!({ "members": [] }))
         .await;
     resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+// --- Cross-hub federated DM tests ---
+
+async fn start_real_hub(name: &str) -> String {
+    let db = SqlitePoolOptions::new()
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    db::migrations::run(&db).await.unwrap();
+    let (chat_tx, _) = broadcast::channel(256);
+    let (voice_event_tx, _) = broadcast::channel(16);
+
+    let state = Arc::new(AppState {
+        hub_name: name.to_string(),
+        hub_identity: Identity::generate(),
+        db,
+        pending_challenges: RwLock::new(HashMap::new()),
+        chat_tx,
+        federation_client: FederationClient::new(),
+        peer_tokens: RwLock::new(HashMap::new()),
+        voice_channels: RwLock::new(HashMap::new()),
+        voice_udp_port: 0,
+        voice_event_tx,
+        dm_tx: broadcast::channel(16).0,
+        online_users: RwLock::new(std::collections::HashSet::new()),
+    });
+    let app = server::create_router(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("http://127.0.0.1:{port}");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    url
+}
+
+async fn authenticate_http(hub_url: &str, identity: &Identity) -> String {
+    let client = reqwest::Client::new();
+    let pub_key = identity.public_key_hex();
+
+    let challenge: ChallengeResponse = client
+        .post(format!("{hub_url}/auth/challenge"))
+        .json(&json!({ "public_key": pub_key }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let challenge_bytes = hex::decode(&challenge.challenge).unwrap();
+    let signature = identity.sign(&challenge_bytes);
+
+    let verify: VerifyResponse = client
+        .post(format!("{hub_url}/auth/verify"))
+        .json(&json!({
+            "public_key": pub_key,
+            "challenge": challenge.challenge,
+            "signature": hex::encode(signature.to_bytes()),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    verify.token
+}
+
+#[tokio::test]
+async fn dm_delivered_across_hubs() {
+    let hub_a = start_real_hub("hub-a").await;
+    let hub_b = start_real_hub("hub-b").await;
+    let client = reqwest::Client::new();
+
+    let alice = Identity::generate();
+    let bob = Identity::generate();
+    let alice_token = authenticate_http(&hub_a, &alice).await;
+    let bob_token = authenticate_http(&hub_b, &bob).await;
+
+    // Alice creates a conversation on Hub A that includes Bob, routing to Hub B.
+    let mut member_hubs = HashMap::new();
+    member_hubs.insert(bob.public_key_hex(), hub_b.clone());
+    let resp = client
+        .post(format!("{hub_a}/conversations"))
+        .bearer_auth(&alice_token)
+        .json(&json!({
+            "members": [bob.public_key_hex()],
+            "member_hubs": member_hubs,
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status();
+    let body_text = resp.text().await.unwrap_or_default();
+    assert!(
+        status.is_success(),
+        "Create conversation failed: {status} {body_text}",
+    );
+    let conv: ConversationResponse = serde_json::from_str(&body_text).unwrap();
+
+    // Alice sends a DM. Hub A persists it locally and federates to Hub B.
+    let resp = client
+        .post(format!("{hub_a}/conversations/{}/messages", conv.id))
+        .bearer_auth(&alice_token)
+        .json(&json!({ "content": "hi bob, from across hubs" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), reqwest::StatusCode::CREATED);
+
+    // Give the async federation request time to land.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    // Bob reads the thread from Hub B — message should have been federated there.
+    let resp = client
+        .get(format!("{hub_b}/conversations/{}/messages", conv.id))
+        .bearer_auth(&bob_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "Hub B list endpoint failed: {}", resp.status());
+    let messages: serde_json::Value = resp.json().await.unwrap();
+    let arr = messages.as_array().expect("expected an array");
+    assert_eq!(arr.len(), 1, "Bob should see the federated DM");
+    assert_eq!(arr[0]["content"], "hi bob, from across hubs");
+    assert_eq!(arr[0]["sender"], alice.public_key_hex());
 }

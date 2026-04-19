@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 
 use crate::auth::models::{ChallengeResponse, VerifyResponse};
 use crate::routes::chat_models::{ChannelResponse, MessageResponse};
+use crate::routes::dm_models::FederatedDmRequest;
 use crate::routes::health::InfoResponse;
 use voxply_identity::Identity;
 
@@ -109,5 +110,20 @@ impl FederationClient {
             .json()
             .await
             .context("Invalid messages response")
+    }
+
+    pub async fn post_federated_dm(
+        &self,
+        base_url: &str,
+        token: &str,
+        envelope: &FederatedDmRequest,
+    ) -> Result<reqwest::Response> {
+        self.http
+            .post(format!("{base_url}/federation/dm"))
+            .bearer_auth(token)
+            .json(envelope)
+            .send()
+            .await
+            .context("Failed to deliver DM to peer")
     }
 }

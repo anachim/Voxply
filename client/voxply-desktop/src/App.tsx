@@ -81,6 +81,15 @@ interface DmMessage {
   timestamp: number;
 }
 
+interface DmMessageFull {
+  id: string;
+  conversation_id: string;
+  sender: string;
+  sender_name: string | null;
+  content: string;
+  created_at: number;
+}
+
 function SortableChannelItem({
   channel,
   selected,
@@ -551,6 +560,26 @@ function App() {
     }
   }
 
+  async function selectConversation(conv: Conversation) {
+    setSelectedConversation(conv);
+    try {
+      const history = await invoke<DmMessageFull[]>("get_dm_messages", {
+        conversationId: conv.id,
+      });
+      setDmMessages((prev) => ({
+        ...prev,
+        [conv.id]: history.map((m) => ({
+          sender: m.sender,
+          sender_name: m.sender_name,
+          content: m.content,
+          timestamp: m.created_at,
+        })),
+      }));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function startDmWith(targetKey: string) {
     try {
       const conv = await invoke<Conversation>("create_conversation", {
@@ -561,7 +590,7 @@ function App() {
         if (prev.some((c) => c.id === conv.id)) return prev;
         return [...prev, conv];
       });
-      setSelectedConversation(conv);
+      await selectConversation(conv);
       setView("dms");
       setShowFriends(false);
     } catch (e) {
@@ -900,7 +929,7 @@ function App() {
                         className={`channel-item ${
                           selectedConversation?.id === c.id ? "selected" : ""
                         }`}
-                        onClick={() => setSelectedConversation(c)}
+                        onClick={() => selectConversation(c)}
                       >
                         @ {label || "(empty)"}
                       </li>

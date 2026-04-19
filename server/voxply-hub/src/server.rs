@@ -27,7 +27,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/channels/{channel_id}/members", get(routes::users::channel_members))
         .route("/ws", get(routes::ws::ws_handler))
         .route("/conversations", get(routes::dms::list_conversations).post(routes::dms::create_conversation))
-        .route("/conversations/{conversation_id}/messages", post(routes::dms::send_dm))
+        .route(
+            "/conversations/{conversation_id}/messages",
+            get(routes::dms::list_dm_messages).post(routes::dms::send_dm),
+        )
+        .route("/federation/dm", post(routes::dms::receive_federated_dm))
         .route("/friends", get(routes::friends::list_friends).post(routes::friends::send_friend_request))
         .route("/friends/pending", get(routes::friends::list_pending_requests))
         .route("/friends/{public_key}/accept", post(routes::friends::accept_friend_request))

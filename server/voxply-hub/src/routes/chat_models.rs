@@ -65,6 +65,8 @@ pub enum WsClientMessage {
     VoiceJoin { channel_id: String, udp_port: u16 },
     #[serde(rename = "voice_leave")]
     VoiceLeave { channel_id: String },
+    #[serde(rename = "voice_speaking")]
+    VoiceSpeaking { channel_id: String, speaking: bool },
 }
 
 #[derive(Serialize, Clone)]
@@ -90,6 +92,12 @@ pub enum WsServerMessage {
     VoiceParticipantLeft {
         channel_id: String,
         public_key: String,
+    },
+    #[serde(rename = "voice_participant_speaking")]
+    VoiceParticipantSpeaking {
+        channel_id: String,
+        public_key: String,
+        speaking: bool,
     },
     #[serde(rename = "dm")]
     DirectMessage {

@@ -227,6 +227,18 @@ body {
   border-radius: 4px;
   font-size: 12px;
   color: #10b981;
+  transition: box-shadow 0.1s, background 0.1s;
+}
+
+.voice-participant.speaking {
+  background: #0f3d2e;
+  box-shadow: 0 0 0 2px #10b981;
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.9); }
+  50%      { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.4); }
 }
 
 .voice-status {

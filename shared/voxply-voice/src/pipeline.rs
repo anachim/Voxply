@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use ringbuf::HeapRb;
 use ringbuf::traits::{Consumer, Producer, Split};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::capture::AudioCapture;
@@ -14,11 +15,22 @@ use crate::playback::AudioPlayback;
 use crate::protocol::{VoicePacket, RING_BUFFER_SIZE};
 use crate::transport::VoiceSocket;
 
+/// Threshold for the RMS voice activity detector. Values in [0, 1].
+/// 0.02 picks up normal speech at typical mic gain while ignoring fan/room noise.
+const VAD_RMS_THRESHOLD: f32 = 0.02;
+
+/// How long we must stay below threshold before declaring "stopped speaking".
+/// Prevents flickering on consonant gaps.
+const VAD_RELEASE_MS: u64 = 250;
+
 pub struct AudioPipeline {
     _capture: AudioCapture,
     _playback: AudioPlayback,
     tasks: Vec<JoinHandle<()>>,
     pub local_udp_port: u16,
+    /// Receives `true` when voice activity starts, `false` when it ends.
+    /// Available on pipelines started with `start_p2p`.
+    pub speaking_rx: Option<mpsc::UnboundedReceiver<bool>>,
 }
 
 fn resolve_opus_rate(device_rate: u32) -> u32 {
@@ -84,6 +96,7 @@ impl AudioPipeline {
             _playback: playback,
             tasks: vec![task],
             local_udp_port: 0,
+            speaking_rx: None,
         })
     }
 
@@ -107,7 +120,9 @@ impl AudioPipeline {
         socket.set_remote(remote_addr);
         let socket = Arc::new(socket);
 
-        // Send task: capture → encode → UDP
+        let (speaking_tx, speaking_rx) = mpsc::unbounded_channel::<bool>();
+
+        // Send task: capture → encode → UDP, plus RMS-based VAD
         let send_socket = socket.clone();
         let send_task = tokio::spawn(async move {
             let mut encoder = VoiceEncoder::new(opus_rate).expect("Failed to create encoder");
@@ -117,15 +132,45 @@ impl AudioPipeline {
             let mut sequence: u16 = 0;
             let mut timestamp: u32 = 0;
 
+            let mut is_speaking = false;
+            let mut last_active_at: Option<std::time::Instant> = None;
+
             loop {
                 interval.tick().await;
 
                 let count = capture_cons.pop_slice(&mut read_buf);
                 if count == 0 {
+                    // Still fire a release even without new audio.
+                    if is_speaking {
+                        if let Some(last) = last_active_at {
+                            if last.elapsed() > Duration::from_millis(VAD_RELEASE_MS) {
+                                is_speaking = false;
+                                let _ = speaking_tx.send(false);
+                            }
+                        }
+                    }
                     continue;
                 }
 
                 let denoised = denoiser.process(&read_buf[..count]);
+
+                // Voice activity detection on post-denoise samples.
+                let rms = rms_of(&denoised);
+                if rms > VAD_RMS_THRESHOLD {
+                    last_active_at = Some(std::time::Instant::now());
+                    if !is_speaking {
+                        is_speaking = true;
+                        let _ = speaking_tx.send(true);
+                    }
+                } else if is_speaking {
+                    if let Some(last) = last_active_at {
+                        if last.elapsed() > Duration::from_millis(VAD_RELEASE_MS) {
+                            is_speaking = false;
+                            let _ = speaking_tx.send(false);
+                        }
+                    }
+                }
+
                 let packets = encoder.encode(&denoised);
 
                 for opus_data in packets {
@@ -174,6 +219,7 @@ impl AudioPipeline {
             _playback: playback,
             tasks: vec![send_task, recv_task],
             local_udp_port: actual_local_port,
+            speaking_rx: Some(speaking_rx),
         })
     }
 
@@ -182,4 +228,12 @@ impl AudioPipeline {
             task.abort();
         }
     }
+}
+
+fn rms_of(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
 }

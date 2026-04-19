@@ -206,6 +206,7 @@ function App() {
   // Voice
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
+  const [speakingKeys, setSpeakingKeys] = useState<Set<string>>(new Set());
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
@@ -318,6 +319,27 @@ function App() {
             setVoiceParticipants((prev) =>
               prev.filter((p) => p.public_key !== event.payload.public_key)
             );
+            setSpeakingKeys((prev) => {
+              if (!prev.has(event.payload.public_key)) return prev;
+              const next = new Set(prev);
+              next.delete(event.payload.public_key);
+              return next;
+            });
+          }
+        )
+      );
+
+      unlistens.push(
+        await listen<{ hub_id: string; channel_id: string; public_key: string; speaking: boolean }>(
+          "voice-participant-speaking",
+          (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
+            setSpeakingKeys((prev) => {
+              const next = new Set(prev);
+              if (event.payload.speaking) next.add(event.payload.public_key);
+              else next.delete(event.payload.public_key);
+              return next;
+            });
           }
         )
       );
@@ -1035,11 +1057,17 @@ function App() {
                 {voiceChannelId === selectedChannel.id && voiceParticipants.length > 0 && (
                   <div className="voice-participants">
                     <span className="muted">In voice: </span>
-                    {voiceParticipants.map((p) => (
-                      <span key={p.public_key} className="voice-participant">
-                        🎙️ {p.display_name || p.public_key.slice(0, 16)}
-                      </span>
-                    ))}
+                    {voiceParticipants.map((p) => {
+                      const isSpeaking = speakingKeys.has(p.public_key);
+                      return (
+                        <span
+                          key={p.public_key}
+                          className={`voice-participant ${isSpeaking ? "speaking" : ""}`}
+                        >
+                          🎙️ {p.display_name || p.public_key.slice(0, 16)}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 <div className="messages">

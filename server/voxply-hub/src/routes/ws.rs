@@ -40,6 +40,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
     let (mut ws_tx, mut ws_rx) = socket.split();
     let mut chat_rx = state.chat_tx.subscribe();
     let mut dm_rx = state.dm_tx.subscribe();
+    let mut voice_rx = state.voice_event_tx.subscribe();
     let mut subscribed: HashSet<String> = HashSet::new();
     let mut subscribe_all = false;
     let mut voice_channel: Option<String> = None;
@@ -144,11 +145,43 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                                 voice_channel = None;
                                 tracing::info!("Voice leave: {}", &public_key[..16]);
                             }
+                            Ok(WsClientMessage::VoiceSpeaking { channel_id, speaking }) => {
+                                // Broadcast to other participants of this voice channel
+                                let _ = state.voice_event_tx.send((
+                                    channel_id.clone(),
+                                    WsServerMessage::VoiceParticipantSpeaking {
+                                        channel_id,
+                                        public_key: public_key.clone(),
+                                        speaking,
+                                    },
+                                ));
+                            }
                             Err(_) => {}
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
+                }
+            }
+
+            // Voice event relay — only forward to clients currently in that voice channel
+            voice_result = voice_rx.recv() => {
+                if let Ok((channel_id, msg)) = voice_result {
+                    if voice_channel.as_deref() == Some(channel_id.as_str()) {
+                        // Don't echo our own speaking state back to ourselves
+                        let is_self = match &msg {
+                            WsServerMessage::VoiceParticipantSpeaking { public_key: pk, .. } => pk == &public_key,
+                            WsServerMessage::VoiceParticipantJoined { participant, .. } => participant.public_key == public_key,
+                            WsServerMessage::VoiceParticipantLeft { public_key: pk, .. } => pk == &public_key,
+                            _ => false,
+                        };
+                        if !is_self {
+                            let json = serde_json::to_string(&msg).unwrap();
+                            if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
                 }
             }
 

@@ -35,6 +35,7 @@ enum WsCommand {
     SubscribeAll,
     VoiceJoin { channel_id: String, udp_port: u16 },
     VoiceLeave { channel_id: String },
+    VoiceSpeaking { channel_id: String, speaking: bool },
 }
 
 struct VoiceSession {
@@ -152,6 +153,12 @@ enum WsServerMessage {
     VoiceParticipantLeft {
         channel_id: String,
         public_key: String,
+    },
+    #[serde(rename = "voice_participant_speaking")]
+    VoiceParticipantSpeaking {
+        channel_id: String,
+        public_key: String,
+        speaking: bool,
     },
     #[serde(rename = "dm")]
     DirectMessage {
@@ -475,6 +482,14 @@ async fn spawn_ws_task(
                                             "public_key": public_key,
                                         }));
                                     }
+                                    WsServerMessage::VoiceParticipantSpeaking { channel_id, public_key, speaking } => {
+                                        let _ = app.emit("voice-participant-speaking", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "channel_id": channel_id,
+                                            "public_key": public_key,
+                                            "speaking": speaking,
+                                        }));
+                                    }
                                     WsServerMessage::DirectMessage { conversation_id, sender, sender_name, content, timestamp } => {
                                         let _ = app.emit("dm", serde_json::json!({
                                             "hub_id": hub_id_for_task,
@@ -513,6 +528,13 @@ async fn spawn_ws_task(
                         }
                         WsCommand::VoiceLeave { channel_id } => {
                             serde_json::json!({ "type": "voice_leave", "channel_id": channel_id })
+                        }
+                        WsCommand::VoiceSpeaking { channel_id, speaking } => {
+                            serde_json::json!({
+                                "type": "voice_speaking",
+                                "channel_id": channel_id,
+                                "speaking": speaking,
+                            })
                         }
                     };
                     if ws_tx.send(WsMessage::Text(json.to_string().into())).await.is_err() {
@@ -722,6 +744,9 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u16, String>>();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
 
+    let speaking_ws = ws_tx.clone();
+    let speaking_channel_id = channel_id.clone();
+
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(r) => r,
@@ -732,7 +757,7 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
         };
 
         rt.block_on(async move {
-            let pipeline = match voxply_voice::AudioPipeline::start_p2p(0, hub_addr).await {
+            let mut pipeline = match voxply_voice::AudioPipeline::start_p2p(0, hub_addr).await {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = ready_tx.send(Err(format!("Audio: {e}")));
@@ -743,7 +768,20 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
             let local_port = pipeline.local_udp_port;
             let _ = ready_tx.send(Ok(local_port));
 
+            // Forward speaking state from the VAD to the hub WS.
+            let mut speaking_rx = pipeline.speaking_rx.take();
+            let speaking_task = tokio::spawn(async move {
+                let Some(mut rx) = speaking_rx.take() else { return };
+                while let Some(speaking) = rx.recv().await {
+                    let _ = speaking_ws.send(WsCommand::VoiceSpeaking {
+                        channel_id: speaking_channel_id.clone(),
+                        speaking,
+                    });
+                }
+            });
+
             let _ = tokio::task::spawn_blocking(move || stop_rx.recv()).await;
+            speaking_task.abort();
             pipeline.stop().await;
         });
     });

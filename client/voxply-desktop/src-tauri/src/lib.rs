@@ -45,6 +45,8 @@ struct ChannelInfo {
     id: String,
     name: String,
     created_by: String,
+    parent_id: Option<String>,
+    is_category: bool,
     created_at: i64,
 }
 
@@ -217,6 +219,8 @@ async fn list_channels(state: State<'_, AppState>) -> Result<Vec<ChannelInfo>, S
 #[tauri::command]
 async fn create_channel(
     name: String,
+    parent_id: Option<String>,
+    is_category: bool,
     state: State<'_, AppState>,
 ) -> Result<ChannelInfo, String> {
     let (hub_url, token) = {
@@ -229,7 +233,11 @@ async fn create_channel(
     let resp = client
         .post(format!("{hub_url}/channels"))
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "name": name }))
+        .json(&serde_json::json!({
+            "name": name,
+            "parent_id": parent_id,
+            "is_category": is_category,
+        }))
         .send()
         .await
         .map_err(|e| format!("Failed to create channel: {e}"))?;
@@ -241,6 +249,33 @@ async fn create_channel(
     }
 
     serde_json::from_str(&body).map_err(|e| format!("Invalid response: {e}"))
+}
+
+#[tauri::command]
+async fn delete_channel(
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/channels/{channel_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to delete channel: {e}"))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Hub rejected: {body}"));
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -341,6 +376,7 @@ pub fn run() {
             connect,
             list_channels,
             create_channel,
+            delete_channel,
             get_messages,
             send_message,
             subscribe_channel,

@@ -25,10 +25,12 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS channels (
-            id         TEXT PRIMARY KEY,
-            name       TEXT NOT NULL UNIQUE,
-            created_by TEXT NOT NULL REFERENCES users(public_key),
-            created_at INTEGER NOT NULL
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            created_by  TEXT NOT NULL REFERENCES users(public_key),
+            parent_id   TEXT REFERENCES channels(id),
+            is_category INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL
         )",
     )
     .execute(pool)

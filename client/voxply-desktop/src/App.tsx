@@ -14,6 +14,8 @@ interface Channel {
   id: string;
   name: string;
   created_by: string;
+  parent_id: string | null;
+  is_category: boolean;
   created_at: number;
 }
 
@@ -43,6 +45,11 @@ function App() {
   // Create channel dialog
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelIsCategory, setNewChannelIsCategory] = useState(false);
+  const [newChannelParentId, setNewChannelParentId] = useState<string | null>(null);
+
+  // Context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null);
 
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -159,18 +166,65 @@ function App() {
     }
   }
 
+  // Build a nested tree: categories contain their child channels.
+  // Top-level = channels with no parent.
+  function buildChannelTree(): { node: Channel; children: Channel[] }[] {
+    const tree: { node: Channel; children: Channel[] }[] = [];
+    const topLevel = channels.filter((c) => !c.parent_id);
+    for (const ch of topLevel) {
+      const children = channels.filter((c) => c.parent_id === ch.id);
+      tree.push({ node: ch, children });
+    }
+    return tree;
+  }
+
   async function handleCreateChannel() {
     const name = newChannelName.trim();
     if (!name) return;
     try {
-      const channel = await invoke<Channel>("create_channel", { name });
+      const channel = await invoke<Channel>("create_channel", {
+        name,
+        parentId: newChannelParentId,
+        isCategory: newChannelIsCategory,
+      });
       setChannels((prev) => [...prev, channel]);
       setNewChannelName("");
+      setNewChannelIsCategory(false);
+      setNewChannelParentId(null);
       setShowCreateChannel(false);
-      selectChannel(channel);
+      if (!channel.is_category) {
+        selectChannel(channel);
+      }
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function handleDeleteChannel(channelId: string) {
+    if (!confirm("Delete this channel? Messages will be lost.")) return;
+    try {
+      await invoke("delete_channel", { channelId });
+      setChannels((prev) => prev.filter((c) => c.id !== channelId));
+      if (selectedChannel?.id === channelId) {
+        setSelectedChannel(null);
+        setMessages([]);
+      }
+      setContextMenu(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function openContextMenu(e: React.MouseEvent, channel: Channel) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, channel });
+  }
+
+  function openCreateChannelUnder(parentId: string | null, isCategory: boolean) {
+    setNewChannelParentId(parentId);
+    setNewChannelIsCategory(isCategory);
+    setShowCreateChannel(true);
+    setContextMenu(null);
   }
 
   return (
@@ -201,24 +255,57 @@ function App() {
               <h3>Channels</h3>
               <button
                 className="btn-icon"
-                onClick={() => setShowCreateChannel(true)}
+                onClick={() => openCreateChannelUnder(null, false)}
                 title="Create channel"
               >
                 +
               </button>
             </div>
             <ul className="channel-list">
-              {channels.map((c) => (
-                <li
-                  key={c.id}
-                  className={`channel-item ${
-                    selectedChannel?.id === c.id ? "selected" : ""
-                  }`}
-                  onClick={() => selectChannel(c)}
-                >
-                  # {c.name}
-                </li>
-              ))}
+              {buildChannelTree().map(({ node, children }) =>
+                node.is_category ? (
+                  <li key={node.id} className="category-group">
+                    <div
+                      className="category-header"
+                      onContextMenu={(e) => openContextMenu(e, node)}
+                    >
+                      <span className="category-name">{node.name.toUpperCase()}</span>
+                      <button
+                        className="btn-icon-small"
+                        onClick={() => openCreateChannelUnder(node.id, false)}
+                        title="Add channel"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <ul className="channel-sublist">
+                      {children.map((c) => (
+                        <li
+                          key={c.id}
+                          className={`channel-item ${
+                            selectedChannel?.id === c.id ? "selected" : ""
+                          }`}
+                          onClick={() => selectChannel(c)}
+                          onContextMenu={(e) => openContextMenu(e, c)}
+                        >
+                          # {c.name}
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ) : (
+                  <li
+                    key={node.id}
+                    className={`channel-item ${
+                      selectedChannel?.id === node.id ? "selected" : ""
+                    }`}
+                    onClick={() => selectChannel(node)}
+                    onContextMenu={(e) => openContextMenu(e, node)}
+                  >
+                    # {node.name}
+                  </li>
+                )
+              )}
             </ul>
             {channels.length === 0 && (
               <p className="muted">No channels yet</p>
@@ -270,7 +357,10 @@ function App() {
         {showCreateChannel && (
           <div className="modal-overlay" onClick={() => setShowCreateChannel(false)}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h3>Create Channel</h3>
+              <h3>
+                Create {newChannelIsCategory ? "Category" : "Channel"}
+                {newChannelParentId && " (under category)"}
+              </h3>
               <input
                 type="text"
                 value={newChannelName}
@@ -279,15 +369,46 @@ function App() {
                   if (e.key === "Enter") handleCreateChannel();
                   if (e.key === "Escape") setShowCreateChannel(false);
                 }}
-                placeholder="channel-name"
+                placeholder={newChannelIsCategory ? "category-name" : "channel-name"}
                 autoFocus
               />
+              {!newChannelParentId && (
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={newChannelIsCategory}
+                    onChange={(e) => setNewChannelIsCategory(e.target.checked)}
+                  />
+                  Create as category (holds other channels)
+                </label>
+              )}
               <div className="modal-actions">
                 <button onClick={() => setShowCreateChannel(false)} className="btn-secondary">
                   Cancel
                 </button>
                 <button onClick={handleCreateChannel}>Create</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {contextMenu && (
+          <div
+            className="context-menu-overlay"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          >
+            <div
+              className="context-menu"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="context-menu-item danger"
+                onClick={() => handleDeleteChannel(contextMenu.channel.id)}
+              >
+                Delete {contextMenu.channel.is_category ? "category" : "channel"}
+              </button>
             </div>
           </div>
         )}

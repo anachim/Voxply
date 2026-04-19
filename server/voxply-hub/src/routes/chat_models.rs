@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct CreateChannelRequest {
     pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub is_category: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -10,6 +14,8 @@ pub struct ChannelResponse {
     pub id: String,
     pub name: String,
     pub created_by: String,
+    pub parent_id: Option<String>,
+    pub is_category: bool,
     pub created_at: i64,
 }
 

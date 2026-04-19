@@ -12,6 +12,7 @@ use voxply_identity::Identity;
 #[derive(Default)]
 struct AppState {
     inner: Mutex<Option<HubSession>>,
+    voice: Mutex<Option<VoiceSession>>,
 }
 
 struct HubSession {
@@ -26,6 +27,15 @@ struct HubSession {
 enum WsCommand {
     Subscribe(String),
     Unsubscribe(String),
+    VoiceJoin { channel_id: String, udp_port: u16 },
+    VoiceLeave { channel_id: String },
+}
+
+/// Voice session state. We send a "stop" signal to a background thread
+/// that owns the AudioPipeline (which contains !Send cpal streams).
+struct VoiceSession {
+    channel_id: String,
+    stop_tx: std::sync::mpsc::Sender<()>,
 }
 
 // --- DTOs ---
@@ -76,9 +86,31 @@ enum WsServerMessage {
         channel_id: String,
         message: MessageInfo,
     },
+    #[serde(rename = "voice_joined")]
+    VoiceJoined {
+        channel_id: String,
+        hub_udp_port: u16,
+        participants: Vec<VoiceParticipantInfo>,
+    },
+    #[serde(rename = "voice_participant_joined")]
+    VoiceParticipantJoined {
+        channel_id: String,
+        participant: VoiceParticipantInfo,
+    },
+    #[serde(rename = "voice_participant_left")]
+    VoiceParticipantLeft {
+        channel_id: String,
+        public_key: String,
+    },
     // Other variants we don't handle yet — serde will ignore them
     #[serde(other)]
     Other,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct VoiceParticipantInfo {
+    public_key: String,
+    display_name: Option<String>,
 }
 
 // --- Tauri commands ---
@@ -163,12 +195,33 @@ async fn spawn_ws_task(
                     match maybe_msg {
                         Some(Ok(WsMessage::Text(text))) => {
                             if let Ok(server_msg) = serde_json::from_str::<WsServerMessage>(&text) {
-                                if let WsServerMessage::ChatMessage { channel_id, message } = server_msg {
-                                    // Emit event to the frontend — React listens with listen("chat-message", ...)
-                                    let _ = app.emit("chat-message", serde_json::json!({
-                                        "channel_id": channel_id,
-                                        "message": message,
-                                    }));
+                                match server_msg {
+                                    WsServerMessage::ChatMessage { channel_id, message } => {
+                                        let _ = app.emit("chat-message", serde_json::json!({
+                                            "channel_id": channel_id,
+                                            "message": message,
+                                        }));
+                                    }
+                                    WsServerMessage::VoiceJoined { channel_id, hub_udp_port, participants } => {
+                                        let _ = app.emit("voice-joined", serde_json::json!({
+                                            "channel_id": channel_id,
+                                            "hub_udp_port": hub_udp_port,
+                                            "participants": participants,
+                                        }));
+                                    }
+                                    WsServerMessage::VoiceParticipantJoined { channel_id, participant } => {
+                                        let _ = app.emit("voice-participant-joined", serde_json::json!({
+                                            "channel_id": channel_id,
+                                            "participant": participant,
+                                        }));
+                                    }
+                                    WsServerMessage::VoiceParticipantLeft { channel_id, public_key } => {
+                                        let _ = app.emit("voice-participant-left", serde_json::json!({
+                                            "channel_id": channel_id,
+                                            "public_key": public_key,
+                                        }));
+                                    }
+                                    WsServerMessage::Other => {}
                                 }
                             }
                         }
@@ -180,7 +233,7 @@ async fn spawn_ws_task(
                         _ => {}
                     }
                 }
-                // Outgoing commands from React (subscribe/unsubscribe)
+                // Outgoing commands from React
                 Some(cmd) = cmd_rx.recv() => {
                     let json = match cmd {
                         WsCommand::Subscribe(channel_id) => {
@@ -188,6 +241,12 @@ async fn spawn_ws_task(
                         }
                         WsCommand::Unsubscribe(channel_id) => {
                             serde_json::json!({ "type": "unsubscribe", "channel_id": channel_id })
+                        }
+                        WsCommand::VoiceJoin { channel_id, udp_port } => {
+                            serde_json::json!({ "type": "voice_join", "channel_id": channel_id, "udp_port": udp_port })
+                        }
+                        WsCommand::VoiceLeave { channel_id } => {
+                            serde_json::json!({ "type": "voice_leave", "channel_id": channel_id })
                         }
                     };
                     if ws_tx.send(WsMessage::Text(json.to_string().into())).await.is_err() {
@@ -358,6 +417,108 @@ async fn send_message(
     Ok(msg)
 }
 
+/// Join a voice channel.
+/// Starts the audio pipeline in a dedicated thread (cpal streams may be !Send),
+/// then sends the VoiceJoin WS message with the actual local UDP port.
+#[tauri::command]
+async fn voice_join(
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Already in voice?
+    if state.voice.lock().unwrap().is_some() {
+        return Err("Already in a voice channel".to_string());
+    }
+
+    let (hub_url, ws_tx) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.ws_tx.clone())
+    };
+
+    // Hub URL is http://host:port, voice UDP is on the same host + port 3001
+    let host = hub_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split(':')
+        .next()
+        .unwrap_or("127.0.0.1")
+        .to_string();
+    let hub_addr: std::net::SocketAddr = format!("{host}:3001")
+        .parse()
+        .map_err(|e| format!("Bad hub address: {e}"))?;
+
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u16, String>>();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+
+    // Run the pipeline in a dedicated thread with its own tokio runtime.
+    // The cpal streams stay on this thread and don't need to be Send.
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Failed to create runtime: {e}")));
+                return;
+            }
+        };
+
+        rt.block_on(async move {
+            let pipeline = match voxply_voice::AudioPipeline::start_p2p(0, hub_addr).await {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(format!("Failed to start audio: {e}")));
+                    return;
+                }
+            };
+
+            let local_port = pipeline.local_udp_port;
+            let _ = ready_tx.send(Ok(local_port));
+
+            // Wait for stop signal
+            let _ = tokio::task::spawn_blocking(move || stop_rx.recv()).await;
+
+            pipeline.stop().await;
+        });
+    });
+
+    // Wait for the pipeline to start and get the local port
+    let local_port = ready_rx
+        .recv()
+        .map_err(|_| "Voice thread died".to_string())??;
+
+    // Tell the hub we're joining via WS
+    ws_tx
+        .send(WsCommand::VoiceJoin {
+            channel_id: channel_id.clone(),
+            udp_port: local_port,
+        })
+        .map_err(|_| "WebSocket closed".to_string())?;
+
+    *state.voice.lock().unwrap() = Some(VoiceSession {
+        channel_id,
+        stop_tx,
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn voice_leave(state: State<'_, AppState>) -> Result<(), String> {
+    let session = state.voice.lock().unwrap().take();
+    if let Some(s) = session {
+        let _ = s.stop_tx.send(()); // signal the audio thread to stop
+
+        // Tell hub we're leaving
+        let inner = state.inner.lock().unwrap();
+        if let Some(hub) = inner.as_ref() {
+            let _ = hub.ws_tx.send(WsCommand::VoiceLeave {
+                channel_id: s.channel_id,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Subscribe to real-time updates for a channel (via WebSocket).
 #[tauri::command]
 fn subscribe_channel(
@@ -386,6 +547,10 @@ fn unsubscribe_channel(
 
 #[tauri::command]
 fn disconnect(state: State<'_, AppState>) {
+    // Stop voice first
+    if let Some(voice) = state.voice.lock().unwrap().take() {
+        let _ = voice.stop_tx.send(());
+    }
     if let Some(session) = state.inner.lock().unwrap().take() {
         session.ws_task.abort();
     }
@@ -409,6 +574,8 @@ pub fn run() {
             send_message,
             subscribe_channel,
             unsubscribe_channel,
+            voice_join,
+            voice_leave,
             disconnect
         ])
         .run(tauri::generate_context!())

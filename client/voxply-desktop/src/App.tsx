@@ -34,6 +34,11 @@ interface User {
   online: boolean;
 }
 
+interface VoiceParticipant {
+  public_key: string;
+  display_name: string | null;
+}
+
 function App() {
   // Connection state
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
@@ -60,6 +65,10 @@ function App() {
   // Hub users
   const [users, setUsers] = useState<User[]>([]);
 
+  // Voice
+  const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
+  const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
+
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -80,28 +89,61 @@ function App() {
   // Listen for real-time chat messages from the Rust backend.
   // This runs once when the component mounts.
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    const unlistens: UnlistenFn[] = [];
 
     (async () => {
-      unlisten = await listen<{ channel_id: string; message: Message }>(
-        "chat-message",
-        (event) => {
-          const { channel_id, message } = event.payload;
-          // Only update if it's for the currently open channel
-          if (channel_id === selectedChannelIdRef.current) {
-            setMessages((prev) => {
-              // Deduplicate — message might arrive via WS right after we sent it via HTTP
-              if (prev.some((m) => m.id === message.id)) return prev;
-              return [...prev, message];
+      unlistens.push(
+        await listen<{ channel_id: string; message: Message }>(
+          "chat-message",
+          (event) => {
+            const { channel_id, message } = event.payload;
+            if (channel_id === selectedChannelIdRef.current) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === message.id)) return prev;
+                return [...prev, message];
+              });
+            }
+          }
+        )
+      );
+
+      unlistens.push(
+        await listen<{
+          channel_id: string;
+          hub_udp_port: number;
+          participants: VoiceParticipant[];
+        }>("voice-joined", (event) => {
+          setVoiceChannelId(event.payload.channel_id);
+          setVoiceParticipants(event.payload.participants);
+        })
+      );
+
+      unlistens.push(
+        await listen<{ channel_id: string; participant: VoiceParticipant }>(
+          "voice-participant-joined",
+          (event) => {
+            setVoiceParticipants((prev) => {
+              if (prev.some((p) => p.public_key === event.payload.participant.public_key)) return prev;
+              return [...prev, event.payload.participant];
             });
           }
-        }
+        )
+      );
+
+      unlistens.push(
+        await listen<{ channel_id: string; public_key: string }>(
+          "voice-participant-left",
+          (event) => {
+            setVoiceParticipants((prev) =>
+              prev.filter((p) => p.public_key !== event.payload.public_key)
+            );
+          }
+        )
       );
     })();
 
-    // Cleanup on unmount — like IDisposable in C#
     return () => {
-      unlisten?.();
+      unlistens.forEach((u) => u());
     };
   }, []);
 
@@ -143,6 +185,8 @@ function App() {
     setUsers([]);
     setSelectedChannel(null);
     setPublicKey(null);
+    setVoiceChannelId(null);
+    setVoiceParticipants([]);
   }
 
   async function selectChannel(channel: Channel) {
@@ -190,6 +234,25 @@ function App() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  async function handleVoiceJoin() {
+    if (!selectedChannel) return;
+    try {
+      await invoke("voice_join", { channelId: selectedChannel.id });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleVoiceLeave() {
+    try {
+      await invoke("voice_leave");
+      setVoiceChannelId(null);
+      setVoiceParticipants([]);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -338,6 +401,17 @@ function App() {
               <p className="muted">No channels yet</p>
             )}
             <div className="user-info">
+              {voiceChannelId && (
+                <div className="voice-status">
+                  <span className="status-dot online" />
+                  <span>
+                    In voice: #{channels.find((c) => c.id === voiceChannelId)?.name}
+                  </span>
+                  <button onClick={handleVoiceLeave} className="btn-small leave">
+                    Leave
+                  </button>
+                </div>
+              )}
               <p className="muted">You: {publicKey?.slice(0, 16)}...</p>
               <button onClick={handleDisconnect} className="btn-small">
                 Disconnect
@@ -350,7 +424,31 @@ function App() {
               <>
                 <div className="channel-header">
                   <h3># {selectedChannel.name}</h3>
+                  {voiceChannelId === selectedChannel.id ? (
+                    <button onClick={handleVoiceLeave} className="btn-voice leave">
+                      🔇 Leave Voice
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleVoiceJoin}
+                      className="btn-voice join"
+                      disabled={voiceChannelId !== null}
+                      title={voiceChannelId ? "Leave current voice channel first" : ""}
+                    >
+                      🎙️ Join Voice
+                    </button>
+                  )}
                 </div>
+                {voiceChannelId === selectedChannel.id && voiceParticipants.length > 0 && (
+                  <div className="voice-participants">
+                    <span className="muted">In voice: </span>
+                    {voiceParticipants.map((p) => (
+                      <span key={p.public_key} className="voice-participant">
+                        🎙️ {p.display_name || p.public_key.slice(0, 16)}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="messages">
                   {messages.map((m) => (
                     <div key={m.id} className="message">

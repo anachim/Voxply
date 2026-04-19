@@ -161,6 +161,85 @@ body {
   padding-bottom: 12px;
   border-bottom: 1px solid #333;
   margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.channel-header h3 {
+  margin: 0;
+}
+
+.btn-voice {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-voice.join {
+  background: #10b981;
+  color: white;
+}
+
+.btn-voice.join:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn-voice.join:disabled {
+  background: #4b5563;
+  cursor: not-allowed;
+}
+
+.btn-voice.leave {
+  background: #ef4444;
+  color: white;
+}
+
+.btn-voice.leave:hover {
+  background: #dc2626;
+}
+
+.voice-participants {
+  padding: 8px 12px;
+  background: #16213e;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.voice-participant {
+  background: #2a3050;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #10b981;
+}
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #1e2a47;
+  padding: 8px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #10b981;
+}
+
+.btn-small.leave {
+  background: #ef4444;
+  margin-left: auto;
+}
+
+.btn-small.leave:hover {
+  background: #dc2626;
 }
 
 .messages {

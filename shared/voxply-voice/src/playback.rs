@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use ringbuf::traits::Consumer;
+
+use crate::devices::find_output_device;
 
 pub struct AudioPlayback {
     stream: cpal::Stream,
@@ -9,11 +11,15 @@ pub struct AudioPlayback {
 }
 
 impl AudioPlayback {
-    pub fn start(mut consumer: ringbuf::HeapCons<f32>) -> Result<Self> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .context("No output device available")?;
+    pub fn start(consumer: ringbuf::HeapCons<f32>) -> Result<Self> {
+        Self::start_with_device(consumer, None)
+    }
+
+    pub fn start_with_device(
+        mut consumer: ringbuf::HeapCons<f32>,
+        device_name: Option<&str>,
+    ) -> Result<Self> {
+        let device = find_output_device(device_name)?;
 
         tracing::info!("Output device: {}", device.name().unwrap_or_default());
 

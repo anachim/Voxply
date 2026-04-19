@@ -213,6 +213,14 @@ function App() {
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
 
+  // Voice settings
+  const [audioInputs, setAudioInputs] = useState<string[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<string[]>([]);
+  const [voiceInputDevice, setVoiceInputDevice] = useState<string>("");
+  const [voiceOutputDevice, setVoiceOutputDevice] = useState<string>("");
+  const [vadThreshold, setVadThreshold] = useState<number>(0.02);
+  const [micTesting, setMicTesting] = useState(false);
+
   // Friends
   const [showFriends, setShowFriends] = useState(false);
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -696,12 +704,64 @@ function App() {
     }
   }
 
-  function openSettings() {
+  async function openSettings() {
     setShowSettings(true);
     setRecoveryPhrase(null);
     // Pre-fill with current display name if known
     const me = users.find((u) => u.public_key === publicKey);
     setSettingsDisplayName(me?.display_name || "");
+
+    // Load voice devices + stored settings
+    try {
+      const devices = await invoke<{ inputs: string[]; outputs: string[] }>(
+        "list_audio_devices"
+      );
+      setAudioInputs(devices.inputs);
+      setAudioOutputs(devices.outputs);
+
+      const saved = await invoke<{
+        input_device?: string;
+        output_device?: string;
+        vad_threshold?: number;
+      }>("get_voice_settings");
+      setVoiceInputDevice(saved.input_device || "");
+      setVoiceOutputDevice(saved.output_device || "");
+      setVadThreshold(saved.vad_threshold ?? 0.02);
+    } catch (e) {
+      console.error("Failed to load voice settings:", e);
+    }
+  }
+
+  async function persistVoiceSettings(
+    input: string,
+    output: string,
+    threshold: number
+  ) {
+    try {
+      await invoke("save_voice_settings", {
+        settings: {
+          input_device: input || null,
+          output_device: output || null,
+          vad_threshold: threshold,
+        },
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function toggleMicTest() {
+    try {
+      if (micTesting) {
+        await invoke("mic_test_stop");
+        setMicTesting(false);
+      } else {
+        await invoke("mic_test_start");
+        setMicTesting(true);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   async function handleVoiceLeave() {
@@ -1286,6 +1346,75 @@ function App() {
                   />
                   <button onClick={handleSaveDisplayName}>Save</button>
                 </div>
+              </div>
+
+              <div className="settings-section">
+                <label className="settings-label">Voice — microphone</label>
+                <select
+                  value={voiceInputDevice}
+                  onChange={(e) => {
+                    setVoiceInputDevice(e.target.value);
+                    persistVoiceSettings(e.target.value, voiceOutputDevice, vadThreshold);
+                  }}
+                >
+                  <option value="">System default</option>
+                  {audioInputs.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="settings-section">
+                <label className="settings-label">Voice — speaker</label>
+                <select
+                  value={voiceOutputDevice}
+                  onChange={(e) => {
+                    setVoiceOutputDevice(e.target.value);
+                    persistVoiceSettings(voiceInputDevice, e.target.value, vadThreshold);
+                  }}
+                >
+                  <option value="">System default</option>
+                  {audioOutputs.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="settings-section">
+                <label className="settings-label">
+                  Mic sensitivity — threshold {vadThreshold.toFixed(3)}
+                </label>
+                <p className="muted">
+                  Lower values trigger the speaking indicator more easily.
+                  Changes apply on the next voice channel you join.
+                </p>
+                <input
+                  type="range"
+                  min={0.001}
+                  max={0.2}
+                  step={0.001}
+                  value={vadThreshold}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setVadThreshold(v);
+                    persistVoiceSettings(voiceInputDevice, voiceOutputDevice, v);
+                  }}
+                />
+              </div>
+
+              <div className="settings-section">
+                <label className="settings-label">Microphone test</label>
+                <p className="muted">
+                  Plays your mic back through your speaker. Use headphones to
+                  avoid feedback.
+                </p>
+                <button onClick={toggleMicTest} className="btn-secondary">
+                  {micTesting ? "Stop test" : "Start mic test"}
+                </button>
               </div>
 
               <div className="settings-section">

@@ -15,13 +15,22 @@ use crate::playback::AudioPlayback;
 use crate::protocol::{VoicePacket, RING_BUFFER_SIZE};
 use crate::transport::VoiceSocket;
 
-/// Threshold for the RMS voice activity detector. Values in [0, 1].
+/// Default threshold for the RMS voice activity detector. Values in [0, 1].
 /// 0.02 picks up normal speech at typical mic gain while ignoring fan/room noise.
-const VAD_RMS_THRESHOLD: f32 = 0.02;
+pub const DEFAULT_VAD_THRESHOLD: f32 = 0.02;
 
 /// How long we must stay below threshold before declaring "stopped speaking".
 /// Prevents flickering on consonant gaps.
 const VAD_RELEASE_MS: u64 = 250;
+
+/// Configuration the client can tune in its settings UI.
+#[derive(Clone, Debug, Default)]
+pub struct VoiceSettings {
+    pub input_device: Option<String>,
+    pub output_device: Option<String>,
+    /// VAD threshold override. `None` uses DEFAULT_VAD_THRESHOLD.
+    pub vad_threshold: Option<f32>,
+}
 
 pub struct AudioPipeline {
     _capture: AudioCapture,
@@ -47,14 +56,18 @@ fn resolve_opus_rate(device_rate: u32) -> u32 {
 
 impl AudioPipeline {
     pub async fn start_loopback() -> Result<Self> {
+        Self::start_loopback_with_settings(VoiceSettings::default()).await
+    }
+
+    pub async fn start_loopback_with_settings(settings: VoiceSettings) -> Result<Self> {
         let capture_rb = HeapRb::<f32>::new(RING_BUFFER_SIZE);
         let (capture_prod, mut capture_cons) = capture_rb.split();
 
         let playback_rb = HeapRb::<f32>::new(RING_BUFFER_SIZE);
         let (mut playback_prod, playback_cons) = playback_rb.split();
 
-        let capture = AudioCapture::start(capture_prod)?;
-        let playback = AudioPlayback::start(playback_cons)?;
+        let capture = AudioCapture::start_with_device(capture_prod, settings.input_device.as_deref())?;
+        let playback = AudioPlayback::start_with_device(playback_cons, settings.output_device.as_deref())?;
 
         let opus_rate = resolve_opus_rate(capture.actual_sample_rate);
         let frame_size = codec::frame_size_for_rate(opus_rate);
@@ -103,14 +116,24 @@ impl AudioPipeline {
     /// P2P mode: capture → encode → UDP send to remote,
     /// UDP recv from remote → decode → playback.
     pub async fn start_p2p(local_port: u16, remote_addr: SocketAddr) -> Result<Self> {
+        Self::start_p2p_with_settings(local_port, remote_addr, VoiceSettings::default()).await
+    }
+
+    pub async fn start_p2p_with_settings(
+        local_port: u16,
+        remote_addr: SocketAddr,
+        settings: VoiceSettings,
+    ) -> Result<Self> {
         let capture_rb = HeapRb::<f32>::new(RING_BUFFER_SIZE);
         let (capture_prod, mut capture_cons) = capture_rb.split();
 
         let playback_rb = HeapRb::<f32>::new(RING_BUFFER_SIZE);
         let (mut playback_prod, playback_cons) = playback_rb.split();
 
-        let capture = AudioCapture::start(capture_prod)?;
-        let playback = AudioPlayback::start(playback_cons)?;
+        let capture = AudioCapture::start_with_device(capture_prod, settings.input_device.as_deref())?;
+        let playback = AudioPlayback::start_with_device(playback_cons, settings.output_device.as_deref())?;
+
+        let vad_threshold = settings.vad_threshold.unwrap_or(DEFAULT_VAD_THRESHOLD);
 
         let opus_rate = resolve_opus_rate(capture.actual_sample_rate);
         let frame_size = codec::frame_size_for_rate(opus_rate);
@@ -156,7 +179,7 @@ impl AudioPipeline {
 
                 // Voice activity detection on post-denoise samples.
                 let rms = rms_of(&denoised);
-                if rms > VAD_RMS_THRESHOLD {
+                if rms > vad_threshold {
                     last_active_at = Some(std::time::Instant::now());
                     if !is_speaking {
                         is_speaking = true;

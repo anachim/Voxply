@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::SampleRate;
+use cpal::traits::{DeviceTrait, StreamTrait};
 use ringbuf::traits::Producer;
 
-use crate::protocol::SAMPLE_RATE;
+use crate::devices::find_input_device;
 
 pub struct AudioCapture {
     stream: cpal::Stream,
@@ -12,11 +11,15 @@ pub struct AudioCapture {
 }
 
 impl AudioCapture {
-    pub fn start(mut producer: ringbuf::HeapProd<f32>) -> Result<Self> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .context("No input device available")?;
+    pub fn start(producer: ringbuf::HeapProd<f32>) -> Result<Self> {
+        Self::start_with_device(producer, None)
+    }
+
+    pub fn start_with_device(
+        mut producer: ringbuf::HeapProd<f32>,
+        device_name: Option<&str>,
+    ) -> Result<Self> {
+        let device = find_input_device(device_name)?;
 
         tracing::info!("Input device: {}", device.name().unwrap_or_default());
 

@@ -44,6 +44,20 @@ struct VoiceSession {
     stop_tx: std::sync::mpsc::Sender<()>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct StoredVoiceSettings {
+    input_device: Option<String>,
+    output_device: Option<String>,
+    /// Range [0.001, 0.2]. Higher = less sensitive.
+    vad_threshold: Option<f32>,
+}
+
+#[derive(Serialize)]
+struct AudioDeviceList {
+    inputs: Vec<String>,
+    outputs: Vec<String>,
+}
+
 // --- DTOs ---
 
 #[derive(Serialize, Deserialize)]
@@ -188,6 +202,32 @@ fn saved_hubs_path() -> Result<std::path::PathBuf, String> {
 fn active_hub_path() -> Result<std::path::PathBuf, String> {
     let home = dirs::home_dir().ok_or("No home directory")?;
     Ok(home.join(".voxply").join("active_hub"))
+}
+
+fn voice_settings_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("voice.json"))
+}
+
+fn load_voice_settings() -> StoredVoiceSettings {
+    if let Ok(path) = voice_settings_path() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(s) = serde_json::from_str::<StoredVoiceSettings>(&data) {
+                return s;
+            }
+        }
+    }
+    StoredVoiceSettings::default()
+}
+
+fn save_voice_settings_to_disk(settings: &StoredVoiceSettings) -> Result<(), String> {
+    let path = voice_settings_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Mkdir failed: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("Write failed: {e}"))?;
+    Ok(())
 }
 
 fn load_saved_hubs() -> Vec<SavedHub> {
@@ -757,7 +797,17 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
         };
 
         rt.block_on(async move {
-            let mut pipeline = match voxply_voice::AudioPipeline::start_p2p(0, hub_addr).await {
+            let saved = load_voice_settings();
+            let vsettings = voxply_voice::VoiceSettings {
+                input_device: saved.input_device,
+                output_device: saved.output_device,
+                vad_threshold: saved.vad_threshold,
+            };
+            let mut pipeline = match voxply_voice::AudioPipeline::start_p2p_with_settings(
+                0, hub_addr, vsettings,
+            )
+            .await
+            {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = ready_tx.send(Err(format!("Audio: {e}")));
@@ -816,6 +866,94 @@ fn voice_leave(state: State<'_, AppState>) -> Result<(), String> {
             let _ = hub.ws_tx.send(WsCommand::VoiceLeave {
                 channel_id: s.channel_id,
             });
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn list_audio_devices() -> Result<AudioDeviceList, String> {
+    let inputs = voxply_voice::devices::list_input_devices()
+        .map_err(|e| format!("inputs: {e}"))?;
+    let outputs = voxply_voice::devices::list_output_devices()
+        .map_err(|e| format!("outputs: {e}"))?;
+    Ok(AudioDeviceList { inputs, outputs })
+}
+
+#[tauri::command]
+fn get_voice_settings() -> StoredVoiceSettings {
+    load_voice_settings()
+}
+
+#[tauri::command]
+fn save_voice_settings(settings: StoredVoiceSettings) -> Result<(), String> {
+    save_voice_settings_to_disk(&settings)
+}
+
+#[tauri::command]
+fn mic_test_start(state: State<'_, AppState>) -> Result<(), String> {
+    // Reuse the voice session slot so we don't collide with an in-progress call.
+    if state.voice.lock().unwrap().is_some() {
+        return Err("Leave the voice channel before testing the mic".to_string());
+    }
+
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = ready_tx.send(Err(format!("Runtime: {e}")));
+                return;
+            }
+        };
+        rt.block_on(async move {
+            let saved = load_voice_settings();
+            let vsettings = voxply_voice::VoiceSettings {
+                input_device: saved.input_device,
+                output_device: saved.output_device,
+                vad_threshold: saved.vad_threshold,
+            };
+            let pipeline =
+                match voxply_voice::AudioPipeline::start_loopback_with_settings(vsettings).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(format!("Audio: {e}")));
+                        return;
+                    }
+                };
+            let _ = ready_tx.send(Ok(()));
+            let _ = tokio::task::spawn_blocking(move || stop_rx.recv()).await;
+            pipeline.stop().await;
+        });
+    });
+
+    ready_rx
+        .recv()
+        .map_err(|_| "Mic test thread died".to_string())??;
+
+    // Stash the stop channel inside a dummy VoiceSession so mic_test_stop can close it.
+    *state.voice.lock().unwrap() = Some(VoiceSession {
+        channel_id: "__mic_test__".to_string(),
+        hub_id: String::new(),
+        stop_tx,
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn mic_test_stop(state: State<'_, AppState>) -> Result<(), String> {
+    let session = state.voice.lock().unwrap().take();
+    if let Some(s) = session {
+        if s.channel_id == "__mic_test__" {
+            let _ = s.stop_tx.send(());
+            return Ok(());
+        } else {
+            // Put it back if it wasn't a mic test.
+            *state.voice.lock().unwrap() = Some(s);
+            return Err("No mic test in progress".to_string());
         }
     }
     Ok(())
@@ -1036,6 +1174,11 @@ pub fn run() {
             unsubscribe_channel,
             voice_join,
             voice_leave,
+            list_audio_devices,
+            get_voice_settings,
+            save_voice_settings,
+            mic_test_start,
+            mic_test_stop,
             update_display_name,
             get_recovery_phrase,
             list_friends,

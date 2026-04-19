@@ -70,13 +70,19 @@ async fn main() -> Result<()> {
         }
     }
 
-    let channels: Vec<serde_json::Value> = client
+    let resp = client
         .get(format!("{hub_url}/channels"))
         .bearer_auth(token)
         .send()
-        .await?
-        .json()
         .await?;
+    let status = resp.status();
+    let body = resp.text().await?;
+    if !status.is_success() {
+        eprintln!("GET /channels failed ({status}): {body}");
+        return Ok(());
+    }
+    let channels: Vec<serde_json::Value> = serde_json::from_str(&body)
+        .map_err(|e| anyhow::anyhow!("Failed to parse channels: {e}. Body: {body}"))?;
 
     if let Some(general) = channels.iter().find(|c| c["name"] == "general") {
         let ch_id = general["id"].as_str().unwrap();

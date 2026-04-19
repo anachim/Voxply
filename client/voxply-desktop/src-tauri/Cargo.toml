@@ -15,3 +15,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+hex = "0.4"
+voxply-identity = { path = "../../../shared/voxply-identity" }

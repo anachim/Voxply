@@ -166,13 +166,14 @@ function App() {
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const activeHubIdRef = useRef<string | null>(null);
   useEffect(() => {
     activeHubIdRef.current = activeHubId;
   }, [activeHubId]);
 
-  const connected = hubs.length > 0 && activeHubId !== null;
+  const hasActiveHub = hubs.length > 0 && activeHubId !== null;
 
   // Chat state
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -229,6 +230,13 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Auto-dismiss toast after 5 seconds
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Keep the ref in sync with the state
   useEffect(() => {
@@ -306,6 +314,21 @@ function App() {
           });
         })
       );
+
+      unlistens.push(
+        await listen<{ hub_id: string; hub_name: string }>("hub-session-lost", async (event) => {
+          const { hub_id, hub_name } = event.payload;
+          setToast(`Disconnected from "${hub_name}" — you may have been banned or kicked`);
+          try {
+            await invoke("remove_hub", { hubId: hub_id });
+            const remaining = await invoke<Hub[]>("list_hubs");
+            setHubs(remaining);
+            if (activeHubIdRef.current === hub_id) {
+              setActiveHubId(remaining[0]?.hub_id ?? null);
+            }
+          } catch {}
+        })
+      );
     })();
 
     return () => {
@@ -369,7 +392,9 @@ function App() {
   }
 
   async function handleRemoveHub(hubId: string) {
-    if (!confirm("Remove this hub from your list?")) return;
+    const hub = hubs.find((h) => h.hub_id === hubId);
+    const name = hub?.hub_name ?? "this hub";
+    if (!confirm(`Leave "${name}"?`)) return;
     try {
       await invoke("remove_hub", { hubId });
       const remaining = await invoke<Hub[]>("list_hubs");
@@ -407,7 +432,7 @@ function App() {
 
   // Refresh users every 10 seconds for active hub
   useEffect(() => {
-    if (!connected) return;
+    if (!hasActiveHub) return;
     const interval = setInterval(async () => {
       try {
         const u = await invoke<User[]>("list_users");
@@ -415,24 +440,7 @@ function App() {
       } catch {}
     }, 10000);
     return () => clearInterval(interval);
-  }, [connected, activeHubId]);
-
-  async function handleDisconnect() {
-    await invoke("disconnect_all");
-    setHubs([]);
-    setActiveHubId(null);
-    setChannels([]);
-    setMessages([]);
-    setUsers([]);
-    setSelectedChannel(null);
-    setPublicKey(null);
-    setVoiceChannelId(null);
-    setVoiceParticipants([]);
-    setConversations([]);
-    setSelectedConversation(null);
-    setDmMessages({});
-    setView("channels");
-  }
+  }, [hasActiveHub, activeHubId]);
 
   async function selectChannel(channel: Channel) {
     // Unsubscribe from previous channel's WS updates
@@ -727,26 +735,12 @@ function App() {
 
   return (
     <div className="app">
-      {!connected ? (
-        <div className="connect-screen">
-          <h1>Voxply</h1>
-          <p>Decentralized voice chat + community platform</p>
-          <div className="connect-form">
-            <input
-              type="text"
-              value={hubUrl}
-              onChange={(e) => setHubUrl(e.target.value)}
-              placeholder="Hub URL"
-              disabled={loading}
-            />
-            <button onClick={handleAddHub} disabled={loading}>
-              {loading ? "Connecting..." : "Connect"}
-            </button>
-          </div>
-          {error && <div className="error">{error}</div>}
+      {toast && (
+        <div className="toast" onClick={() => setToast(null)}>
+          {toast}
         </div>
-      ) : (
-        <>
+      )}
+      <>
         <div className="main-layout">
           <div className="hub-sidebar">
             {hubs.map((h) => (
@@ -771,6 +765,16 @@ function App() {
               +
             </button>
           </div>
+          {!hasActiveHub ? (
+            <div className="empty-state">
+              <h1>Voxply</h1>
+              <p>Decentralized voice chat + community platform</p>
+              <button className="primary" onClick={() => setShowAddHub(true)}>
+                Add a hub to get started
+              </button>
+            </div>
+          ) : (
+            <>
           <div className="sidebar">
             <div className="view-tabs">
               <button
@@ -903,9 +907,6 @@ function App() {
                 </button>
                 <button onClick={openSettings} className="btn-small">
                   Settings
-                </button>
-                <button onClick={handleDisconnect} className="btn-small btn-secondary-small">
-                  Disconnect
                 </button>
               </div>
             </div>
@@ -1042,6 +1043,8 @@ function App() {
               </ul>
             </div>
           </div>
+            </>
+          )}
         </div>
 
         {showCreateChannel && (
@@ -1251,8 +1254,7 @@ function App() {
             </div>
           </div>
         )}
-        </>
-      )}
+      </>
     </div>
   );
 }

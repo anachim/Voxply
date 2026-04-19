@@ -555,18 +555,34 @@ async fn delete_channel(channel_id: String, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
-async fn list_users(state: State<'_, AppState>) -> Result<Vec<UserInfo>, String> {
+async fn list_users(state: State<'_, AppState>, app: AppHandle) -> Result<Vec<UserInfo>, String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
-    client
+    let resp = client
         .get(format!("{hub_url}/users"))
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid: {e}"))
+        .map_err(|e| format!("Failed: {e}"))?;
+
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        // Session was revoked server-side (ban or kick). Notify UI.
+        if let Some(active_id) = state.active_hub.lock().unwrap().clone() {
+            let hubs = state.hubs.lock().unwrap();
+            if let Some(session) = hubs.get(&active_id) {
+                let _ = app.emit(
+                    "hub-session-lost",
+                    serde_json::json!({
+                        "hub_id": session.hub_id,
+                        "hub_name": session.hub_name,
+                    }),
+                );
+            }
+        }
+        return Err("Session lost".to_string());
+    }
+
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]

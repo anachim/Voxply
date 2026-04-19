@@ -167,6 +167,11 @@ fn saved_hubs_path() -> Result<std::path::PathBuf, String> {
     Ok(home.join(".voxply").join("hubs.json"))
 }
 
+fn active_hub_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("active_hub"))
+}
+
 fn load_saved_hubs() -> Vec<SavedHub> {
     if let Ok(path) = saved_hubs_path() {
         if let Ok(data) = std::fs::read_to_string(&path) {
@@ -186,6 +191,21 @@ fn save_hubs_list(hubs: &[SavedHub]) -> Result<(), String> {
     let json = serde_json::to_string_pretty(hubs).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| format!("Write failed: {e}"))?;
     Ok(())
+}
+
+fn load_active_hub_id() -> Option<String> {
+    let path = active_hub_path().ok()?;
+    let data = std::fs::read_to_string(&path).ok()?;
+    let trimmed = data.trim();
+    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+}
+
+fn save_active_hub_id(hub_id: Option<&str>) {
+    let Ok(path) = active_hub_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, hub_id.unwrap_or(""));
 }
 
 // --- Helpers ---
@@ -339,7 +359,8 @@ fn set_active_hub(hub_id: String, state: State<'_, AppState>) -> Result<(), Stri
     if !hubs.contains_key(&hub_id) {
         return Err("Hub not connected".to_string());
     }
-    *state.active_hub.lock().unwrap() = Some(hub_id);
+    *state.active_hub.lock().unwrap() = Some(hub_id.clone());
+    save_active_hub_id(Some(&hub_id));
     Ok(())
 }
 
@@ -352,6 +373,7 @@ fn remove_hub(hub_id: String, state: State<'_, AppState>) -> Result<(), String> 
         let mut active = state.active_hub.lock().unwrap();
         if active.as_deref() == Some(hub_id.as_str()) {
             *active = None;
+            save_active_hub_id(None);
         }
     }
     let mut saved = load_saved_hubs();
@@ -369,6 +391,16 @@ async fn auto_connect_saved(
     for hub in &saved {
         let _ = add_hub(hub.hub_url.clone(), state.clone(), app.clone()).await;
     }
+
+    // Restore the previously-active hub if it successfully reconnected.
+    if let Some(persisted) = load_active_hub_id() {
+        let hubs = state.hubs.lock().unwrap();
+        if hubs.contains_key(&persisted) {
+            drop(hubs);
+            *state.active_hub.lock().unwrap() = Some(persisted);
+        }
+    }
+
     Ok(list_hubs(state))
 }
 

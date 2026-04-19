@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 interface Channel {
   id: string;
@@ -42,11 +43,47 @@ function App() {
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when messages change.
-  // useEffect runs after render. Deps array [messages] means "run when messages changes".
+  // Ref to the currently selected channel ID (for the event listener closure).
+  // Why a ref? Because event listeners capture the state at time of setup — using
+  // a ref ensures we always read the latest value without re-registering the listener.
+  const selectedChannelIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Keep the ref in sync with the state
+  useEffect(() => {
+    selectedChannelIdRef.current = selectedChannel?.id ?? null;
+  }, [selectedChannel]);
+
+  // Listen for real-time chat messages from the Rust backend.
+  // This runs once when the component mounts.
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+
+    (async () => {
+      unlisten = await listen<{ channel_id: string; message: Message }>(
+        "chat-message",
+        (event) => {
+          const { channel_id, message } = event.payload;
+          // Only update if it's for the currently open channel
+          if (channel_id === selectedChannelIdRef.current) {
+            setMessages((prev) => {
+              // Deduplicate — message might arrive via WS right after we sent it via HTTP
+              if (prev.some((m) => m.id === message.id)) return prev;
+              return [...prev, message];
+            });
+          }
+        }
+      );
+    })();
+
+    // Cleanup on unmount — like IDisposable in C#
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   async function handleConnect() {
     setLoading(true);
@@ -74,6 +111,11 @@ function App() {
   }
 
   async function selectChannel(channel: Channel) {
+    // Unsubscribe from previous channel's WS updates
+    if (selectedChannel && selectedChannel.id !== channel.id) {
+      await invoke("unsubscribe_channel", { channelId: selectedChannel.id });
+    }
+
     setSelectedChannel(channel);
     setMessages([]);
     try {
@@ -81,6 +123,9 @@ function App() {
         channelId: channel.id,
       });
       setMessages(msgs);
+
+      // Subscribe to real-time updates for this channel
+      await invoke("subscribe_channel", { channelId: channel.id });
     } catch (e) {
       setError(String(e));
     }

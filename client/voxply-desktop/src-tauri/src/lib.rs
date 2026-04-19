@@ -215,6 +215,35 @@ async fn list_channels(state: State<'_, AppState>) -> Result<Vec<ChannelInfo>, S
 }
 
 #[tauri::command]
+async fn create_channel(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<ChannelInfo, String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/channels"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "name": name }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create channel: {e}"))?;
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("Hub rejected: {body}"));
+    }
+
+    serde_json::from_str(&body).map_err(|e| format!("Invalid response: {e}"))
+}
+
+#[tauri::command]
 async fn get_messages(
     channel_id: String,
     state: State<'_, AppState>,
@@ -311,6 +340,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             connect,
             list_channels,
+            create_channel,
             get_messages,
             send_message,
             subscribe_channel,

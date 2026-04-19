@@ -40,6 +40,10 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
 
+  // Create channel dialog
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -155,6 +159,20 @@ function App() {
     }
   }
 
+  async function handleCreateChannel() {
+    const name = newChannelName.trim();
+    if (!name) return;
+    try {
+      const channel = await invoke<Channel>("create_channel", { name });
+      setChannels((prev) => [...prev, channel]);
+      setNewChannelName("");
+      setShowCreateChannel(false);
+      selectChannel(channel);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   return (
     <div className="app">
       {!connected ? (
@@ -176,9 +194,19 @@ function App() {
           {error && <div className="error">{error}</div>}
         </div>
       ) : (
+        <>
         <div className="main-layout">
           <div className="sidebar">
-            <h3>Channels</h3>
+            <div className="sidebar-header">
+              <h3>Channels</h3>
+              <button
+                className="btn-icon"
+                onClick={() => setShowCreateChannel(true)}
+                title="Create channel"
+              >
+                +
+              </button>
+            </div>
             <ul className="channel-list">
               {channels.map((c) => (
                 <li
@@ -238,6 +266,32 @@ function App() {
             )}
           </div>
         </div>
+
+        {showCreateChannel && (
+          <div className="modal-overlay" onClick={() => setShowCreateChannel(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Create Channel</h3>
+              <input
+                type="text"
+                value={newChannelName}
+                onChange={(e) => setNewChannelName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateChannel();
+                  if (e.key === "Escape") setShowCreateChannel(false);
+                }}
+                placeholder="channel-name"
+                autoFocus
+              />
+              <div className="modal-actions">
+                <button onClick={() => setShowCreateChannel(false)} className="btn-secondary">
+                  Cancel
+                </button>
+                <button onClick={handleCreateChannel}>Create</button>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
     </div>
   );

@@ -819,9 +819,9 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
             let _ = ready_tx.send(Ok(local_port));
 
             // Forward speaking state from the VAD to the hub WS.
-            let mut speaking_rx = pipeline.speaking_rx.take();
+            let speaking_rx = pipeline.speaking_rx.take();
             let speaking_task = tokio::spawn(async move {
-                let Some(mut rx) = speaking_rx.take() else { return };
+                let Some(mut rx) = speaking_rx else { return };
                 while let Some(speaking) = rx.recv().await {
                     let _ = speaking_ws.send(WsCommand::VoiceSpeaking {
                         channel_id: speaking_channel_id.clone(),

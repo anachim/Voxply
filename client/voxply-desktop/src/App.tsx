@@ -257,6 +257,12 @@ function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Surface any error as a toast so the user actually sees it
+  // (we removed the always-visible connect screen that used to render it).
+  useEffect(() => {
+    if (error) setToast(error);
+  }, [error]);
+
   // Keep the ref in sync with the state
   useEffect(() => {
     selectedChannelIdRef.current = selectedChannel?.id ?? null;
@@ -374,6 +380,12 @@ function App() {
             if (activeHubIdRef.current === hub_id) {
               setActiveHubId(remaining[0]?.hub_id ?? null);
             }
+            setUnreadByHub((prev) => {
+              if (!prev[hub_id]) return prev;
+              const next = { ...prev };
+              delete next[hub_id];
+              return next;
+            });
           } catch {}
         })
       );
@@ -769,6 +781,7 @@ function App() {
       await invoke("voice_leave");
       setVoiceChannelId(null);
       setVoiceParticipants([]);
+      setSpeakingKeys(new Set());
     } catch (e) {
       setError(String(e));
     }

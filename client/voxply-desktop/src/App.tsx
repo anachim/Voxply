@@ -45,6 +45,20 @@ interface Friend {
   since: number;
 }
 
+interface Conversation {
+  id: string;
+  conv_type: string;
+  members: string[];
+  created_at: number;
+}
+
+interface DmMessage {
+  sender: string;
+  sender_name: string | null;
+  content: string;
+  timestamp: number;
+}
+
 function App() {
   // Connection state
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
@@ -85,6 +99,17 @@ function App() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [pendingFriends, setPendingFriends] = useState<Friend[]>([]);
   const [friendRequestKey, setFriendRequestKey] = useState("");
+
+  // DMs
+  const [view, setView] = useState<"channels" | "dms">("channels");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [dmMessages, setDmMessages] = useState<Record<string, DmMessage[]>>({});
+  const selectedConversationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedConversationIdRef.current = selectedConversation?.id ?? null;
+  }, [selectedConversation]);
 
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -157,6 +182,16 @@ function App() {
           }
         )
       );
+
+      unlistens.push(
+        await listen<DmMessage & { conversation_id: string }>("dm", (event) => {
+          const { conversation_id, ...msg } = event.payload;
+          setDmMessages((prev) => {
+            const list = prev[conversation_id] || [];
+            return { ...prev, [conversation_id]: [...list, msg] };
+          });
+        })
+      );
     })();
 
     return () => {
@@ -174,6 +209,8 @@ function App() {
       setChannels(ch);
       const u = await invoke<User[]>("list_users");
       setUsers(u);
+      const c = await invoke<Conversation[]>("list_conversations");
+      setConversations(c);
       setConnected(true);
     } catch (e) {
       setError(String(e));
@@ -204,6 +241,10 @@ function App() {
     setPublicKey(null);
     setVoiceChannelId(null);
     setVoiceParticipants([]);
+    setConversations([]);
+    setSelectedConversation(null);
+    setDmMessages({});
+    setView("channels");
   }
 
   async function selectChannel(channel: Channel) {
@@ -280,6 +321,63 @@ function App() {
     try {
       const phrase = await invoke<string>("get_recovery_phrase");
       setRecoveryPhrase(phrase);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function loadConversations() {
+    try {
+      const c = await invoke<Conversation[]>("list_conversations");
+      setConversations(c);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function startDmWith(targetKey: string) {
+    try {
+      const conv = await invoke<Conversation>("create_conversation", {
+        members: [targetKey],
+      });
+      // Make sure it's in the list
+      setConversations((prev) => {
+        if (prev.some((c) => c.id === conv.id)) return prev;
+        return [...prev, conv];
+      });
+      setSelectedConversation(conv);
+      setView("dms");
+      setShowFriends(false);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSendDm() {
+    if (!inputText.trim() || !selectedConversation) return;
+    const content = inputText;
+    setInputText("");
+    try {
+      await invoke("send_dm", {
+        conversationId: selectedConversation.id,
+        content,
+      });
+      // Optimistic local append
+      setDmMessages((prev) => {
+        const list = prev[selectedConversation.id] || [];
+        return {
+          ...prev,
+          [selectedConversation.id]: [
+            ...list,
+            {
+              sender: publicKey || "",
+              sender_name: null,
+              content,
+              timestamp: Math.floor(Date.now() / 1000),
+            },
+          ],
+        };
+      });
     } catch (e) {
       setError(String(e));
     }
@@ -434,6 +532,28 @@ function App() {
         <>
         <div className="main-layout">
           <div className="sidebar">
+            <div className="view-tabs">
+              <button
+                className={`view-tab ${view === "channels" ? "active" : ""}`}
+                onClick={() => setView("channels")}
+              >
+                Channels
+              </button>
+              <button
+                className={`view-tab ${view === "dms" ? "active" : ""}`}
+                onClick={() => {
+                  setView("dms");
+                  loadConversations();
+                }}
+              >
+                DMs
+                {conversations.length > 0 && (
+                  <span className="badge">{conversations.length}</span>
+                )}
+              </button>
+            </div>
+            {view === "channels" ? (
+              <>
             <div className="sidebar-header">
               <h3>Channels</h3>
               <button
@@ -493,6 +613,39 @@ function App() {
             {channels.length === 0 && (
               <p className="muted">No channels yet</p>
             )}
+              </>
+            ) : (
+              <>
+                <div className="sidebar-header">
+                  <h3>Direct Messages</h3>
+                </div>
+                <ul className="channel-list">
+                  {conversations.map((c) => {
+                    const others = c.members.filter((m) => m !== publicKey);
+                    const label = others
+                      .map((k) => {
+                        const u = users.find((u) => u.public_key === k);
+                        return u?.display_name || k.slice(0, 12);
+                      })
+                      .join(", ");
+                    return (
+                      <li
+                        key={c.id}
+                        className={`channel-item ${
+                          selectedConversation?.id === c.id ? "selected" : ""
+                        }`}
+                        onClick={() => setSelectedConversation(c)}
+                      >
+                        @ {label || "(empty)"}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {conversations.length === 0 && (
+                  <p className="muted">No conversations. Start one from your friends list.</p>
+                )}
+              </>
+            )}
             <div className="user-info">
               {voiceChannelId && (
                 <div className="voice-status">
@@ -521,7 +674,54 @@ function App() {
           </div>
 
           <div className="content">
-            {selectedChannel ? (
+            {view === "dms" ? (
+              selectedConversation ? (
+                <>
+                  <div className="channel-header">
+                    <h3>
+                      @{" "}
+                      {selectedConversation.members
+                        .filter((m) => m !== publicKey)
+                        .map((k) => {
+                          const u = users.find((u) => u.public_key === k);
+                          return u?.display_name || k.slice(0, 12);
+                        })
+                        .join(", ")}
+                    </h3>
+                  </div>
+                  <div className="messages">
+                    {(dmMessages[selectedConversation.id] || []).map((m, i) => (
+                      <div key={i} className="message">
+                        <span className="message-sender">
+                          {m.sender_name || m.sender.slice(0, 16)}
+                        </span>
+                        <span className="message-content">{m.content}</span>
+                      </div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
+                  <div className="input-area">
+                    <input
+                      type="text"
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendDm();
+                        }
+                      }}
+                      placeholder="Send a message..."
+                    />
+                    <button onClick={handleSendDm}>Send</button>
+                  </div>
+                </>
+              ) : (
+                <div className="no-channel">
+                  <p>Select a conversation</p>
+                </div>
+              )
+            ) : selectedChannel ? (
               <>
                 <div className="channel-header">
                   <h3># {selectedChannel.name}</h3>
@@ -696,12 +896,17 @@ function App() {
                         <span className="friend-name">
                           {f.display_name || f.public_key.slice(0, 16)}
                         </span>
-                        <button
-                          onClick={() => handleRemoveFriend(f.public_key)}
-                          className="btn-secondary"
-                        >
-                          Remove
-                        </button>
+                        <div style={{ display: "flex", gap: "6px" }}>
+                          <button onClick={() => startDmWith(f.public_key)}>
+                            Message
+                          </button>
+                          <button
+                            onClick={() => handleRemoveFriend(f.public_key)}
+                            className="btn-secondary"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>

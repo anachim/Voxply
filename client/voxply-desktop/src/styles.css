@@ -357,6 +357,47 @@ body {
   background: #6d28d9;
 }
 
+.view-tabs {
+  display: flex;
+  margin-bottom: 12px;
+  background: #0f1729;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.view-tab {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #8b94b0;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.view-tab.active {
+  background: #7c3aed;
+  color: white;
+}
+
+.view-tab:hover:not(.active) {
+  color: #e0e0e0;
+}
+
+.badge {
+  background: #ef4444;
+  color: white;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;

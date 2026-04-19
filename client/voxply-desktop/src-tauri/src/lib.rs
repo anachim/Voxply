@@ -75,6 +75,14 @@ struct FriendInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct ConversationInfo {
+    id: String,
+    conv_type: String,
+    members: Vec<String>,
+    created_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -108,6 +116,14 @@ enum WsServerMessage {
     VoiceParticipantLeft {
         channel_id: String,
         public_key: String,
+    },
+    #[serde(rename = "dm")]
+    DirectMessage {
+        conversation_id: String,
+        sender: String,
+        sender_name: Option<String>,
+        content: String,
+        timestamp: i64,
     },
     // Other variants we don't handle yet — serde will ignore them
     #[serde(other)]
@@ -226,6 +242,15 @@ async fn spawn_ws_task(
                                         let _ = app.emit("voice-participant-left", serde_json::json!({
                                             "channel_id": channel_id,
                                             "public_key": public_key,
+                                        }));
+                                    }
+                                    WsServerMessage::DirectMessage { conversation_id, sender, sender_name, content, timestamp } => {
+                                        let _ = app.emit("dm", serde_json::json!({
+                                            "conversation_id": conversation_id,
+                                            "sender": sender,
+                                            "sender_name": sender_name,
+                                            "content": content,
+                                            "timestamp": timestamp,
                                         }));
                                     }
                                     WsServerMessage::Other => {}
@@ -651,6 +676,77 @@ async fn remove_friend(
 }
 
 #[tauri::command]
+async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<ConversationInfo>, String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/conversations"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch conversations: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid conversations response: {e}"))
+}
+
+#[tauri::command]
+async fn create_conversation(
+    members: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<ConversationInfo, String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/conversations"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "members": members }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid response: {e}"))
+}
+
+#[tauri::command]
+async fn send_dm(
+    conversation_id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/conversations/{conversation_id}/messages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "content": content }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn get_recovery_phrase() -> Result<String, String> {
     let path = Identity::default_path().map_err(|e| e.to_string())?;
     let identity = Identity::load(&path).map_err(|e| e.to_string())?;
@@ -738,6 +834,9 @@ pub fn run() {
             send_friend_request,
             accept_friend,
             remove_friend,
+            list_conversations,
+            create_conversation,
+            send_dm,
             disconnect
         ])
         .run(tauri::generate_context!())

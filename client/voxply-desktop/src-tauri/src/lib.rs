@@ -32,6 +32,7 @@ struct HubSession {
 enum WsCommand {
     Subscribe(String),
     Unsubscribe(String),
+    SubscribeAll,
     VoiceJoin { channel_id: String, udp_port: u16 },
     VoiceLeave { channel_id: String },
 }
@@ -423,6 +424,10 @@ async fn spawn_ws_task(
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<WsCommand>();
     let hub_id_for_task = hub_id.clone();
 
+    // Ask the hub to forward every channel message so we can show unread badges
+    // for hubs the user isn't currently viewing.
+    let _ = cmd_tx.send(WsCommand::SubscribeAll);
+
     let task = tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -489,6 +494,9 @@ async fn spawn_ws_task(
                         }
                         WsCommand::Unsubscribe(channel_id) => {
                             serde_json::json!({ "type": "unsubscribe", "channel_id": channel_id })
+                        }
+                        WsCommand::SubscribeAll => {
+                            serde_json::json!({ "type": "subscribe_all" })
                         }
                         WsCommand::VoiceJoin { channel_id, udp_port } => {
                             serde_json::json!({ "type": "voice_join", "channel_id": channel_id, "udp_port": udp_port })

@@ -162,6 +162,7 @@ function App() {
   const [activeHubId, setActiveHubId] = useState<string | null>(null);
   const [showAddHub, setShowAddHub] = useState(false);
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
+  const [unreadByHub, setUnreadByHub] = useState<Record<string, number>>({});
 
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -253,14 +254,22 @@ function App() {
         await listen<{ hub_id: string; channel_id: string; message: Message }>(
           "chat-message",
           (event) => {
-            // Only react to events from the currently active hub
-            if (event.payload.hub_id !== activeHubIdRef.current) return;
-            const { channel_id, message } = event.payload;
-            if (channel_id === selectedChannelIdRef.current) {
+            const { hub_id, channel_id, message } = event.payload;
+            const isActiveHub = hub_id === activeHubIdRef.current;
+            const isActiveChannel =
+              isActiveHub && channel_id === selectedChannelIdRef.current;
+
+            if (isActiveChannel) {
               setMessages((prev) => {
                 if (prev.some((m) => m.id === message.id)) return prev;
                 return [...prev, message];
               });
+            } else if (!isActiveHub) {
+              // Unread bump: only for hubs the user isn't currently viewing
+              setUnreadByHub((prev) => ({
+                ...prev,
+                [hub_id]: (prev[hub_id] || 0) + 1,
+              }));
             }
           }
         )
@@ -386,6 +395,12 @@ function App() {
       setHubs((prev) =>
         prev.map((h) => ({ ...h, is_active: h.hub_id === hubId }))
       );
+      setUnreadByHub((prev) => {
+        if (!prev[hubId]) return prev;
+        const next = { ...prev };
+        delete next[hubId];
+        return next;
+      });
     } catch (e) {
       setError(String(e));
     }
@@ -402,6 +417,12 @@ function App() {
       if (activeHubId === hubId) {
         setActiveHubId(remaining[0]?.hub_id ?? null);
       }
+      setUnreadByHub((prev) => {
+        if (!prev[hubId]) return prev;
+        const next = { ...prev };
+        delete next[hubId];
+        return next;
+      });
     } catch (e) {
       setError(String(e));
     }
@@ -755,23 +776,31 @@ function App() {
               @
             </button>
             <div className="hub-sidebar-divider" />
-            {hubs.map((h) => (
-              <button
-                key={h.hub_id}
-                className={`hub-icon ${h.hub_id === activeHubId && view === "channels" ? "active" : ""}`}
-                onClick={() => {
-                  handleSwitchHub(h.hub_id);
-                  setView("channels");
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  handleRemoveHub(h.hub_id);
-                }}
-                title={`${h.hub_name} (${h.hub_url})`}
-              >
-                {h.hub_name.slice(0, 2).toUpperCase()}
-              </button>
-            ))}
+            {hubs.map((h) => {
+              const unread = unreadByHub[h.hub_id] || 0;
+              return (
+                <button
+                  key={h.hub_id}
+                  className={`hub-icon ${h.hub_id === activeHubId && view === "channels" ? "active" : ""}`}
+                  onClick={() => {
+                    handleSwitchHub(h.hub_id);
+                    setView("channels");
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    handleRemoveHub(h.hub_id);
+                  }}
+                  title={`${h.hub_name} (${h.hub_url})`}
+                >
+                  {h.hub_name.slice(0, 2).toUpperCase()}
+                  {unread > 0 && (
+                    <span className="hub-unread-badge">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             <button
               className="hub-icon add"
               onClick={() => setShowAddHub(true)}

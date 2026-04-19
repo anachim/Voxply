@@ -59,6 +59,8 @@ pub enum WsClientMessage {
     Subscribe { channel_id: String },
     #[serde(rename = "unsubscribe")]
     Unsubscribe { channel_id: String },
+    #[serde(rename = "subscribe_all")]
+    SubscribeAll,
     #[serde(rename = "voice_join")]
     VoiceJoin { channel_id: String, udp_port: u16 },
     #[serde(rename = "voice_leave")]

@@ -41,6 +41,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
     let mut chat_rx = state.chat_tx.subscribe();
     let mut dm_rx = state.dm_tx.subscribe();
     let mut subscribed: HashSet<String> = HashSet::new();
+    let mut subscribe_all = false;
     let mut voice_channel: Option<String> = None;
 
     // Load this user's conversation IDs for DM filtering
@@ -59,7 +60,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
             result = chat_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if subscribed.contains(&event.channel_id) {
+                        if subscribe_all || subscribed.contains(&event.channel_id) {
                             let msg = WsServerMessage::ChatMessage {
                                 channel_id: event.channel_id,
                                 message: event.message,
@@ -86,6 +87,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                             }
                             Ok(WsClientMessage::Unsubscribe { channel_id }) => {
                                 subscribed.remove(&channel_id);
+                            }
+                            Ok(WsClientMessage::SubscribeAll) => {
+                                subscribe_all = true;
                             }
                             Ok(WsClientMessage::VoiceJoin { channel_id, udp_port }) => {
                                 let client_addr: SocketAddr =

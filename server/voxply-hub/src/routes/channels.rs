@@ -39,15 +39,24 @@ pub async fn create_channel(
     let now = crate::auth::handlers::unix_timestamp();
     let is_category_int = if req.is_category { 1i64 } else { 0 };
 
+    // Append at the end of the current order
+    let next_order: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(display_order), -1) + 1 FROM channels",
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
     sqlx::query(
-        "INSERT INTO channels (id, name, created_by, parent_id, is_category, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO channels (id, name, created_by, parent_id, is_category, display_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&req.name)
     .bind(&user.public_key)
     .bind(&req.parent_id)
     .bind(is_category_int)
+    .bind(next_order)
     .bind(now)
     .execute(&state.db)
     .await
@@ -67,6 +76,7 @@ pub async fn create_channel(
             created_by: user.public_key,
             parent_id: req.parent_id,
             is_category: req.is_category,
+            display_order: next_order,
             created_at: now,
         }),
     ))
@@ -77,7 +87,9 @@ pub async fn list_channels(
     _user: AuthUser,
 ) -> Result<Json<Vec<ChannelResponse>>, (StatusCode, String)> {
     let rows = sqlx::query_as::<_, ChannelRow>(
-        "SELECT id, name, created_by, parent_id, is_category, created_at FROM channels ORDER BY is_category DESC, created_at",
+        "SELECT id, name, created_by, parent_id, is_category, display_order, created_at
+         FROM channels
+         ORDER BY display_order, created_at",
     )
     .fetch_all(&state.db)
     .await
@@ -91,11 +103,39 @@ pub async fn list_channels(
             created_by: r.created_by,
             parent_id: r.parent_id,
             is_category: r.is_category != 0,
+            display_order: r.display_order,
             created_at: r.created_at,
         })
         .collect();
 
     Ok(Json(channels))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ReorderRequest {
+    /// Ordered list of channel IDs as they should appear
+    pub channel_ids: Vec<String>,
+}
+
+pub async fn reorder_channels(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<ReorderRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(permissions::MANAGE_CHANNELS)?;
+
+    // Assign sequential display_order values
+    for (index, channel_id) in req.channel_ids.iter().enumerate() {
+        sqlx::query("UPDATE channels SET display_order = ? WHERE id = ?")
+            .bind(index as i64)
+            .bind(channel_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
+
+    Ok(StatusCode::OK)
 }
 
 pub async fn delete_channel(
@@ -176,5 +216,6 @@ struct ChannelRow {
     created_by: String,
     parent_id: Option<String>,
     is_category: i64,
+    display_order: i64,
     created_at: i64,
 }

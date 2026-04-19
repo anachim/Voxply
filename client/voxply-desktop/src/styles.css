@@ -398,6 +398,22 @@ body {
   font-weight: 700;
 }
 
+.channel-item.dragging,
+.category-group.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.channel-item,
+.category-header {
+  cursor: grab;
+}
+
+.channel-item:active,
+.category-header:active {
+  cursor: grabbing;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;

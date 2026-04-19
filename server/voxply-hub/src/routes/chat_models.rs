@@ -16,6 +16,7 @@ pub struct ChannelResponse {
     pub created_by: String,
     pub parent_id: Option<String>,
     pub is_category: bool,
+    pub display_order: i64,
     pub created_at: i64,
 }
 

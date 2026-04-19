@@ -9,6 +9,20 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface Channel {
   id: string;
@@ -16,6 +30,7 @@ interface Channel {
   created_by: string;
   parent_id: string | null;
   is_category: boolean;
+  display_order: number;
   created_at: number;
 }
 
@@ -57,6 +72,81 @@ interface DmMessage {
   sender_name: string | null;
   content: string;
   timestamp: number;
+}
+
+function SortableChannelItem({
+  channel,
+  selected,
+  onClick,
+  onContextMenu,
+}: {
+  channel: Channel;
+  selected: boolean;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: channel.id });
+
+  return (
+    <li
+      ref={setNodeRef}
+      className={`channel-item ${selected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+      {...attributes}
+      {...listeners}
+    >
+      # {channel.name}
+    </li>
+  );
+}
+
+function SortableCategoryItem({
+  channel,
+  children,
+  onContextMenu,
+  onAddChannel,
+}: {
+  channel: Channel;
+  children: React.ReactNode;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onAddChannel: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: channel.id });
+
+  return (
+    <li
+      ref={setNodeRef}
+      className={`category-group ${isDragging ? "dragging" : ""}`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <div
+        className="category-header"
+        onContextMenu={onContextMenu}
+        {...attributes}
+        {...listeners}
+      >
+        <span className="category-name">{channel.name.toUpperCase()}</span>
+        <button
+          className="btn-icon-small"
+          onClick={(e) => { e.stopPropagation(); onAddChannel(); }}
+          title="Add channel"
+        >
+          +
+        </button>
+      </div>
+      {children}
+    </li>
+  );
 }
 
 function App() {
@@ -448,15 +538,45 @@ function App() {
   }
 
   // Build a nested tree: categories contain their child channels.
-  // Top-level = channels with no parent.
+  // Top-level = channels with no parent. Sorted by display_order.
   function buildChannelTree(): { node: Channel; children: Channel[] }[] {
+    const sorted = [...channels].sort((a, b) => a.display_order - b.display_order);
     const tree: { node: Channel; children: Channel[] }[] = [];
-    const topLevel = channels.filter((c) => !c.parent_id);
+    const topLevel = sorted.filter((c) => !c.parent_id);
     for (const ch of topLevel) {
-      const children = channels.filter((c) => c.parent_id === ch.id);
+      const children = sorted.filter((c) => c.parent_id === ch.id);
       tree.push({ node: ch, children });
     }
     return tree;
+  }
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const sorted = [...channels].sort((a, b) => a.display_order - b.display_order);
+    const oldIndex = sorted.findIndex((c) => c.id === active.id);
+    const newIndex = sorted.findIndex((c) => c.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+
+    const reordered = arrayMove(sorted, oldIndex, newIndex);
+
+    // Update local state immediately
+    const reIndexed = reordered.map((c, i) => ({ ...c, display_order: i }));
+    setChannels(reIndexed);
+
+    // Persist to hub
+    try {
+      await invoke("reorder_channels", {
+        channelIds: reordered.map((c) => c.id),
+      });
+    } catch (e) {
+      setError(String(e));
+    }
   }
 
   async function handleCreateChannel() {
@@ -564,52 +684,50 @@ function App() {
                 +
               </button>
             </div>
-            <ul className="channel-list">
-              {buildChannelTree().map(({ node, children }) =>
-                node.is_category ? (
-                  <li key={node.id} className="category-group">
-                    <div
-                      className="category-header"
-                      onContextMenu={(e) => openContextMenu(e, node)}
-                    >
-                      <span className="category-name">{node.name.toUpperCase()}</span>
-                      <button
-                        className="btn-icon-small"
-                        onClick={() => openCreateChannelUnder(node.id, false)}
-                        title="Add channel"
+            <DndContext sensors={dndSensors} onDragEnd={handleDragEnd}>
+              <SortableContext
+                items={buildChannelTree().map(({ node }) => node.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <ul className="channel-list">
+                  {buildChannelTree().map(({ node, children }) =>
+                    node.is_category ? (
+                      <SortableCategoryItem
+                        key={node.id}
+                        channel={node}
+                        onContextMenu={(e) => openContextMenu(e, node)}
+                        onAddChannel={() => openCreateChannelUnder(node.id, false)}
                       >
-                        +
-                      </button>
-                    </div>
-                    <ul className="channel-sublist">
-                      {children.map((c) => (
-                        <li
-                          key={c.id}
-                          className={`channel-item ${
-                            selectedChannel?.id === c.id ? "selected" : ""
-                          }`}
-                          onClick={() => selectChannel(c)}
-                          onContextMenu={(e) => openContextMenu(e, c)}
+                        <SortableContext
+                          items={children.map((c) => c.id)}
+                          strategy={verticalListSortingStrategy}
                         >
-                          # {c.name}
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ) : (
-                  <li
-                    key={node.id}
-                    className={`channel-item ${
-                      selectedChannel?.id === node.id ? "selected" : ""
-                    }`}
-                    onClick={() => selectChannel(node)}
-                    onContextMenu={(e) => openContextMenu(e, node)}
-                  >
-                    # {node.name}
-                  </li>
-                )
-              )}
-            </ul>
+                          <ul className="channel-sublist">
+                            {children.map((c) => (
+                              <SortableChannelItem
+                                key={c.id}
+                                channel={c}
+                                selected={selectedChannel?.id === c.id}
+                                onClick={() => selectChannel(c)}
+                                onContextMenu={(e) => openContextMenu(e, c)}
+                              />
+                            ))}
+                          </ul>
+                        </SortableContext>
+                      </SortableCategoryItem>
+                    ) : (
+                      <SortableChannelItem
+                        key={node.id}
+                        channel={node}
+                        selected={selectedChannel?.id === node.id}
+                        onClick={() => selectChannel(node)}
+                        onContextMenu={(e) => openContextMenu(e, node)}
+                      />
+                    )
+                  )}
+                </ul>
+              </SortableContext>
+            </DndContext>
             {channels.length === 0 && (
               <p className="muted">No channels yet</p>
             )}

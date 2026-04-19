@@ -20,6 +20,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/channels", post(routes::channels::create_channel))
         .route("/channels", get(routes::channels::list_channels))
         .route("/channels/{channel_id}", axum::routing::delete(routes::channels::delete_channel))
+        .route("/channels/reorder", post(routes::channels::reorder_channels))
         .route("/channels/{channel_id}/messages", post(routes::messages::send_message))
         .route("/channels/{channel_id}/messages", get(routes::messages::get_messages))
         .route("/users", get(routes::users::list_users))

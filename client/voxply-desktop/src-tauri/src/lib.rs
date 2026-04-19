@@ -57,6 +57,7 @@ struct ChannelInfo {
     created_by: String,
     parent_id: Option<String>,
     is_category: bool,
+    display_order: i64,
     created_at: i64,
 }
 
@@ -347,6 +348,31 @@ async fn create_channel(
     }
 
     serde_json::from_str(&body).map_err(|e| format!("Invalid response: {e}"))
+}
+
+#[tauri::command]
+async fn reorder_channels(
+    channel_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/channels/reorder"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "channel_ids": channel_ids }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to reorder: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -820,6 +846,7 @@ pub fn run() {
             list_channels,
             create_channel,
             delete_channel,
+            reorder_channels,
             list_users,
             get_messages,
             send_message,

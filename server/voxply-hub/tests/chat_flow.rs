@@ -340,6 +340,39 @@ async fn cannot_delete_non_empty_category() {
 }
 
 #[tokio::test]
+async fn reorder_channels() {
+    let server = setup().await;
+    let identity = Identity::generate();
+    let token = authenticate(&server, &identity).await;
+
+    let mut ids = Vec::new();
+    for name in ["alpha", "beta", "gamma"] {
+        let resp = server
+            .post("/channels")
+            .authorization_bearer(&token)
+            .json(&json!({ "name": name }))
+            .await;
+        let ch: ChannelResponse = resp.json();
+        ids.push(ch.id);
+    }
+
+    // Reverse the order
+    let reversed: Vec<String> = ids.iter().rev().cloned().collect();
+    server
+        .post("/channels/reorder")
+        .authorization_bearer(&token)
+        .json(&json!({ "channel_ids": reversed.clone() }))
+        .await
+        .assert_status_ok();
+
+    // List should now be in the new order
+    let resp = server.get("/channels").authorization_bearer(&token).await;
+    let channels: Vec<ChannelResponse> = resp.json();
+    let names: Vec<&str> = channels.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["gamma", "beta", "alpha"]);
+}
+
+#[tokio::test]
 async fn delete_channel_nonexistent_returns_404() {
     let server = setup().await;
     let identity = Identity::generate();

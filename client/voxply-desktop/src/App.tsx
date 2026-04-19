@@ -54,6 +54,13 @@ interface VoiceParticipant {
   display_name: string | null;
 }
 
+interface Hub {
+  hub_id: string;
+  hub_name: string;
+  hub_url: string;
+  is_active: boolean;
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -150,12 +157,22 @@ function SortableCategoryItem({
 }
 
 function App() {
-  // Connection state
+  // Multi-hub state
+  const [hubs, setHubs] = useState<Hub[]>([]);
+  const [activeHubId, setActiveHubId] = useState<string | null>(null);
+  const [showAddHub, setShowAddHub] = useState(false);
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
-  const [connected, setConnected] = useState(false);
+
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const activeHubIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeHubIdRef.current = activeHubId;
+  }, [activeHubId]);
+
+  const connected = hubs.length > 0 && activeHubId !== null;
 
   // Chat state
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -225,9 +242,11 @@ function App() {
 
     (async () => {
       unlistens.push(
-        await listen<{ channel_id: string; message: Message }>(
+        await listen<{ hub_id: string; channel_id: string; message: Message }>(
           "chat-message",
           (event) => {
+            // Only react to events from the currently active hub
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
             const { channel_id, message } = event.payload;
             if (channel_id === selectedChannelIdRef.current) {
               setMessages((prev) => {
@@ -241,19 +260,22 @@ function App() {
 
       unlistens.push(
         await listen<{
+          hub_id: string;
           channel_id: string;
           hub_udp_port: number;
           participants: VoiceParticipant[];
         }>("voice-joined", (event) => {
+          if (event.payload.hub_id !== activeHubIdRef.current) return;
           setVoiceChannelId(event.payload.channel_id);
           setVoiceParticipants(event.payload.participants);
         })
       );
 
       unlistens.push(
-        await listen<{ channel_id: string; participant: VoiceParticipant }>(
+        await listen<{ hub_id: string; channel_id: string; participant: VoiceParticipant }>(
           "voice-participant-joined",
           (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
             setVoiceParticipants((prev) => {
               if (prev.some((p) => p.public_key === event.payload.participant.public_key)) return prev;
               return [...prev, event.payload.participant];
@@ -263,9 +285,10 @@ function App() {
       );
 
       unlistens.push(
-        await listen<{ channel_id: string; public_key: string }>(
+        await listen<{ hub_id: string; channel_id: string; public_key: string }>(
           "voice-participant-left",
           (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
             setVoiceParticipants((prev) =>
               prev.filter((p) => p.public_key !== event.payload.public_key)
             );
@@ -274,8 +297,9 @@ function App() {
       );
 
       unlistens.push(
-        await listen<DmMessage & { conversation_id: string }>("dm", (event) => {
-          const { conversation_id, ...msg } = event.payload;
+        await listen<DmMessage & { hub_id: string; conversation_id: string }>("dm", (event) => {
+          if (event.payload.hub_id !== activeHubIdRef.current) return;
+          const { conversation_id, hub_id: _, ...msg } = event.payload;
           setDmMessages((prev) => {
             const list = prev[conversation_id] || [];
             return { ...prev, [conversation_id]: [...list, msg] };
@@ -289,19 +313,41 @@ function App() {
     };
   }, []);
 
-  async function handleConnect() {
-    setLoading(true);
-    setError(null);
+  async function loadHubData() {
     try {
-      const pubKey = await invoke<string>("connect", { hubUrl });
-      setPublicKey(pubKey);
       const ch = await invoke<Channel[]>("list_channels");
       setChannels(ch);
       const u = await invoke<User[]>("list_users");
       setUsers(u);
       const c = await invoke<Conversation[]>("list_conversations");
       setConversations(c);
-      setConnected(true);
+      // Reset selection when switching hub
+      setSelectedChannel(null);
+      setSelectedConversation(null);
+      setMessages([]);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleAddHub() {
+    setLoading(true);
+    setError(null);
+    try {
+      const hub = await invoke<Hub>("add_hub", { hubUrl });
+      const allHubs = await invoke<Hub[]>("list_hubs");
+      setHubs(allHubs);
+      // Get our public key (assuming it's the same identity for all hubs)
+      if (!publicKey) {
+        const phrase = await invoke<string>("get_recovery_phrase").catch(() => "");
+        // We can't easily get the pub key — pull from /me of the new hub later
+        setPublicKey(null);
+      }
+      // If this is the first hub, set it active
+      if (!activeHubId) {
+        setActiveHubId(hub.hub_id);
+      }
+      setShowAddHub(false);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -309,7 +355,57 @@ function App() {
     }
   }
 
-  // Refresh users every 10 seconds while connected (cheap polling for online status)
+  async function handleSwitchHub(hubId: string) {
+    if (hubId === activeHubId) return;
+    try {
+      await invoke("set_active_hub", { hubId });
+      setActiveHubId(hubId);
+      setHubs((prev) =>
+        prev.map((h) => ({ ...h, is_active: h.hub_id === hubId }))
+      );
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRemoveHub(hubId: string) {
+    if (!confirm("Remove this hub from your list?")) return;
+    try {
+      await invoke("remove_hub", { hubId });
+      const remaining = await invoke<Hub[]>("list_hubs");
+      setHubs(remaining);
+      if (activeHubId === hubId) {
+        setActiveHubId(remaining[0]?.hub_id ?? null);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  // Auto-connect saved hubs on app start
+  useEffect(() => {
+    (async () => {
+      try {
+        const allHubs = await invoke<Hub[]>("auto_connect_saved");
+        if (allHubs.length > 0) {
+          setHubs(allHubs);
+          const active = allHubs.find((h) => h.is_active) ?? allHubs[0];
+          setActiveHubId(active.hub_id);
+        }
+      } catch (e) {
+        console.error("Auto-connect failed:", e);
+      }
+    })();
+  }, []);
+
+  // Reload data when switching hubs
+  useEffect(() => {
+    if (activeHubId) {
+      loadHubData();
+    }
+  }, [activeHubId]);
+
+  // Refresh users every 10 seconds for active hub
   useEffect(() => {
     if (!connected) return;
     const interval = setInterval(async () => {
@@ -319,11 +415,12 @@ function App() {
       } catch {}
     }, 10000);
     return () => clearInterval(interval);
-  }, [connected]);
+  }, [connected, activeHubId]);
 
   async function handleDisconnect() {
-    await invoke("disconnect");
-    setConnected(false);
+    await invoke("disconnect_all");
+    setHubs([]);
+    setActiveHubId(null);
     setChannels([]);
     setMessages([]);
     setUsers([]);
@@ -642,7 +739,7 @@ function App() {
               placeholder="Hub URL"
               disabled={loading}
             />
-            <button onClick={handleConnect} disabled={loading}>
+            <button onClick={handleAddHub} disabled={loading}>
               {loading ? "Connecting..." : "Connect"}
             </button>
           </div>
@@ -651,6 +748,29 @@ function App() {
       ) : (
         <>
         <div className="main-layout">
+          <div className="hub-sidebar">
+            {hubs.map((h) => (
+              <button
+                key={h.hub_id}
+                className={`hub-icon ${h.hub_id === activeHubId ? "active" : ""}`}
+                onClick={() => handleSwitchHub(h.hub_id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  handleRemoveHub(h.hub_id);
+                }}
+                title={`${h.hub_name} (${h.hub_url})`}
+              >
+                {h.hub_name.slice(0, 2).toUpperCase()}
+              </button>
+            ))}
+            <button
+              className="hub-icon add"
+              onClick={() => setShowAddHub(true)}
+              title="Add hub"
+            >
+              +
+            </button>
+          </div>
           <div className="sidebar">
             <div className="view-tabs">
               <button
@@ -958,6 +1078,34 @@ function App() {
                 </button>
                 <button onClick={handleCreateChannel}>Create</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {showAddHub && (
+          <div className="modal-overlay" onClick={() => setShowAddHub(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Add Hub</h3>
+              <input
+                type="text"
+                value={hubUrl}
+                onChange={(e) => setHubUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddHub();
+                  if (e.key === "Escape") setShowAddHub(false);
+                }}
+                placeholder="http://hub-url:3000"
+                autoFocus
+              />
+              <div className="modal-actions">
+                <button onClick={() => setShowAddHub(false)} className="btn-secondary">
+                  Cancel
+                </button>
+                <button onClick={handleAddHub} disabled={loading}>
+                  {loading ? "Connecting..." : "Connect"}
+                </button>
+              </div>
+              {error && <div className="error">{error}</div>}
             </div>
           </div>
         )}

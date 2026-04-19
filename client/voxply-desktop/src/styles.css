@@ -404,6 +404,57 @@ body {
   cursor: grabbing;
 }
 
+.hub-sidebar {
+  width: 64px;
+  background: #0f1729;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  gap: 8px;
+  border-right: 1px solid #1a1a2e;
+  overflow-y: auto;
+}
+
+.hub-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  border: none;
+  background: #1e2a47;
+  color: #e0e0e0;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hub-icon:hover {
+  border-radius: 12px;
+  background: #7c3aed;
+}
+
+.hub-icon.active {
+  border-radius: 12px;
+  background: #7c3aed;
+  box-shadow: -3px 0 0 0 #fbbf24;
+}
+
+.hub-icon.add {
+  background: #1e2a47;
+  color: #10b981;
+  font-size: 24px;
+}
+
+.hub-icon.add:hover {
+  background: #10b981;
+  color: white;
+}
+
 .channel-item,
 .category-header {
   cursor: grab;

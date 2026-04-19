@@ -23,3 +23,4 @@ voxply-identity = { path = "../../../shared/voxply-identity" }
 voxply-voice = { path = "../../../shared/voxply-voice" }
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 futures-util = "0.3"
+dirs = "6"

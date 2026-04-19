@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc;
@@ -11,16 +12,20 @@ use voxply_identity::Identity;
 
 #[derive(Default)]
 struct AppState {
-    inner: Mutex<Option<HubSession>>,
+    /// Live hub sessions keyed by hub_id (the hub's public_key).
+    hubs: Mutex<HashMap<String, HubSession>>,
+    /// Currently active hub_id (what the UI is showing).
+    active_hub: Mutex<Option<String>>,
+    /// Voice session (only one at a time across all hubs).
     voice: Mutex<Option<VoiceSession>>,
 }
 
 struct HubSession {
+    hub_id: String,
+    hub_name: String,
     hub_url: String,
     token: String,
-    // Channel to send commands to the WS task (subscribe/unsubscribe)
     ws_tx: mpsc::UnboundedSender<WsCommand>,
-    // Handle to the background WS task so we can abort on disconnect
     ws_task: JoinHandle<()>,
 }
 
@@ -31,10 +36,9 @@ enum WsCommand {
     VoiceLeave { channel_id: String },
 }
 
-/// Voice session state. We send a "stop" signal to a background thread
-/// that owns the AudioPipeline (which contains !Send cpal streams).
 struct VoiceSession {
     channel_id: String,
+    hub_id: String,
     stop_tx: std::sync::mpsc::Sender<()>,
 }
 
@@ -48,6 +52,27 @@ struct ChallengeResponse {
 #[derive(Serialize, Deserialize)]
 struct VerifyResponse {
     token: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct HubInfo {
+    hub_id: String,
+    hub_name: String,
+    hub_url: String,
+    is_active: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct SavedHub {
+    hub_id: String,
+    hub_name: String,
+    hub_url: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InfoResponse {
+    name: String,
+    public_key: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -93,7 +118,6 @@ struct MessageInfo {
     created_at: i64,
 }
 
-// Incoming WS message from the hub (tagged enum matching server)
 #[derive(Deserialize)]
 #[serde(tag = "type")]
 enum WsServerMessage {
@@ -126,7 +150,6 @@ enum WsServerMessage {
         content: String,
         timestamp: i64,
     },
-    // Other variants we don't handle yet — serde will ignore them
     #[serde(other)]
     Other,
 }
@@ -137,32 +160,102 @@ struct VoiceParticipantInfo {
     display_name: Option<String>,
 }
 
+// --- Persistence: saved hubs file ---
+
+fn saved_hubs_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("hubs.json"))
+}
+
+fn load_saved_hubs() -> Vec<SavedHub> {
+    if let Ok(path) = saved_hubs_path() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(hubs) = serde_json::from_str(&data) {
+                return hubs;
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn save_hubs_list(hubs: &[SavedHub]) -> Result<(), String> {
+    let path = saved_hubs_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Mkdir failed: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(hubs).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("Write failed: {e}"))?;
+    Ok(())
+}
+
+// --- Helpers ---
+
+/// Get the active session details (hub_url, token) or error if no hub selected.
+fn active_session(state: &AppState) -> Result<(String, String), String> {
+    let active_id = state
+        .active_hub
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("No active hub")?;
+    let hubs = state.hubs.lock().unwrap();
+    let s = hubs.get(&active_id).ok_or("Active hub not connected")?;
+    Ok((s.hub_url.clone(), s.token.clone()))
+}
+
+/// Get the active session's WS sender.
+fn active_ws_tx(state: &AppState) -> Result<mpsc::UnboundedSender<WsCommand>, String> {
+    let active_id = state
+        .active_hub
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("No active hub")?;
+    let hubs = state.hubs.lock().unwrap();
+    let s = hubs.get(&active_id).ok_or("Active hub not connected")?;
+    Ok(s.ws_tx.clone())
+}
+
 // --- Tauri commands ---
 
+/// Connect to a hub by URL. Adds it to the saved list.
 #[tauri::command]
-async fn connect(
+async fn add_hub(
     hub_url: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<String, String> {
+) -> Result<HubInfo, String> {
     let path = Identity::default_path().map_err(|e| e.to_string())?;
     let (identity, _) = Identity::load_or_create(&path).map_err(|e| e.to_string())?;
     let pub_key = identity.public_key_hex();
 
     let client = reqwest::Client::new();
 
+    // Get hub info first (gives us hub_id and name)
+    let info: InfoResponse = client
+        .get(format!("{hub_url}/info"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to reach hub: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid info response: {e}"))?;
+
+    let hub_id = info.public_key.clone();
+    let hub_name = info.name.clone();
+
+    // Authenticate
     let challenge: ChallengeResponse = client
         .post(format!("{hub_url}/auth/challenge"))
         .json(&serde_json::json!({ "public_key": pub_key }))
         .send()
         .await
-        .map_err(|e| format!("Failed to connect: {e}"))?
+        .map_err(|e| format!("Failed: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("Invalid challenge response: {e}"))?;
+        .map_err(|e| format!("Invalid challenge: {e}"))?;
 
-    let challenge_bytes = hex::decode(&challenge.challenge)
-        .map_err(|e| format!("Invalid challenge hex: {e}"))?;
+    let challenge_bytes = hex::decode(&challenge.challenge).map_err(|e| e.to_string())?;
     let signature = identity.sign(&challenge_bytes);
 
     let verify: VerifyResponse = client
@@ -174,27 +267,113 @@ async fn connect(
         }))
         .send()
         .await
-        .map_err(|e| format!("Failed to verify: {e}"))?
+        .map_err(|e| format!("Failed: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("Invalid verify response: {e}"))?;
+        .map_err(|e| format!("Invalid verify: {e}"))?;
 
     let token = verify.token;
 
-    // Start the WebSocket connection
-    let (cmd_tx, ws_task) = spawn_ws_task(hub_url.clone(), token.clone(), app.clone()).await?;
+    // Spawn WS task with hub_id tagging
+    let (cmd_tx, ws_task) = spawn_ws_task(hub_id.clone(), hub_url.clone(), token.clone(), app.clone()).await?;
 
-    *state.inner.lock().unwrap() = Some(HubSession {
-        hub_url,
+    let session = HubSession {
+        hub_id: hub_id.clone(),
+        hub_name: hub_name.clone(),
+        hub_url: hub_url.clone(),
         token,
         ws_tx: cmd_tx,
         ws_task,
-    });
+    };
 
-    Ok(pub_key)
+    {
+        let mut hubs = state.hubs.lock().unwrap();
+        hubs.insert(hub_id.clone(), session);
+    }
+
+    // Auto-set as active if no active hub yet
+    {
+        let mut active = state.active_hub.lock().unwrap();
+        if active.is_none() {
+            *active = Some(hub_id.clone());
+        }
+    }
+
+    // Persist to disk
+    let mut saved = load_saved_hubs();
+    if !saved.iter().any(|h| h.hub_id == hub_id) {
+        saved.push(SavedHub {
+            hub_id: hub_id.clone(),
+            hub_name: hub_name.clone(),
+            hub_url: hub_url.clone(),
+        });
+        let _ = save_hubs_list(&saved);
+    }
+
+    let active = state.active_hub.lock().unwrap().clone();
+    Ok(HubInfo {
+        hub_id: hub_id.clone(),
+        hub_name,
+        hub_url,
+        is_active: active.as_deref() == Some(hub_id.as_str()),
+    })
+}
+
+#[tauri::command]
+fn list_hubs(state: State<'_, AppState>) -> Vec<HubInfo> {
+    let hubs = state.hubs.lock().unwrap();
+    let active = state.active_hub.lock().unwrap().clone();
+    hubs.values()
+        .map(|s| HubInfo {
+            hub_id: s.hub_id.clone(),
+            hub_name: s.hub_name.clone(),
+            hub_url: s.hub_url.clone(),
+            is_active: active.as_deref() == Some(s.hub_id.as_str()),
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn set_active_hub(hub_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let hubs = state.hubs.lock().unwrap();
+    if !hubs.contains_key(&hub_id) {
+        return Err("Hub not connected".to_string());
+    }
+    *state.active_hub.lock().unwrap() = Some(hub_id);
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_hub(hub_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(session) = state.hubs.lock().unwrap().remove(&hub_id) {
+        session.ws_task.abort();
+    }
+    {
+        let mut active = state.active_hub.lock().unwrap();
+        if active.as_deref() == Some(hub_id.as_str()) {
+            *active = None;
+        }
+    }
+    let mut saved = load_saved_hubs();
+    saved.retain(|h| h.hub_id != hub_id);
+    let _ = save_hubs_list(&saved);
+    Ok(())
+}
+
+#[tauri::command]
+async fn auto_connect_saved(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Vec<HubInfo>, String> {
+    let saved = load_saved_hubs();
+    for hub in &saved {
+        let _ = add_hub(hub.hub_url.clone(), state.clone(), app.clone()).await;
+    }
+    Ok(list_hubs(state))
 }
 
 async fn spawn_ws_task(
+    hub_id: String,
     hub_url: String,
     token: String,
     app: AppHandle,
@@ -210,11 +389,11 @@ async fn spawn_ws_task(
 
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<WsCommand>();
+    let hub_id_for_task = hub_id.clone();
 
     let task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // Incoming WS messages from hub
                 maybe_msg = ws_rx.next() => {
                     match maybe_msg {
                         Some(Ok(WsMessage::Text(text))) => {
@@ -222,12 +401,14 @@ async fn spawn_ws_task(
                                 match server_msg {
                                     WsServerMessage::ChatMessage { channel_id, message } => {
                                         let _ = app.emit("chat-message", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
                                             "channel_id": channel_id,
                                             "message": message,
                                         }));
                                     }
                                     WsServerMessage::VoiceJoined { channel_id, hub_udp_port, participants } => {
                                         let _ = app.emit("voice-joined", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
                                             "channel_id": channel_id,
                                             "hub_udp_port": hub_udp_port,
                                             "participants": participants,
@@ -235,18 +416,21 @@ async fn spawn_ws_task(
                                     }
                                     WsServerMessage::VoiceParticipantJoined { channel_id, participant } => {
                                         let _ = app.emit("voice-participant-joined", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
                                             "channel_id": channel_id,
                                             "participant": participant,
                                         }));
                                     }
                                     WsServerMessage::VoiceParticipantLeft { channel_id, public_key } => {
                                         let _ = app.emit("voice-participant-left", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
                                             "channel_id": channel_id,
                                             "public_key": public_key,
                                         }));
                                     }
                                     WsServerMessage::DirectMessage { conversation_id, sender, sender_name, content, timestamp } => {
                                         let _ = app.emit("dm", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
                                             "conversation_id": conversation_id,
                                             "sender": sender,
                                             "sender_name": sender_name,
@@ -266,7 +450,6 @@ async fn spawn_ws_task(
                         _ => {}
                     }
                 }
-                // Outgoing commands from React
                 Some(cmd) = cmd_rx.recv() => {
                     let json = match cmd {
                         WsCommand::Subscribe(channel_id) => {
@@ -295,24 +478,17 @@ async fn spawn_ws_task(
 
 #[tauri::command]
 async fn list_channels(state: State<'_, AppState>) -> Result<Vec<ChannelInfo>, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
-    let channels: Vec<ChannelInfo> = client
+    client
         .get(format!("{hub_url}/channels"))
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch channels: {e}"))?
+        .map_err(|e| format!("Failed: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("Invalid channels response: {e}"))?;
-
-    Ok(channels)
+        .map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]
@@ -322,12 +498,7 @@ async fn create_channel(
     is_category: bool,
     state: State<'_, AppState>,
 ) -> Result<ChannelInfo, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{hub_url}/channels"))
@@ -339,15 +510,12 @@ async fn create_channel(
         }))
         .send()
         .await
-        .map_err(|e| format!("Failed to create channel: {e}"))?;
+        .map_err(|e| format!("Failed: {e}"))?;
 
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("Hub rejected: {body}"));
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
     }
-
-    serde_json::from_str(&body).map_err(|e| format!("Invalid response: {e}"))
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]
@@ -355,12 +523,7 @@ async fn reorder_channels(
     channel_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{hub_url}/channels/reorder"))
@@ -368,7 +531,7 @@ async fn reorder_channels(
         .json(&serde_json::json!({ "channel_ids": channel_ids }))
         .send()
         .await
-        .map_err(|e| format!("Failed to reorder: {e}"))?;
+        .map_err(|e| format!("Failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(resp.text().await.unwrap_or_default());
     }
@@ -376,50 +539,34 @@ async fn reorder_channels(
 }
 
 #[tauri::command]
-async fn delete_channel(
-    channel_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+async fn delete_channel(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .delete(format!("{hub_url}/channels/{channel_id}"))
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to delete channel: {e}"))?;
-
+        .map_err(|e| format!("Failed: {e}"))?;
     if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Hub rejected: {body}"));
+        return Err(resp.text().await.unwrap_or_default());
     }
-
     Ok(())
 }
 
 #[tauri::command]
 async fn list_users(state: State<'_, AppState>) -> Result<Vec<UserInfo>, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     client
         .get(format!("{hub_url}/users"))
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch users: {e}"))?
+        .map_err(|e| format!("Failed: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("Invalid users response: {e}"))
+        .map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]
@@ -427,22 +574,17 @@ async fn get_messages(
     channel_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<MessageInfo>, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let mut messages: Vec<MessageInfo> = client
         .get(format!("{hub_url}/channels/{channel_id}/messages"))
         .bearer_auth(&token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch messages: {e}"))?
+        .map_err(|e| format!("Failed: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("Invalid messages response: {e}"))?;
+        .map_err(|e| format!("Invalid: {e}"))?;
 
     messages.reverse();
     Ok(messages)
@@ -454,47 +596,52 @@ async fn send_message(
     content: String,
     state: State<'_, AppState>,
 ) -> Result<MessageInfo, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
-    let msg: MessageInfo = client
+    client
         .post(format!("{hub_url}/channels/{channel_id}/messages"))
         .bearer_auth(&token)
         .json(&serde_json::json!({ "content": content }))
         .send()
         .await
-        .map_err(|e| format!("Failed to send message: {e}"))?
+        .map_err(|e| format!("Failed: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("Invalid message response: {e}"))?;
-
-    Ok(msg)
+        .map_err(|e| format!("Invalid: {e}"))
 }
 
-/// Join a voice channel.
-/// Starts the audio pipeline in a dedicated thread (cpal streams may be !Send),
-/// then sends the VoiceJoin WS message with the actual local UDP port.
 #[tauri::command]
-async fn voice_join(
-    channel_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    // Already in voice?
+fn subscribe_channel(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let tx = active_ws_tx(&state)?;
+    tx.send(WsCommand::Subscribe(channel_id))
+        .map_err(|_| "WS closed".to_string())
+}
+
+#[tauri::command]
+fn unsubscribe_channel(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let tx = active_ws_tx(&state)?;
+    tx.send(WsCommand::Unsubscribe(channel_id))
+        .map_err(|_| "WS closed".to_string())
+}
+
+#[tauri::command]
+async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
     if state.voice.lock().unwrap().is_some() {
         return Err("Already in a voice channel".to_string());
     }
 
-    let (hub_url, ws_tx) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.ws_tx.clone())
+    let (active_id, hub_url, ws_tx) = {
+        let active_id = state
+            .active_hub
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or("No active hub")?;
+        let hubs = state.hubs.lock().unwrap();
+        let s = hubs.get(&active_id).ok_or("Hub not connected")?;
+        (active_id, s.hub_url.clone(), s.ws_tx.clone())
     };
 
-    // Hub URL is http://host:port, voice UDP is on the same host + port 3001
     let host = hub_url
         .trim_start_matches("http://")
         .trim_start_matches("https://")
@@ -509,13 +656,11 @@ async fn voice_join(
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u16, String>>();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
 
-    // Run the pipeline in a dedicated thread with its own tokio runtime.
-    // The cpal streams stay on this thread and don't need to be Send.
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(r) => r,
             Err(e) => {
-                let _ = ready_tx.send(Err(format!("Failed to create runtime: {e}")));
+                let _ = ready_tx.send(Err(format!("Runtime: {e}")));
                 return;
             }
         };
@@ -524,7 +669,7 @@ async fn voice_join(
             let pipeline = match voxply_voice::AudioPipeline::start_p2p(0, hub_addr).await {
                 Ok(p) => p,
                 Err(e) => {
-                    let _ = ready_tx.send(Err(format!("Failed to start audio: {e}")));
+                    let _ = ready_tx.send(Err(format!("Audio: {e}")));
                     return;
                 }
             };
@@ -532,28 +677,25 @@ async fn voice_join(
             let local_port = pipeline.local_udp_port;
             let _ = ready_tx.send(Ok(local_port));
 
-            // Wait for stop signal
             let _ = tokio::task::spawn_blocking(move || stop_rx.recv()).await;
-
             pipeline.stop().await;
         });
     });
 
-    // Wait for the pipeline to start and get the local port
     let local_port = ready_rx
         .recv()
         .map_err(|_| "Voice thread died".to_string())??;
 
-    // Tell the hub we're joining via WS
     ws_tx
         .send(WsCommand::VoiceJoin {
             channel_id: channel_id.clone(),
             udp_port: local_port,
         })
-        .map_err(|_| "WebSocket closed".to_string())?;
+        .map_err(|_| "WS closed".to_string())?;
 
     *state.voice.lock().unwrap() = Some(VoiceSession {
         channel_id,
+        hub_id: active_id,
         stop_tx,
     });
 
@@ -561,208 +703,28 @@ async fn voice_join(
 }
 
 #[tauri::command]
-async fn update_display_name(
-    display_name: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
+fn voice_leave(state: State<'_, AppState>) -> Result<(), String> {
+    let session = state.voice.lock().unwrap().take();
+    if let Some(s) = session {
+        let _ = s.stop_tx.send(());
+        let hubs = state.hubs.lock().unwrap();
+        if let Some(hub) = hubs.get(&s.hub_id) {
+            let _ = hub.ws_tx.send(WsCommand::VoiceLeave {
+                channel_id: s.channel_id,
+            });
+        }
+    }
+    Ok(())
+}
 
+#[tauri::command]
+async fn update_display_name(display_name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .patch(format!("{hub_url}/me"))
         .bearer_auth(&token)
         .json(&serde_json::json!({ "display_name": display_name }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to update display name: {e}"))?;
-
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Hub rejected: {body}"));
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn list_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    client
-        .get(format!("{hub_url}/friends"))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch friends: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid friends response: {e}"))
-}
-
-#[tauri::command]
-async fn list_pending_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    client
-        .get(format!("{hub_url}/friends/pending"))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch pending: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid pending response: {e}"))
-}
-
-#[tauri::command]
-async fn send_friend_request(
-    target_public_key: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("{hub_url}/friends"))
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "target_public_key": target_public_key }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send request: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(resp.text().await.unwrap_or_default());
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn accept_friend(
-    from_public_key: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("{hub_url}/friends/{from_public_key}/accept"))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to accept: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(resp.text().await.unwrap_or_default());
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn remove_friend(
-    target_public_key: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .delete(format!("{hub_url}/friends/{target_public_key}"))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to remove friend: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(resp.text().await.unwrap_or_default());
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<ConversationInfo>, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    client
-        .get(format!("{hub_url}/conversations"))
-        .bearer_auth(&token)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch conversations: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid conversations response: {e}"))
-}
-
-#[tauri::command]
-async fn create_conversation(
-    members: Vec<String>,
-    state: State<'_, AppState>,
-) -> Result<ConversationInfo, String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("{hub_url}/conversations"))
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "members": members }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(resp.text().await.unwrap_or_default());
-    }
-    resp.json().await.map_err(|e| format!("Invalid response: {e}"))
-}
-
-#[tauri::command]
-async fn send_dm(
-    conversation_id: String,
-    content: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (hub_url, token) = {
-        let session = state.inner.lock().unwrap();
-        let s = session.as_ref().ok_or("Not connected")?;
-        (s.hub_url.clone(), s.token.clone())
-    };
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("{hub_url}/conversations/{conversation_id}/messages"))
-        .bearer_auth(&token)
-        .json(&serde_json::json!({ "content": content }))
         .send()
         .await
         .map_err(|e| format!("Failed: {e}"))?;
@@ -780,57 +742,144 @@ fn get_recovery_phrase() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn voice_leave(state: State<'_, AppState>) -> Result<(), String> {
-    let session = state.voice.lock().unwrap().take();
-    if let Some(s) = session {
-        let _ = s.stop_tx.send(()); // signal the audio thread to stop
+async fn list_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/friends"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))
+}
 
-        // Tell hub we're leaving
-        let inner = state.inner.lock().unwrap();
-        if let Some(hub) = inner.as_ref() {
-            let _ = hub.ws_tx.send(WsCommand::VoiceLeave {
-                channel_id: s.channel_id,
-            });
-        }
+#[tauri::command]
+async fn list_pending_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/friends/pending"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn send_friend_request(target_public_key: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/friends"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "target_public_key": target_public_key }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
     }
     Ok(())
 }
 
-/// Subscribe to real-time updates for a channel (via WebSocket).
 #[tauri::command]
-fn subscribe_channel(
-    channel_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let session = state.inner.lock().unwrap();
-    let s = session.as_ref().ok_or("Not connected")?;
-    s.ws_tx
-        .send(WsCommand::Subscribe(channel_id))
-        .map_err(|_| "WebSocket closed".to_string())
-}
-
-/// Unsubscribe from a channel's real-time updates.
-#[tauri::command]
-fn unsubscribe_channel(
-    channel_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let session = state.inner.lock().unwrap();
-    let s = session.as_ref().ok_or("Not connected")?;
-    s.ws_tx
-        .send(WsCommand::Unsubscribe(channel_id))
-        .map_err(|_| "WebSocket closed".to_string())
+async fn accept_friend(from_public_key: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/friends/{from_public_key}/accept"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
 }
 
 #[tauri::command]
-fn disconnect(state: State<'_, AppState>) {
-    // Stop voice first
+async fn remove_friend(target_public_key: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/friends/{target_public_key}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_conversations(state: State<'_, AppState>) -> Result<Vec<ConversationInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/conversations"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn create_conversation(members: Vec<String>, state: State<'_, AppState>) -> Result<ConversationInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/conversations"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "members": members }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn send_dm(conversation_id: String, content: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/conversations/{conversation_id}/messages"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "content": content }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn disconnect_all(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(voice) = state.voice.lock().unwrap().take() {
         let _ = voice.stop_tx.send(());
     }
-    if let Some(session) = state.inner.lock().unwrap().take() {
+    let mut hubs = state.hubs.lock().unwrap();
+    for (_, session) in hubs.drain() {
         session.ws_task.abort();
     }
+    *state.active_hub.lock().unwrap() = None;
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -842,7 +891,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            connect,
+            add_hub,
+            list_hubs,
+            set_active_hub,
+            remove_hub,
+            auto_connect_saved,
             list_channels,
             create_channel,
             delete_channel,
@@ -864,7 +917,7 @@ pub fn run() {
             list_conversations,
             create_conversation,
             send_dm,
-            disconnect
+            disconnect_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

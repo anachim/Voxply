@@ -322,6 +322,41 @@ body {
   user-select: text;
 }
 
+.friend-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.friend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #16213e;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.friend-name {
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.friend-item button {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  background: #7c3aed;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.friend-item button:hover {
+  background: #6d28d9;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;

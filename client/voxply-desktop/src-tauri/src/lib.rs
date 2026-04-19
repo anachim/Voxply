@@ -68,6 +68,13 @@ struct UserInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct FriendInfo {
+    public_key: String,
+    display_name: Option<String>,
+    since: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -531,6 +538,119 @@ async fn update_display_name(
 }
 
 #[tauri::command]
+async fn list_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/friends"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch friends: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid friends response: {e}"))
+}
+
+#[tauri::command]
+async fn list_pending_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/friends/pending"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch pending: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid pending response: {e}"))
+}
+
+#[tauri::command]
+async fn send_friend_request(
+    target_public_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/friends"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "target_public_key": target_public_key }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn accept_friend(
+    from_public_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/friends/{from_public_key}/accept"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to accept: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_friend(
+    target_public_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/friends/{target_public_key}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to remove friend: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn get_recovery_phrase() -> Result<String, String> {
     let path = Identity::default_path().map_err(|e| e.to_string())?;
     let identity = Identity::load(&path).map_err(|e| e.to_string())?;
@@ -613,6 +733,11 @@ pub fn run() {
             voice_leave,
             update_display_name,
             get_recovery_phrase,
+            list_friends,
+            list_pending_friends,
+            send_friend_request,
+            accept_friend,
+            remove_friend,
             disconnect
         ])
         .run(tauri::generate_context!())

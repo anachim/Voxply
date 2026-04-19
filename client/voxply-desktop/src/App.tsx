@@ -39,6 +39,12 @@ interface VoiceParticipant {
   display_name: string | null;
 }
 
+interface Friend {
+  public_key: string;
+  display_name: string | null;
+  since: number;
+}
+
 function App() {
   // Connection state
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
@@ -73,6 +79,12 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
+
+  // Friends
+  const [showFriends, setShowFriends] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [pendingFriends, setPendingFriends] = useState<Friend[]>([]);
+  const [friendRequestKey, setFriendRequestKey] = useState("");
 
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -273,6 +285,52 @@ function App() {
     }
   }
 
+  async function refreshFriends() {
+    try {
+      const f = await invoke<Friend[]>("list_friends");
+      const p = await invoke<Friend[]>("list_pending_friends");
+      setFriends(f);
+      setPendingFriends(p);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function openFriends() {
+    setShowFriends(true);
+    await refreshFriends();
+  }
+
+  async function handleSendFriendRequest() {
+    const key = friendRequestKey.trim();
+    if (!key) return;
+    try {
+      await invoke("send_friend_request", { targetPublicKey: key });
+      setFriendRequestKey("");
+      await refreshFriends();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleAcceptFriend(fromKey: string) {
+    try {
+      await invoke("accept_friend", { fromPublicKey: fromKey });
+      await refreshFriends();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRemoveFriend(targetKey: string) {
+    try {
+      await invoke("remove_friend", { targetPublicKey: targetKey });
+      await refreshFriends();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   function openSettings() {
     setShowSettings(true);
     setRecoveryPhrase(null);
@@ -449,6 +507,9 @@ function App() {
               )}
               <p className="muted">You: {publicKey?.slice(0, 16)}...</p>
               <div className="user-info-buttons">
+                <button onClick={openFriends} className="btn-small">
+                  Friends
+                </button>
                 <button onClick={openSettings} className="btn-small">
                   Settings
                 </button>
@@ -578,6 +639,77 @@ function App() {
                   Cancel
                 </button>
                 <button onClick={handleCreateChannel}>Create</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showFriends && (
+          <div className="modal-overlay" onClick={() => setShowFriends(false)}>
+            <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+              <h3>Friends</h3>
+
+              <div className="settings-section">
+                <label className="settings-label">Add friend</label>
+                <div className="settings-row">
+                  <input
+                    type="text"
+                    value={friendRequestKey}
+                    onChange={(e) => setFriendRequestKey(e.target.value)}
+                    placeholder="Public key (paste here)"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSendFriendRequest();
+                    }}
+                  />
+                  <button onClick={handleSendFriendRequest}>Send</button>
+                </div>
+              </div>
+
+              {pendingFriends.length > 0 && (
+                <div className="settings-section">
+                  <label className="settings-label">
+                    Pending requests ({pendingFriends.length})
+                  </label>
+                  <ul className="friend-list">
+                    {pendingFriends.map((f) => (
+                      <li key={f.public_key} className="friend-item">
+                        <span className="friend-name">
+                          {f.display_name || f.public_key.slice(0, 16)}
+                        </span>
+                        <button onClick={() => handleAcceptFriend(f.public_key)}>
+                          Accept
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="settings-section">
+                <label className="settings-label">Friends ({friends.length})</label>
+                {friends.length === 0 ? (
+                  <p className="muted">No friends yet</p>
+                ) : (
+                  <ul className="friend-list">
+                    {friends.map((f) => (
+                      <li key={f.public_key} className="friend-item">
+                        <span className="friend-name">
+                          {f.display_name || f.public_key.slice(0, 16)}
+                        </span>
+                        <button
+                          onClick={() => handleRemoveFriend(f.public_key)}
+                          className="btn-secondary"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowFriends(false)}>Close</button>
               </div>
             </div>
           </div>

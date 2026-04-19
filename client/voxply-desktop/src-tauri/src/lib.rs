@@ -503,6 +503,41 @@ async fn voice_join(
 }
 
 #[tauri::command]
+async fn update_display_name(
+    display_name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = {
+        let session = state.inner.lock().unwrap();
+        let s = session.as_ref().ok_or("Not connected")?;
+        (s.hub_url.clone(), s.token.clone())
+    };
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/me"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "display_name": display_name }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to update display name: {e}"))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Hub rejected: {body}"));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_recovery_phrase() -> Result<String, String> {
+    let path = Identity::default_path().map_err(|e| e.to_string())?;
+    let identity = Identity::load(&path).map_err(|e| e.to_string())?;
+    Ok(identity.recovery_phrase())
+}
+
+#[tauri::command]
 fn voice_leave(state: State<'_, AppState>) -> Result<(), String> {
     let session = state.voice.lock().unwrap().take();
     if let Some(s) = session {
@@ -576,6 +611,8 @@ pub fn run() {
             unsubscribe_channel,
             voice_join,
             voice_leave,
+            update_display_name,
+            get_recovery_phrase,
             disconnect
         ])
         .run(tauri::generate_context!())

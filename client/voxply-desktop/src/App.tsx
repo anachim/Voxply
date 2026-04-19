@@ -69,6 +69,11 @@ function App() {
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
 
+  // Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsDisplayName, setSettingsDisplayName] = useState("");
+  const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
+
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -246,6 +251,36 @@ function App() {
     }
   }
 
+  async function handleSaveDisplayName() {
+    const name = settingsDisplayName.trim();
+    if (!name) return;
+    try {
+      await invoke("update_display_name", { displayName: name });
+      // Refresh user list to show new name
+      const u = await invoke<User[]>("list_users");
+      setUsers(u);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleShowRecovery() {
+    try {
+      const phrase = await invoke<string>("get_recovery_phrase");
+      setRecoveryPhrase(phrase);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function openSettings() {
+    setShowSettings(true);
+    setRecoveryPhrase(null);
+    // Pre-fill with current display name if known
+    const me = users.find((u) => u.public_key === publicKey);
+    setSettingsDisplayName(me?.display_name || "");
+  }
+
   async function handleVoiceLeave() {
     try {
       await invoke("voice_leave");
@@ -413,9 +448,14 @@ function App() {
                 </div>
               )}
               <p className="muted">You: {publicKey?.slice(0, 16)}...</p>
-              <button onClick={handleDisconnect} className="btn-small">
-                Disconnect
-              </button>
+              <div className="user-info-buttons">
+                <button onClick={openSettings} className="btn-small">
+                  Settings
+                </button>
+                <button onClick={handleDisconnect} className="btn-small btn-secondary-small">
+                  Disconnect
+                </button>
+              </div>
             </div>
           </div>
 
@@ -538,6 +578,51 @@ function App() {
                   Cancel
                 </button>
                 <button onClick={handleCreateChannel}>Create</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSettings && (
+          <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+            <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+              <h3>Settings</h3>
+
+              <div className="settings-section">
+                <label className="settings-label">Display name</label>
+                <div className="settings-row">
+                  <input
+                    type="text"
+                    value={settingsDisplayName}
+                    onChange={(e) => setSettingsDisplayName(e.target.value)}
+                    placeholder="Your display name"
+                  />
+                  <button onClick={handleSaveDisplayName}>Save</button>
+                </div>
+              </div>
+
+              <div className="settings-section">
+                <label className="settings-label">Recovery phrase</label>
+                <p className="muted">
+                  24 words you can use to restore your identity. Write them down
+                  and keep them safe — anyone with these words can impersonate you.
+                </p>
+                {recoveryPhrase ? (
+                  <div className="recovery-phrase">{recoveryPhrase}</div>
+                ) : (
+                  <button onClick={handleShowRecovery} className="btn-secondary">
+                    Reveal recovery phrase
+                  </button>
+                )}
+              </div>
+
+              <div className="settings-section">
+                <label className="settings-label">Public key</label>
+                <div className="public-key">{publicKey}</div>
+              </div>
+
+              <div className="modal-actions">
+                <button onClick={() => setShowSettings(false)}>Close</button>
               </div>
             </div>
           </div>

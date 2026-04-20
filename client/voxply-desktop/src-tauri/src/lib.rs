@@ -1153,6 +1153,49 @@ fn get_my_public_key() -> Result<String, String> {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct BanInfo {
+    target_public_key: String,
+    banned_by: String,
+    reason: Option<String>,
+    created_at: i64,
+}
+
+#[tauri::command]
+async fn list_bans(state: State<'_, AppState>) -> Result<Vec<BanInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/moderation/bans"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn unban_user(
+    target_public_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/moderation/bans/{target_public_key}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MemberAdminInfo {
     public_key: String,
     display_name: Option<String>,
@@ -1662,6 +1705,8 @@ pub fn run() {
             timeout_user_cmd,
             assign_role,
             unassign_role,
+            list_bans,
+            unban_user,
             list_friends,
             list_pending_friends,
             send_friend_request,

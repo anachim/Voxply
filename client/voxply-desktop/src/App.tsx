@@ -84,6 +84,13 @@ interface MemberAdminInfo {
   roles: RoleInfo[];
 }
 
+interface BanInfo {
+  target_public_key: string;
+  banned_by: string;
+  reason: string | null;
+  created_at: number;
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -411,6 +418,8 @@ interface HubAdminPageProps {
     roleId: string,
     hasRole: boolean
   ) => void;
+  bans: BanInfo[];
+  onUnban: (publicKey: string) => void;
 }
 
 const ALL_PERMISSIONS: { id: string; label: string }[] = [
@@ -827,8 +836,48 @@ function HubAdminPage(props: HubAdminPageProps) {
         )}
         {props.tab === "bans" && (
           <section>
-            <h1>Bans</h1>
-            <p className="muted">Ban list is coming soon.</p>
+            <h1>Bans — {props.bans.length}</h1>
+            {props.bans.length === 0 ? (
+              <p className="muted">No active bans.</p>
+            ) : (
+              <table className="members-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Reason</th>
+                    <th>Banned by</th>
+                    <th>When</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {props.bans.map((b) => (
+                    <tr key={b.target_public_key}>
+                      <td>
+                        <div className="member-pk" title={b.target_public_key}>
+                          {formatPubkey(b.target_public_key)}
+                        </div>
+                      </td>
+                      <td>{b.reason || <span className="muted">—</span>}</td>
+                      <td>
+                        <span className="member-pk" title={b.banned_by}>
+                          {formatPubkey(b.banned_by)}
+                        </span>
+                      </td>
+                      <td>{formatRelative(b.created_at)}</td>
+                      <td>
+                        <button
+                          className="btn-small"
+                          onClick={() => props.onUnban(b.target_public_key)}
+                        >
+                          Unban
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </section>
         )}
         {props.tab === "invites" && (
@@ -895,6 +944,9 @@ function App() {
 
   // Member admin
   const [adminMembers, setAdminMembers] = useState<MemberAdminInfo[]>([]);
+
+  // Ban admin
+  const [adminBans, setAdminBans] = useState<BanInfo[]>([]);
 
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
@@ -988,6 +1040,8 @@ function App() {
     } else if (hubAdminTab === "members") {
       refreshRoles(); // roles list used for the assign-role dropdown
       refreshMembers();
+    } else if (hubAdminTab === "bans") {
+      refreshBans();
     }
   }, [showHubAdmin, hubAdminTab]);
 
@@ -1323,6 +1377,26 @@ function App() {
       });
       setToast(`Timed out for ${minutes}m`);
       await refreshMembers();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshBans() {
+    try {
+      const b = await invoke<BanInfo[]>("list_bans");
+      setAdminBans(b);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUnban(publicKey: string) {
+    if (!confirm("Unban this user? They'll be able to rejoin.")) return;
+    try {
+      await invoke("unban_user", { targetPublicKey: publicKey });
+      setToast("Unbanned");
+      await refreshBans();
     } catch (e) {
       setError(String(e));
     }
@@ -1885,6 +1959,8 @@ function App() {
             onMuteMember={handleMuteMember}
             onTimeoutMember={handleTimeoutMember}
             onToggleRoleAssignment={handleToggleRoleAssignment}
+            bans={adminBans}
+            onUnban={handleUnban}
           />
         ) : showSettings ? (
           <SettingsPage

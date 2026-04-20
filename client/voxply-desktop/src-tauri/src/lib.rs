@@ -1153,6 +1153,90 @@ fn get_my_public_key() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn list_roles(state: State<'_, AppState>) -> Result<Vec<RoleInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/roles"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn create_role(
+    name: String,
+    permissions: Vec<String>,
+    priority: i64,
+    state: State<'_, AppState>,
+) -> Result<RoleInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/roles"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": name,
+            "permissions": permissions,
+            "priority": priority,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn update_role(
+    role_id: String,
+    name: Option<String>,
+    permissions: Option<Vec<String>>,
+    priority: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/roles/{role_id}"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": name,
+            "permissions": permissions,
+            "priority": priority,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn delete_role(role_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/roles/{role_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn get_me(state: State<'_, AppState>) -> Result<MeInfo, String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
@@ -1425,6 +1509,10 @@ pub fn run() {
             get_me,
             get_hub_branding,
             update_hub_branding,
+            list_roles,
+            create_role,
+            update_role,
+            delete_role,
             list_friends,
             list_pending_friends,
             send_friend_request,

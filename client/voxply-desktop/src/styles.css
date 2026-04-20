@@ -357,6 +357,46 @@ body {
   border: 1px dashed #333;
 }
 
+.role-editor {
+  background: #16213e;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.role-editor h3 {
+  color: #7c3aed;
+  font-size: 14px;
+  margin: 0;
+}
+
+.role-creator {
+  border: 1px dashed #333;
+  background: transparent;
+}
+
+.role-perms {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+}
+
+.role-perms .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+}
+
+.role-perms .checkbox-label input[type="checkbox"]:disabled + * {
+  color: #6b7280;
+}
+
 .sidebar-header-users {
   margin-top: 16px;
   border-top: 1px solid #1a1a2e;

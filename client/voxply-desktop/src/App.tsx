@@ -385,6 +385,168 @@ interface HubAdminPageProps {
   hubIcon: string;
   onHubIconChange: (v: string) => void;
   onSave: () => void;
+  roles: RoleInfo[];
+  onCreateRole: (name: string, perms: string[], priority: number) => void;
+  onUpdateRole: (
+    id: string,
+    updates: { name?: string; permissions?: string[]; priority?: number }
+  ) => void;
+  onDeleteRole: (id: string) => void;
+}
+
+const ALL_PERMISSIONS: { id: string; label: string }[] = [
+  { id: "admin", label: "Administrator (grants everything)" },
+  { id: "manage_channels", label: "Manage channels" },
+  { id: "manage_roles", label: "Manage roles" },
+  { id: "manage_messages", label: "Manage messages" },
+  { id: "kick_members", label: "Kick members" },
+  { id: "ban_members", label: "Ban members" },
+  { id: "mute_members", label: "Mute members" },
+  { id: "timeout_members", label: "Timeout members" },
+  { id: "read_messages", label: "Read messages" },
+  { id: "send_messages", label: "Send messages" },
+];
+
+function RoleEditor({
+  role,
+  onUpdate,
+  onDelete,
+}: {
+  role: RoleInfo;
+  onUpdate: (updates: { name?: string; permissions?: string[]; priority?: number }) => void;
+  onDelete: () => void;
+}) {
+  const isBuiltin = role.id.startsWith("builtin-");
+  const isOwner = role.id === "builtin-owner";
+  const [name, setName] = useState(role.name);
+  const [priority, setPriority] = useState(role.priority);
+  const [perms, setPerms] = useState<Set<string>>(new Set(role.permissions));
+
+  // Sync local state when the role prop changes (e.g., after a refresh)
+  useEffect(() => {
+    setName(role.name);
+    setPriority(role.priority);
+    setPerms(new Set(role.permissions));
+  }, [role.id, role.name, role.priority, role.permissions.join(",")]);
+
+  function togglePerm(p: string) {
+    const next = new Set(perms);
+    if (next.has(p)) next.delete(p);
+    else next.add(p);
+    setPerms(next);
+  }
+
+  function save() {
+    onUpdate({
+      name: isBuiltin ? undefined : name,
+      priority: isBuiltin ? undefined : priority,
+      permissions: isOwner ? undefined : Array.from(perms),
+    });
+  }
+
+  return (
+    <div className="role-editor">
+      <div className="settings-row">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={isBuiltin}
+        />
+        <input
+          type="number"
+          value={priority}
+          onChange={(e) => setPriority(Number(e.target.value))}
+          disabled={isBuiltin}
+          style={{ maxWidth: 90 }}
+          title="Priority (higher = more powerful)"
+        />
+      </div>
+      <div className="role-perms">
+        {ALL_PERMISSIONS.map((p) => (
+          <label key={p.id} className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={perms.has(p.id)}
+              onChange={() => togglePerm(p.id)}
+              disabled={isOwner}
+            />
+            {p.label}
+          </label>
+        ))}
+      </div>
+      <div className="settings-row">
+        <button onClick={save}>Save</button>
+        {!isBuiltin && (
+          <button onClick={onDelete} className="btn-secondary">
+            Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RoleCreator({
+  onCreate,
+}: {
+  onCreate: (name: string, perms: string[], priority: number) => void;
+}) {
+  const [name, setName] = useState("");
+  const [priority, setPriority] = useState(10);
+  const [perms, setPerms] = useState<Set<string>>(new Set());
+
+  function togglePerm(p: string) {
+    const next = new Set(perms);
+    if (next.has(p)) next.delete(p);
+    else next.add(p);
+    setPerms(next);
+  }
+
+  function create() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onCreate(trimmed, Array.from(perms), priority);
+    setName("");
+    setPriority(10);
+    setPerms(new Set());
+  }
+
+  return (
+    <div className="role-editor role-creator">
+      <h3>Create role</h3>
+      <div className="settings-row">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Role name"
+        />
+        <input
+          type="number"
+          value={priority}
+          onChange={(e) => setPriority(Number(e.target.value))}
+          style={{ maxWidth: 90 }}
+          title="Priority"
+        />
+      </div>
+      <div className="role-perms">
+        {ALL_PERMISSIONS.map((p) => (
+          <label key={p.id} className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={perms.has(p.id)}
+              onChange={() => togglePerm(p.id)}
+            />
+            {p.label}
+          </label>
+        ))}
+      </div>
+      <div className="settings-row">
+        <button onClick={create}>Create role</button>
+      </div>
+    </div>
+  );
 }
 
 function HubAdminPage(props: HubAdminPageProps) {
@@ -489,7 +651,22 @@ function HubAdminPage(props: HubAdminPageProps) {
         {props.tab === "roles" && (
           <section>
             <h1>Roles</h1>
-            <p className="muted">Role management UI is coming soon.</p>
+            <p className="muted">
+              Built-in roles (@everyone, Owner) can't be renamed or deleted but
+              @everyone permissions can be tuned.
+            </p>
+            {props.roles
+              .slice()
+              .sort((a, b) => b.priority - a.priority)
+              .map((role) => (
+                <RoleEditor
+                  key={role.id}
+                  role={role}
+                  onUpdate={(updates) => props.onUpdateRole(role.id, updates)}
+                  onDelete={() => props.onDeleteRole(role.id)}
+                />
+              ))}
+            <RoleCreator onCreate={props.onCreateRole} />
           </section>
         )}
         {props.tab === "members" && (
@@ -562,6 +739,9 @@ function App() {
   const [adminHubName, setAdminHubName] = useState("");
   const [adminHubDescription, setAdminHubDescription] = useState("");
   const [adminHubIcon, setAdminHubIcon] = useState("");
+
+  // Role editor
+  const [adminRoles, setAdminRoles] = useState<RoleInfo[]>([]);
 
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
@@ -646,6 +826,14 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showHubAdmin]);
+
+  // Load data for whichever admin tab the user opens
+  useEffect(() => {
+    if (!showHubAdmin) return;
+    if (hubAdminTab === "roles") {
+      refreshRoles();
+    }
+  }, [showHubAdmin, hubAdminTab]);
 
   async function copyPublicKey() {
     if (!publicKey) return;
@@ -850,6 +1038,58 @@ function App() {
       const refreshed = await invoke<Hub[]>("list_hubs");
       setHubs(refreshed);
       setToast("Hub settings saved");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshRoles() {
+    try {
+      const r = await invoke<RoleInfo[]>("list_roles");
+      setAdminRoles(r);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCreateRole(
+    name: string,
+    permissions: string[],
+    priority: number
+  ) {
+    try {
+      await invoke("create_role", { name, permissions, priority });
+      await refreshRoles();
+      setToast("Role created");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUpdateRole(
+    roleId: string,
+    updates: { name?: string; permissions?: string[]; priority?: number }
+  ) {
+    try {
+      await invoke("update_role", {
+        roleId,
+        name: updates.name ?? null,
+        permissions: updates.permissions ?? null,
+        priority: updates.priority ?? null,
+      });
+      await refreshRoles();
+      setToast("Role updated");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteRole(roleId: string) {
+    if (!confirm("Delete this role? Users assigned to it will lose the role.")) return;
+    try {
+      await invoke("delete_role", { roleId });
+      await refreshRoles();
+      setToast("Role deleted");
     } catch (e) {
       setError(String(e));
     }
@@ -1379,6 +1619,10 @@ function App() {
             hubIcon={adminHubIcon}
             onHubIconChange={setAdminHubIcon}
             onSave={handleSaveHubBranding}
+            roles={adminRoles}
+            onCreateRole={handleCreateRole}
+            onUpdateRole={handleUpdateRole}
+            onDeleteRole={handleDeleteRole}
           />
         ) : showSettings ? (
           <SettingsPage

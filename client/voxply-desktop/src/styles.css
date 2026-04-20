@@ -397,6 +397,78 @@ body {
   color: #6b7280;
 }
 
+.members-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.members-table th {
+  text-align: left;
+  color: #9ca3af;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid #333;
+  background: #0f1729;
+}
+
+.members-table td {
+  padding: 10px;
+  border-bottom: 1px solid #1a1a2e;
+  vertical-align: middle;
+}
+
+.member-name {
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.member-pk {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.member-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.member-role-chip {
+  background: #1e2a47;
+  color: #c4b5fd;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.member-actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.member-role-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .sidebar-header-users {
   margin-top: 16px;
   border-top: 1px solid #1a1a2e;

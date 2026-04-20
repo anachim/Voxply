@@ -1152,6 +1152,148 @@ fn get_my_public_key() -> Result<String, String> {
     Ok(identity.public_key_hex())
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct MemberAdminInfo {
+    public_key: String,
+    display_name: Option<String>,
+    online: bool,
+    first_seen_at: i64,
+    last_seen_at: i64,
+    roles: Vec<RoleInfo>,
+}
+
+#[tauri::command]
+async fn list_hub_members(
+    state: State<'_, AppState>,
+) -> Result<Vec<MemberAdminInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/hub/members"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn kick_user_cmd(
+    target_public_key: String,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    post_moderation(&state, "moderation/kick", serde_json::json!({
+        "target_public_key": target_public_key,
+        "reason": reason,
+    }))
+    .await
+}
+
+#[tauri::command]
+async fn ban_user_cmd(
+    target_public_key: String,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    post_moderation(&state, "moderation/bans", serde_json::json!({
+        "target_public_key": target_public_key,
+        "reason": reason,
+    }))
+    .await
+}
+
+#[tauri::command]
+async fn mute_user_cmd(
+    target_public_key: String,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    post_moderation(&state, "moderation/mutes", serde_json::json!({
+        "target_public_key": target_public_key,
+        "reason": reason,
+    }))
+    .await
+}
+
+#[tauri::command]
+async fn timeout_user_cmd(
+    target_public_key: String,
+    duration_seconds: u64,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    post_moderation(&state, "moderation/timeout", serde_json::json!({
+        "target_public_key": target_public_key,
+        "duration_seconds": duration_seconds,
+        "reason": reason,
+    }))
+    .await
+}
+
+async fn post_moderation(
+    state: &State<'_, AppState>,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/{path}"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn assign_role(
+    target_public_key: String,
+    role_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .put(format!("{hub_url}/users/{target_public_key}/roles/{role_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn unassign_role(
+    target_public_key: String,
+    role_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/users/{target_public_key}/roles/{role_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn list_roles(state: State<'_, AppState>) -> Result<Vec<RoleInfo>, String> {
     let (hub_url, token) = active_session(&state)?;
@@ -1513,6 +1655,13 @@ pub fn run() {
             create_role,
             update_role,
             delete_role,
+            list_hub_members,
+            kick_user_cmd,
+            ban_user_cmd,
+            mute_user_cmd,
+            timeout_user_cmd,
+            assign_role,
+            unassign_role,
             list_friends,
             list_pending_friends,
             send_friend_request,

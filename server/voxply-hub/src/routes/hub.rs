@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::middleware::AuthUser;
 use crate::permissions::{self, ADMIN};
+use crate::routes::role_models::RoleResponse;
 use crate::state::AppState;
 
 /// Update the hub's branding: name, description, icon (all optional).
@@ -89,4 +90,94 @@ async fn read_setting(db: &sqlx::SqlitePool, key: &str) -> Option<String> {
         .await
         .ok()
         .flatten()
+}
+
+/// Admin-facing member listing with joined / last-seen / online + role summaries.
+pub async fn list_members(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<Vec<MemberAdminInfo>>, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(ADMIN)?;
+
+    let online = state.online_users.read().await;
+
+    let users = sqlx::query_as::<_, UserAdminRow>(
+        "SELECT public_key, display_name, first_seen_at, last_seen_at
+         FROM users ORDER BY first_seen_at",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let mut result = Vec::with_capacity(users.len());
+    for u in users {
+        let roles = sqlx::query_as::<_, RoleAdminRow>(
+            "SELECT r.id, r.name, r.priority, r.created_at
+             FROM roles r
+             INNER JOIN user_roles ur ON r.id = ur.role_id
+             WHERE ur.user_public_key = ?
+             ORDER BY r.priority DESC",
+        )
+        .bind(&u.public_key)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+        let mut role_summaries = Vec::with_capacity(roles.len());
+        for r in roles {
+            let perms_for_role: Vec<String> = sqlx::query_scalar(
+                "SELECT permission FROM role_permissions WHERE role_id = ?",
+            )
+            .bind(&r.id)
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+            role_summaries.push(RoleResponse {
+                id: r.id,
+                name: r.name,
+                priority: r.priority,
+                permissions: perms_for_role,
+                created_at: r.created_at,
+            });
+        }
+
+        result.push(MemberAdminInfo {
+            online: online.contains(&u.public_key),
+            public_key: u.public_key,
+            display_name: u.display_name,
+            first_seen_at: u.first_seen_at,
+            last_seen_at: u.last_seen_at,
+            roles: role_summaries,
+        });
+    }
+
+    Ok(Json(result))
+}
+
+#[derive(Serialize)]
+pub struct MemberAdminInfo {
+    pub public_key: String,
+    pub display_name: Option<String>,
+    pub online: bool,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+    pub roles: Vec<RoleResponse>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UserAdminRow {
+    public_key: String,
+    display_name: Option<String>,
+    first_seen_at: i64,
+    last_seen_at: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct RoleAdminRow {
+    id: String,
+    name: String,
+    priority: i64,
+    created_at: i64,
 }

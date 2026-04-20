@@ -75,6 +75,15 @@ interface MeInfo {
   roles: RoleInfo[];
 }
 
+interface MemberAdminInfo {
+  public_key: string;
+  display_name: string | null;
+  online: boolean;
+  first_seen_at: number;
+  last_seen_at: number;
+  roles: RoleInfo[];
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -392,6 +401,16 @@ interface HubAdminPageProps {
     updates: { name?: string; permissions?: string[]; priority?: number }
   ) => void;
   onDeleteRole: (id: string) => void;
+  members: MemberAdminInfo[];
+  onKickMember: (publicKey: string) => void;
+  onBanMember: (publicKey: string) => void;
+  onMuteMember: (publicKey: string) => void;
+  onTimeoutMember: (publicKey: string) => void;
+  onToggleRoleAssignment: (
+    publicKey: string,
+    roleId: string,
+    hasRole: boolean
+  ) => void;
 }
 
 const ALL_PERMISSIONS: { id: string; label: string }[] = [
@@ -406,6 +425,107 @@ const ALL_PERMISSIONS: { id: string; label: string }[] = [
   { id: "read_messages", label: "Read messages" },
   { id: "send_messages", label: "Send messages" },
 ];
+
+function formatRelative(unixSec: number): string {
+  if (!unixSec) return "—";
+  const now = Math.floor(Date.now() / 1000);
+  const diff = now - unixSec;
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function MemberRow({
+  member,
+  allRoles,
+  onKick,
+  onBan,
+  onMute,
+  onTimeout,
+  onToggleRole,
+}: {
+  member: MemberAdminInfo;
+  allRoles: RoleInfo[];
+  onKick: () => void;
+  onBan: () => void;
+  onMute: () => void;
+  onTimeout: () => void;
+  onToggleRole: (roleId: string, hasRole: boolean) => void;
+}) {
+  const [showRoleMenu, setShowRoleMenu] = useState(false);
+  const hasRoleId = new Set(member.roles.map((r) => r.id));
+
+  return (
+    <tr>
+      <td>
+        <div className="member-name">
+          {member.display_name || formatPubkey(member.public_key)}
+        </div>
+        <div className="member-pk" title={member.public_key}>
+          {formatPubkey(member.public_key)}
+        </div>
+      </td>
+      <td>
+        <span className={`status-dot ${member.online ? "online" : "offline"}`} />{" "}
+        {member.online ? "Online" : "Offline"}
+      </td>
+      <td>
+        <div className="member-roles">
+          {member.roles.map((r) => (
+            <span key={r.id} className="member-role-chip">
+              {r.name}
+            </span>
+          ))}
+          {member.roles.length === 0 && <span className="muted">none</span>}
+        </div>
+      </td>
+      <td>{formatRelative(member.first_seen_at)}</td>
+      <td>{formatRelative(member.last_seen_at)}</td>
+      <td>
+        <div className="member-actions">
+          <button
+            className="btn-small"
+            onClick={() => setShowRoleMenu(!showRoleMenu)}
+          >
+            Roles ▾
+          </button>
+          <button className="btn-small" onClick={onTimeout}>
+            Timeout
+          </button>
+          <button className="btn-small" onClick={onMute}>
+            Mute
+          </button>
+          <button className="btn-small" onClick={onKick}>
+            Kick
+          </button>
+          <button className="btn-small btn-secondary-small" onClick={onBan}>
+            Ban
+          </button>
+          {showRoleMenu && (
+            <div className="member-role-menu">
+              {allRoles.map((r) => {
+                const has = hasRoleId.has(r.id);
+                // Owner role can't be toggled here (protects server-side rule).
+                if (r.id === "builtin-owner") return null;
+                return (
+                  <label key={r.id} className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={has}
+                      onChange={() => onToggleRole(r.id, has)}
+                    />
+                    {r.name}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
 
 function RoleEditor({
   role,
@@ -671,8 +791,38 @@ function HubAdminPage(props: HubAdminPageProps) {
         )}
         {props.tab === "members" && (
           <section>
-            <h1>Members</h1>
-            <p className="muted">Member table + moderation actions are coming soon.</p>
+            <h1>Members — {props.members.length}</h1>
+            <table className="members-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Status</th>
+                  <th>Roles</th>
+                  <th>Joined</th>
+                  <th>Last seen</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {props.members.map((m) => (
+                  <MemberRow
+                    key={m.public_key}
+                    member={m}
+                    allRoles={props.roles}
+                    onKick={() => props.onKickMember(m.public_key)}
+                    onBan={() => props.onBanMember(m.public_key)}
+                    onMute={() => props.onMuteMember(m.public_key)}
+                    onTimeout={() => props.onTimeoutMember(m.public_key)}
+                    onToggleRole={(roleId, has) =>
+                      props.onToggleRoleAssignment(m.public_key, roleId, has)
+                    }
+                  />
+                ))}
+              </tbody>
+            </table>
+            {props.members.length === 0 && (
+              <p className="muted">No members yet.</p>
+            )}
           </section>
         )}
         {props.tab === "bans" && (
@@ -742,6 +892,9 @@ function App() {
 
   // Role editor
   const [adminRoles, setAdminRoles] = useState<RoleInfo[]>([]);
+
+  // Member admin
+  const [adminMembers, setAdminMembers] = useState<MemberAdminInfo[]>([]);
 
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
@@ -832,6 +985,9 @@ function App() {
     if (!showHubAdmin) return;
     if (hubAdminTab === "roles") {
       refreshRoles();
+    } else if (hubAdminTab === "members") {
+      refreshRoles(); // roles list used for the assign-role dropdown
+      refreshMembers();
     }
   }, [showHubAdmin, hubAdminTab]);
 
@@ -1090,6 +1246,106 @@ function App() {
       await invoke("delete_role", { roleId });
       await refreshRoles();
       setToast("Role deleted");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshMembers() {
+    try {
+      const m = await invoke<MemberAdminInfo[]>("list_hub_members");
+      setAdminMembers(m);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleKickMember(publicKey: string) {
+    const reason = prompt("Reason for kick (optional)") ?? "";
+    try {
+      await invoke("kick_user_cmd", {
+        targetPublicKey: publicKey,
+        reason: reason.trim() || null,
+      });
+      setToast("Kicked");
+      await refreshMembers();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleBanMember(publicKey: string) {
+    const reason = prompt("Reason for ban (optional)") ?? "";
+    if (!confirm("Ban this user? They won't be able to rejoin.")) return;
+    try {
+      await invoke("ban_user_cmd", {
+        targetPublicKey: publicKey,
+        reason: reason.trim() || null,
+      });
+      setToast("Banned");
+      await refreshMembers();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleMuteMember(publicKey: string) {
+    const reason = prompt("Reason for mute (optional)") ?? "";
+    try {
+      await invoke("mute_user_cmd", {
+        targetPublicKey: publicKey,
+        reason: reason.trim() || null,
+      });
+      setToast("Muted");
+      await refreshMembers();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleTimeoutMember(publicKey: string) {
+    const durationStr = prompt(
+      "Timeout duration in minutes (1-1440)",
+      "10"
+    );
+    if (!durationStr) return;
+    const minutes = Number(durationStr);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 1440) {
+      setError("Invalid duration");
+      return;
+    }
+    const reason = prompt("Reason (optional)") ?? "";
+    try {
+      await invoke("timeout_user_cmd", {
+        targetPublicKey: publicKey,
+        durationSeconds: Math.floor(minutes * 60),
+        reason: reason.trim() || null,
+      });
+      setToast(`Timed out for ${minutes}m`);
+      await refreshMembers();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleToggleRoleAssignment(
+    publicKey: string,
+    roleId: string,
+    hasRole: boolean
+  ) {
+    try {
+      if (hasRole) {
+        await invoke("unassign_role", {
+          targetPublicKey: publicKey,
+          roleId,
+        });
+      } else {
+        await invoke("assign_role", {
+          targetPublicKey: publicKey,
+          roleId,
+        });
+      }
+      await refreshMembers();
     } catch (e) {
       setError(String(e));
     }
@@ -1623,6 +1879,12 @@ function App() {
             onCreateRole={handleCreateRole}
             onUpdateRole={handleUpdateRole}
             onDeleteRole={handleDeleteRole}
+            members={adminMembers}
+            onKickMember={handleKickMember}
+            onBanMember={handleBanMember}
+            onMuteMember={handleMuteMember}
+            onTimeoutMember={handleTimeoutMember}
+            onToggleRoleAssignment={handleToggleRoleAssignment}
           />
         ) : showSettings ? (
           <SettingsPage

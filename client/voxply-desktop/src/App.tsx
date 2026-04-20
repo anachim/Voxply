@@ -91,6 +91,15 @@ interface BanInfo {
   created_at: number;
 }
 
+interface InviteInfo {
+  code: string;
+  created_by: string;
+  max_uses: number | null;
+  uses: number;
+  expires_at: number | null;
+  created_at: number;
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -420,6 +429,10 @@ interface HubAdminPageProps {
   ) => void;
   bans: BanInfo[];
   onUnban: (publicKey: string) => void;
+  invites: InviteInfo[];
+  activeHubUrl: string;
+  onCreateInvite: (maxUses: number | null, expiresInSeconds: number | null) => void;
+  onRevokeInvite: (code: string) => void;
 }
 
 const ALL_PERMISSIONS: { id: string; label: string }[] = [
@@ -434,6 +447,127 @@ const ALL_PERMISSIONS: { id: string; label: string }[] = [
   { id: "read_messages", label: "Read messages" },
   { id: "send_messages", label: "Send messages" },
 ];
+
+const EXPIRY_OPTIONS: { label: string; seconds: number | null }[] = [
+  { label: "Never", seconds: null },
+  { label: "30 minutes", seconds: 30 * 60 },
+  { label: "1 hour", seconds: 60 * 60 },
+  { label: "6 hours", seconds: 6 * 60 * 60 },
+  { label: "1 day", seconds: 24 * 60 * 60 },
+  { label: "7 days", seconds: 7 * 24 * 60 * 60 },
+];
+
+function InvitesSection({
+  invites,
+  hubUrl,
+  onCreate,
+  onRevoke,
+}: {
+  invites: InviteInfo[];
+  hubUrl: string;
+  onCreate: (maxUses: number | null, expiresInSeconds: number | null) => void;
+  onRevoke: (code: string) => void;
+}) {
+  const [maxUsesStr, setMaxUsesStr] = useState("");
+  const [expiryIdx, setExpiryIdx] = useState(0);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  function submit() {
+    const parsed = maxUsesStr.trim() ? Number(maxUsesStr) : null;
+    const maxUses =
+      parsed !== null && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    onCreate(maxUses, EXPIRY_OPTIONS[expiryIdx].seconds);
+    setMaxUsesStr("");
+    setExpiryIdx(0);
+  }
+
+  async function copyLink(code: string) {
+    const link = `${hubUrl}#invite=${code}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(code);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {}
+  }
+
+  return (
+    <section>
+      <h1>Invites — {invites.length}</h1>
+      <div className="role-editor">
+        <h3>Create invite</h3>
+        <div className="settings-row">
+          <input
+            type="number"
+            value={maxUsesStr}
+            onChange={(e) => setMaxUsesStr(e.target.value)}
+            placeholder="Max uses (blank = unlimited)"
+            min={1}
+          />
+          <select
+            value={expiryIdx}
+            onChange={(e) => setExpiryIdx(Number(e.target.value))}
+          >
+            {EXPIRY_OPTIONS.map((o, i) => (
+              <option key={o.label} value={i}>
+                Expires: {o.label}
+              </option>
+            ))}
+          </select>
+          <button onClick={submit}>Create</button>
+        </div>
+      </div>
+
+      {invites.length === 0 ? (
+        <p className="muted">No invites yet.</p>
+      ) : (
+        <table className="members-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Uses</th>
+              <th>Expires</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {invites.map((i) => (
+              <tr key={i.code}>
+                <td>
+                  <code className="invite-code">{i.code}</code>
+                </td>
+                <td>
+                  {i.uses}
+                  {i.max_uses !== null ? ` / ${i.max_uses}` : ""}
+                </td>
+                <td>
+                  {i.expires_at
+                    ? new Date(i.expires_at * 1000).toLocaleString()
+                    : "Never"}
+                </td>
+                <td>{formatRelative(i.created_at)}</td>
+                <td>
+                  <button
+                    className="btn-small"
+                    onClick={() => copyLink(i.code)}
+                  >
+                    {copied === i.code ? "Copied" : "Copy link"}
+                  </button>
+                  <button
+                    className="btn-small btn-secondary-small"
+                    onClick={() => onRevoke(i.code)}
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
 
 function formatRelative(unixSec: number): string {
   if (!unixSec) return "—";
@@ -881,10 +1015,12 @@ function HubAdminPage(props: HubAdminPageProps) {
           </section>
         )}
         {props.tab === "invites" && (
-          <section>
-            <h1>Invites</h1>
-            <p className="muted">Invite management is coming soon.</p>
-          </section>
+          <InvitesSection
+            invites={props.invites}
+            hubUrl={props.activeHubUrl}
+            onCreate={props.onCreateInvite}
+            onRevoke={props.onRevokeInvite}
+          />
         )}
       </main>
     </div>
@@ -947,6 +1083,9 @@ function App() {
 
   // Ban admin
   const [adminBans, setAdminBans] = useState<BanInfo[]>([]);
+
+  // Invite admin
+  const [adminInvites, setAdminInvites] = useState<InviteInfo[]>([]);
 
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
@@ -1042,6 +1181,8 @@ function App() {
       refreshMembers();
     } else if (hubAdminTab === "bans") {
       refreshBans();
+    } else if (hubAdminTab === "invites") {
+      refreshInvites();
     }
   }, [showHubAdmin, hubAdminTab]);
 
@@ -1397,6 +1538,42 @@ function App() {
       await invoke("unban_user", { targetPublicKey: publicKey });
       setToast("Unbanned");
       await refreshBans();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshInvites() {
+    try {
+      const i = await invoke<InviteInfo[]>("list_invites");
+      setAdminInvites(i);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCreateInvite(
+    maxUses: number | null,
+    expiresInSeconds: number | null
+  ) {
+    try {
+      await invoke<InviteInfo>("create_invite", {
+        maxUses,
+        expiresInSeconds,
+      });
+      await refreshInvites();
+      setToast("Invite created");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleRevokeInvite(code: string) {
+    if (!confirm(`Revoke invite ${code}?`)) return;
+    try {
+      await invoke("revoke_invite", { code });
+      await refreshInvites();
+      setToast("Invite revoked");
     } catch (e) {
       setError(String(e));
     }
@@ -1961,6 +2138,10 @@ function App() {
             onToggleRoleAssignment={handleToggleRoleAssignment}
             bans={adminBans}
             onUnban={handleUnban}
+            invites={adminInvites}
+            activeHubUrl={hubs.find((h) => h.hub_id === activeHubId)?.hub_url ?? ""}
+            onCreateInvite={handleCreateInvite}
+            onRevokeInvite={handleRevokeInvite}
           />
         ) : showSettings ? (
           <SettingsPage
@@ -2069,15 +2250,17 @@ function App() {
                 </button>
                 {hubDropdownOpen && (
                   <div className="hub-dropdown">
-                    <button
-                      className="hub-dropdown-item"
-                      onClick={() => {
-                        setHubDropdownOpen(false);
-                        setToast("Invite management coming soon");
-                      }}
-                    >
-                      Invite people
-                    </button>
+                    {isAdmin && (
+                      <button
+                        className="hub-dropdown-item"
+                        onClick={async () => {
+                          await openHubAdmin();
+                          setHubAdminTab("invites");
+                        }}
+                      >
+                        Invite people
+                      </button>
+                    )}
                     {isAdmin && (
                       <button
                         className="hub-dropdown-item"

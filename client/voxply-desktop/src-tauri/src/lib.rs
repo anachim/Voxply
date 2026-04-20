@@ -1160,6 +1160,72 @@ struct BanInfo {
     created_at: i64,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct InviteInfo {
+    code: String,
+    created_by: String,
+    max_uses: Option<i64>,
+    uses: i64,
+    expires_at: Option<i64>,
+    created_at: i64,
+}
+
+#[tauri::command]
+async fn list_invites(state: State<'_, AppState>) -> Result<Vec<InviteInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/invites"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn create_invite(
+    max_uses: Option<i64>,
+    expires_in_seconds: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<InviteInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/invites"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "max_uses": max_uses,
+            "expires_in_seconds": expires_in_seconds,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn revoke_invite(code: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/invites/{code}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn list_bans(state: State<'_, AppState>) -> Result<Vec<BanInfo>, String> {
     let (hub_url, token) = active_session(&state)?;
@@ -1707,6 +1773,9 @@ pub fn run() {
             unassign_role,
             list_bans,
             unban_user,
+            list_invites,
+            create_invite,
+            revoke_invite,
             list_friends,
             list_pending_friends,
             send_friend_request,

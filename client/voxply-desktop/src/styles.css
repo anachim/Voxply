@@ -469,6 +469,14 @@ body {
   gap: 4px;
 }
 
+.invite-code {
+  background: #0f1729;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: "Consolas", "Menlo", monospace;
+  color: #10b981;
+}
+
 .sidebar-header-users {
   margin-top: 16px;
   border-top: 1px solid #1a1a2e;

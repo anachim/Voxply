@@ -101,6 +101,12 @@ interface InviteInfo {
   created_at: number;
 }
 
+interface PendingUser {
+  public_key: string;
+  display_name: string | null;
+  first_seen_at: number;
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -467,7 +473,11 @@ interface HubAdminPageProps {
   onHubDescriptionChange: (v: string) => void;
   hubIcon: string;
   onHubIconChange: (v: string) => void;
+  requireApproval: boolean;
+  onRequireApprovalChange: (v: boolean) => void;
   onSave: () => void;
+  pendingMembers: PendingUser[];
+  onApproveMember: (publicKey: string) => void;
   roles: RoleInfo[];
   onCreateRole: (name: string, perms: string[], priority: number) => void;
   onUpdateRole: (
@@ -965,6 +975,22 @@ function HubAdminPage(props: HubAdminPageProps) {
               </div>
             </div>
             <div className="settings-section">
+              <label className="settings-label">Membership</label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={props.requireApproval}
+                  onChange={(e) => props.onRequireApprovalChange(e.target.checked)}
+                />
+                Require admin approval before new members can participate
+              </label>
+              <p className="muted">
+                When on, anyone who authenticates is marked pending. They can
+                see their own status but nothing else until an admin approves
+                them on the Members tab.
+              </p>
+            </div>
+            <div className="settings-section">
               <button onClick={props.onSave}>Save changes</button>
             </div>
           </section>
@@ -992,6 +1018,43 @@ function HubAdminPage(props: HubAdminPageProps) {
         )}
         {props.tab === "members" && (
           <section>
+            {props.pendingMembers.length > 0 && (
+              <div className="pending-section">
+                <h2>Pending approval — {props.pendingMembers.length}</h2>
+                <table className="members-table">
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Signed up</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {props.pendingMembers.map((p) => (
+                      <tr key={p.public_key}>
+                        <td>
+                          <div className="member-name">
+                            {p.display_name || "(no name)"}
+                          </div>
+                          <div className="member-pk" title={p.public_key}>
+                            {formatPubkey(p.public_key)}
+                          </div>
+                        </td>
+                        <td>{formatRelative(p.first_seen_at)}</td>
+                        <td>
+                          <button
+                            className="btn-small"
+                            onClick={() => props.onApproveMember(p.public_key)}
+                          >
+                            Approve
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <h1>Members — {props.members.length}</h1>
             <table className="members-table">
               <thead>
@@ -1151,6 +1214,10 @@ function App() {
   // Invite admin
   const [adminInvites, setAdminInvites] = useState<InviteInfo[]>([]);
 
+  // Approval queue + hub-wide flags
+  const [requireApproval, setRequireApproval] = useState(false);
+  const [pendingMembers, setPendingMembers] = useState<PendingUser[]>([]);
+
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
   // Context menu
@@ -1244,6 +1311,7 @@ function App() {
     } else if (hubAdminTab === "members") {
       refreshRoles(); // roles list used for the assign-role dropdown
       refreshMembers();
+      refreshPending();
     } else if (hubAdminTab === "bans") {
       refreshBans();
     } else if (hubAdminTab === "invites") {
@@ -1457,6 +1525,12 @@ function App() {
       setAdminHubName(branding.name);
       setAdminHubDescription(branding.description ?? "");
       setAdminHubIcon(branding.icon ?? "");
+
+      const settings = await invoke<{
+        require_approval: boolean;
+        invite_only: boolean;
+      }>("get_hub_settings");
+      setRequireApproval(settings.require_approval);
     } catch (e) {
       setError(String(e));
     }
@@ -1468,11 +1542,32 @@ function App() {
         name: adminHubName.trim() || null,
         description: adminHubDescription,
         icon: adminHubIcon,
+        requireApproval: requireApproval,
       });
       // Refresh hub list so the new name flows into the hub-icon title
       const refreshed = await invoke<Hub[]>("list_hubs");
       setHubs(refreshed);
       setToast("Hub settings saved");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshPending() {
+    try {
+      const p = await invoke<PendingUser[]>("list_pending_members");
+      setPendingMembers(p);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleApproveMember(publicKey: string) {
+    try {
+      await invoke("approve_member", { targetPublicKey: publicKey });
+      setToast("Member approved");
+      await refreshPending();
+      await refreshMembers();
     } catch (e) {
       setError(String(e));
     }
@@ -2257,7 +2352,11 @@ function App() {
             onHubDescriptionChange={setAdminHubDescription}
             hubIcon={adminHubIcon}
             onHubIconChange={setAdminHubIcon}
+            requireApproval={requireApproval}
+            onRequireApprovalChange={setRequireApproval}
             onSave={handleSaveHubBranding}
+            pendingMembers={pendingMembers}
+            onApproveMember={handleApproveMember}
             roles={adminRoles}
             onCreateRole={handleCreateRole}
             onUpdateRole={handleUpdateRole}

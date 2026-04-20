@@ -213,6 +213,20 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .await?;
 
     sqlx::query(
+        "INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('require_approval', 'false')",
+    )
+    .execute(pool)
+    .await?;
+
+    // Approval state per user. 'approved' for existing users (default), 'pending'
+    // for new sign-ups when require_approval is on.
+    let _ = sqlx::query(
+        "ALTER TABLE users ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS alliances (
             id         TEXT PRIMARY KEY,
             name       TEXT NOT NULL,

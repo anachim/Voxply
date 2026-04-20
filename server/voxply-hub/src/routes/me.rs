@@ -13,19 +13,23 @@ pub async fn me(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
-    let display_name: Option<String> =
-        sqlx::query_scalar("SELECT display_name FROM users WHERE public_key = ?")
-            .bind(&user.public_key)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
-            .flatten();
+    let row: Option<(Option<String>, String)> = sqlx::query_as(
+        "SELECT display_name, approval_status FROM users WHERE public_key = ?",
+    )
+    .bind(&user.public_key)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let (display_name, approval_status) = row
+        .unwrap_or((None, "approved".to_string()));
 
     let roles = fetch_user_roles(&state.db, &user.public_key).await?;
 
     Ok(Json(MeResponse {
         public_key: user.public_key,
         display_name,
+        approval_status,
         roles,
     }))
 }
@@ -44,9 +48,19 @@ pub async fn update_me(
 
     let roles = fetch_user_roles(&state.db, &user.public_key).await?;
 
+    let approval_status: String = sqlx::query_scalar(
+        "SELECT approval_status FROM users WHERE public_key = ?",
+    )
+    .bind(&user.public_key)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .unwrap_or_else(|| "approved".to_string());
+
     Ok(Json(MeResponse {
         public_key: user.public_key,
         display_name: Some(req.display_name),
+        approval_status,
         roles,
     }))
 }
@@ -91,8 +105,14 @@ async fn fetch_user_roles(
 pub struct MeResponse {
     pub public_key: String,
     pub display_name: Option<String>,
+    #[serde(default = "default_approval_status")]
+    pub approval_status: String,
     #[serde(default)]
     pub roles: Vec<RoleResponse>,
+}
+
+fn default_approval_status() -> String {
+    "approved".to_string()
 }
 
 #[derive(Deserialize)]

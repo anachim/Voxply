@@ -91,3 +91,83 @@ async fn me_rejects_no_token() {
     let resp = server.get("/me").await;
     resp.assert_status_unauthorized();
 }
+
+async fn authenticate(server: &TestServer, identity: &Identity) -> String {
+    let pub_key = identity.public_key_hex();
+    let resp = server
+        .post("/auth/challenge")
+        .json(&json!({ "public_key": pub_key }))
+        .await;
+    let challenge: ChallengeResponse = resp.json();
+    let signature = identity.sign(&hex::decode(&challenge.challenge).unwrap());
+    let resp = server
+        .post("/auth/verify")
+        .json(&json!({
+            "public_key": pub_key,
+            "challenge": challenge.challenge,
+            "signature": hex::encode(signature.to_bytes()),
+        }))
+        .await;
+    let verify: VerifyResponse = resp.json();
+    verify.token
+}
+
+#[tokio::test]
+async fn pending_members_are_blocked_until_approved() {
+    let server = setup().await;
+
+    // Owner signs up first — auto-approved since they're the hub creator.
+    let owner = Identity::generate();
+    let owner_token = authenticate(&server, &owner).await;
+
+    // Owner turns on require_approval.
+    server
+        .patch("/hub")
+        .authorization_bearer(&owner_token)
+        .json(&json!({ "require_approval": true }))
+        .await
+        .assert_status_ok();
+
+    // New member joins — they get a token but start pending.
+    let newbie = Identity::generate();
+    let newbie_token = authenticate(&server, &newbie).await;
+
+    // Can see their own status
+    let resp = server
+        .get("/me")
+        .authorization_bearer(&newbie_token)
+        .await;
+    resp.assert_status_ok();
+    let me: MeResponse = resp.json();
+    assert_eq!(me.approval_status, "pending");
+
+    // Cannot see channels or anything else
+    server
+        .get("/channels")
+        .authorization_bearer(&newbie_token)
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+
+    // Owner sees them in the pending queue
+    let resp = server
+        .get("/hub/pending")
+        .authorization_bearer(&owner_token)
+        .await;
+    resp.assert_status_ok();
+    let pending: serde_json::Value = resp.json();
+    assert_eq!(pending.as_array().unwrap().len(), 1);
+
+    // Owner approves
+    server
+        .post(&format!("/hub/pending/{}/approve", newbie.public_key_hex()))
+        .authorization_bearer(&owner_token)
+        .await
+        .assert_status_ok();
+
+    // Newbie can now access channels
+    server
+        .get("/channels")
+        .authorization_bearer(&newbie_token)
+        .await
+        .assert_status_ok();
+}

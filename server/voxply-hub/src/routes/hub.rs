@@ -34,8 +34,100 @@ pub async fn update_hub(
         // Accept any string here — caller sends a base64 data URL or empty to clear.
         upsert_setting(&state.db, "hub_icon", icon).await?;
     }
+    if let Some(flag) = req.require_approval {
+        upsert_setting(&state.db, "require_approval", if flag { "true" } else { "false" }).await?;
+    }
 
     Ok(StatusCode::OK)
+}
+
+/// List all users awaiting admin approval.
+pub async fn list_pending(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<Vec<PendingUser>>, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(ADMIN)?;
+
+    let rows = sqlx::query_as::<_, PendingUserRow>(
+        "SELECT public_key, display_name, first_seen_at
+         FROM users WHERE approval_status = 'pending'
+         ORDER BY first_seen_at",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| PendingUser {
+                public_key: r.public_key,
+                display_name: r.display_name,
+                first_seen_at: r.first_seen_at,
+            })
+            .collect(),
+    ))
+}
+
+/// Approve a pending user so they can start using the hub.
+pub async fn approve_user(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    axum::extract::Path(target_key): axum::extract::Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(ADMIN)?;
+
+    sqlx::query("UPDATE users SET approval_status = 'approved' WHERE public_key = ?")
+        .bind(&target_key)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(StatusCode::OK)
+}
+
+/// Read-only admin view of hub-wide settings for the Overview tab.
+pub async fn get_hub_settings(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<HubSettings>, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(ADMIN)?;
+
+    let require_approval: bool = read_setting(&state.db, "require_approval")
+        .await
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    let invite_only: bool = read_setting(&state.db, "invite_only")
+        .await
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    Ok(Json(HubSettings {
+        require_approval,
+        invite_only,
+    }))
+}
+
+#[derive(Serialize)]
+pub struct HubSettings {
+    pub require_approval: bool,
+    pub invite_only: bool,
+}
+
+#[derive(Serialize)]
+pub struct PendingUser {
+    pub public_key: String,
+    pub display_name: Option<String>,
+    pub first_seen_at: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct PendingUserRow {
+    public_key: String,
+    display_name: Option<String>,
+    first_seen_at: i64,
 }
 
 async fn upsert_setting(
@@ -64,6 +156,8 @@ pub struct UpdateHubRequest {
     pub description: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    #[serde(default)]
+    pub require_approval: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]

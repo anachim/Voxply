@@ -120,6 +120,19 @@ struct HubBranding {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct HubSettings {
+    require_approval: bool,
+    invite_only: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct PendingUser {
+    public_key: String,
+    display_name: Option<String>,
+    first_seen_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct ChannelInfo {
     id: String,
     name: String,
@@ -1356,6 +1369,59 @@ struct MemberAdminInfo {
 }
 
 #[tauri::command]
+async fn get_hub_settings(state: State<'_, AppState>) -> Result<HubSettings, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/hub/settings"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn list_pending_members(
+    state: State<'_, AppState>,
+) -> Result<Vec<PendingUser>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/hub/pending"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn approve_member(
+    target_public_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/hub/pending/{target_public_key}/approve"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn list_hub_members(
     state: State<'_, AppState>,
 ) -> Result<Vec<MemberAdminInfo>, String> {
@@ -1610,6 +1676,7 @@ async fn update_hub_branding(
     name: Option<String>,
     description: Option<String>,
     icon: Option<String>,
+    require_approval: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (hub_url, token) = active_session(&state)?;
@@ -1621,6 +1688,7 @@ async fn update_hub_branding(
             "name": name,
             "description": description,
             "icon": icon,
+            "require_approval": require_approval,
         }))
         .send()
         .await
@@ -1853,6 +1921,9 @@ pub fn run() {
             create_role,
             update_role,
             delete_role,
+            get_hub_settings,
+            list_pending_members,
+            approve_member,
             list_hub_members,
             kick_user_cmd,
             ban_user_cmd,

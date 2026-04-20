@@ -102,14 +102,39 @@ pub async fn verify(
 
     let now = unix_timestamp();
 
+    // Does this hub gate new members behind admin approval?
+    let require_approval: bool = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM hub_settings WHERE key = 'require_approval'",
+    )
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(|v| v == "true")
+    .unwrap_or(false);
+
+    // First-ever user on a hub is implicitly approved (they'll become Owner).
+    let existing_users: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let initial_status = if require_approval && existing_users > 0 {
+        "pending"
+    } else {
+        "approved"
+    };
+
     sqlx::query(
-        "INSERT INTO users (public_key, first_seen_at, last_seen_at)
-         VALUES (?, ?, ?)
+        "INSERT INTO users (public_key, first_seen_at, last_seen_at, approval_status)
+         VALUES (?, ?, ?, ?)
          ON CONFLICT(public_key) DO UPDATE SET last_seen_at = ?",
     )
     .bind(&req.public_key)
     .bind(&now)
     .bind(&now)
+    .bind(initial_status)
     .bind(&now)
     .execute(&state.db)
     .await

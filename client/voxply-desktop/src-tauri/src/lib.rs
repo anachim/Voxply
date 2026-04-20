@@ -24,6 +24,7 @@ struct HubSession {
     hub_id: String,
     hub_name: String,
     hub_url: String,
+    hub_icon: Option<String>,
     token: String,
     ws_tx: mpsc::UnboundedSender<WsCommand>,
     ws_task: JoinHandle<()>,
@@ -75,6 +76,7 @@ struct HubInfo {
     hub_id: String,
     hub_name: String,
     hub_url: String,
+    hub_icon: Option<String>,
     is_active: bool,
 }
 
@@ -348,6 +350,7 @@ async fn add_hub(
 
     let hub_id = info.public_key.clone();
     let hub_name = info.name.clone();
+    let hub_icon = info.icon.clone();
 
     // Authenticate
     let challenge: ChallengeResponse = client
@@ -386,6 +389,7 @@ async fn add_hub(
         hub_id: hub_id.clone(),
         hub_name: hub_name.clone(),
         hub_url: hub_url.clone(),
+        hub_icon: hub_icon.clone(),
         token,
         ws_tx: cmd_tx,
         ws_task,
@@ -420,6 +424,7 @@ async fn add_hub(
         hub_id: hub_id.clone(),
         hub_name,
         hub_url,
+        hub_icon,
         is_active: active.as_deref() == Some(hub_id.as_str()),
     })
 }
@@ -455,6 +460,7 @@ fn list_hubs(state: State<'_, AppState>) -> Vec<HubInfo> {
             hub_id: s.hub_id.clone(),
             hub_name: s.hub_name.clone(),
             hub_url: s.hub_url.clone(),
+            hub_icon: s.hub_icon.clone(),
             is_active: active.as_deref() == Some(s.hub_id.as_str()),
         })
         .collect()
@@ -930,7 +936,11 @@ fn unsubscribe_channel(channel_id: String, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
-async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<(), String> {
+async fn voice_join(
+    channel_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
     if state.voice.lock().unwrap().is_some() {
         return Err("Already in a voice channel".to_string());
     }
@@ -970,6 +980,7 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
 
     let speaking_ws = ws_tx.clone();
     let speaking_channel_id = channel_id.clone();
+    let speaking_app = app.clone();
 
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
@@ -1002,7 +1013,8 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
             let local_port = pipeline.local_udp_port;
             let _ = ready_tx.send(Ok(local_port));
 
-            // Forward speaking state from the VAD to the hub WS.
+            // Forward speaking state from the VAD to the hub WS and emit a
+            // local Tauri event so the current user's own chip can pulse too.
             let speaking_rx = pipeline.speaking_rx.take();
             let speaking_task = tokio::spawn(async move {
                 let Some(mut rx) = speaking_rx else { return };
@@ -1011,6 +1023,10 @@ async fn voice_join(channel_id: String, state: State<'_, AppState>) -> Result<()
                         channel_id: speaking_channel_id.clone(),
                         speaking,
                     });
+                    let _ = speaking_app.emit(
+                        "voice-self-speaking",
+                        serde_json::json!({ "speaking": speaking }),
+                    );
                 }
             });
 
@@ -1567,11 +1583,14 @@ async fn update_hub_branding(
         return Err(resp.text().await.unwrap_or_default());
     }
 
-    // Update the in-memory hub_name in the active session so list_hubs reflects it.
-    if let Some(new_name) = name {
-        if let Some(active_id) = state.active_hub.lock().unwrap().clone() {
-            if let Some(s) = state.hubs.lock().unwrap().get_mut(&active_id) {
+    // Update the in-memory branding in the active session so list_hubs reflects it.
+    if let Some(active_id) = state.active_hub.lock().unwrap().clone() {
+        if let Some(s) = state.hubs.lock().unwrap().get_mut(&active_id) {
+            if let Some(new_name) = name {
                 s.hub_name = new_name;
+            }
+            if let Some(new_icon) = icon {
+                s.hub_icon = if new_icon.is_empty() { None } else { Some(new_icon) };
             }
         }
     }

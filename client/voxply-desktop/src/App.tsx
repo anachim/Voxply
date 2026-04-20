@@ -59,6 +59,7 @@ interface Hub {
   hub_id: string;
   hub_name: string;
   hub_url: string;
+  hub_icon: string | null;
   is_active: boolean;
 }
 
@@ -1046,6 +1047,11 @@ function App() {
     activeHubIdRef.current = activeHubId;
   }, [activeHubId]);
 
+  const publicKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    publicKeyRef.current = publicKey;
+  }, [publicKey]);
+
   const hasActiveHub = hubs.length > 0 && activeHubId !== null;
 
   // Chat state
@@ -1152,15 +1158,15 @@ function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // ESC closes the settings view
+  // ESC closes the settings view (and stops the mic test if one is running)
   useEffect(() => {
     if (!showSettings) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowSettings(false);
+      if (e.key === "Escape") closeSettings();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showSettings]);
+  }, [showSettings, micTesting]);
 
   // ESC closes the hub admin view
   useEffect(() => {
@@ -1297,6 +1303,19 @@ function App() {
             });
           }
         )
+      );
+
+      unlistens.push(
+        await listen<{ speaking: boolean }>("voice-self-speaking", (event) => {
+          const myKey = publicKeyRef.current;
+          if (!myKey) return;
+          setSpeakingKeys((prev) => {
+            const next = new Set(prev);
+            if (event.payload.speaking) next.add(myKey);
+            else next.delete(myKey);
+            return next;
+          });
+        })
       );
 
       unlistens.push(
@@ -1996,6 +2015,16 @@ function App() {
     }
   }
 
+  async function closeSettings() {
+    if (micTesting) {
+      try {
+        await invoke("mic_test_stop");
+      } catch {}
+      setMicTesting(false);
+    }
+    setShowSettings(false);
+  }
+
   async function handleVoiceLeave() {
     try {
       await invoke("voice_leave");
@@ -2172,7 +2201,7 @@ function App() {
           <SettingsPage
             tab={settingsTab}
             onTab={setSettingsTab}
-            onClose={() => setShowSettings(false)}
+            onClose={closeSettings}
             displayName={settingsDisplayName}
             onDisplayNameChange={setSettingsDisplayName}
             onSaveDisplayName={handleSaveDisplayName}
@@ -2219,48 +2248,46 @@ function App() {
             {hubs.map((h) => {
               const unread = unreadByHub[h.hub_id] || 0;
               const ping = pingByHub[h.hub_id];
-              const pingClass =
-                ping === null || ping === undefined
-                  ? "offline"
-                  : ping < 150
-                  ? "good"
-                  : ping < 400
-                  ? "okay"
-                  : "bad";
-              const titleSuffix =
-                ping === undefined
-                  ? ""
-                  : ping === null
-                  ? " — offline"
-                  : ` — ${ping}ms`;
+              const offline = ping === null;
+              const titleSuffix = offline
+                ? " — offline"
+                : ping === undefined
+                ? ""
+                : ` — ${ping}ms`;
               return (
                 <div key={h.hub_id} className="hub-icon-wrap">
-                  <button
-                    className={`hub-icon ${h.hub_id === activeHubId && view === "channels" ? "active" : ""}`}
-                    onClick={() => {
-                      handleSwitchHub(h.hub_id);
-                      setView("channels");
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      handleRemoveHub(h.hub_id);
-                    }}
-                    title={`${h.hub_name} (${h.hub_url})${titleSuffix}`}
-                  >
-                    {h.hub_name.slice(0, 2).toUpperCase()}
+                  <div className="hub-icon-box">
+                    <button
+                      className={`hub-icon ${
+                        h.hub_id === activeHubId && view === "channels" ? "active" : ""
+                      } ${offline ? "offline" : ""}`}
+                      onClick={() => {
+                        handleSwitchHub(h.hub_id);
+                        setView("channels");
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        handleRemoveHub(h.hub_id);
+                      }}
+                      title={`${h.hub_name} (${h.hub_url})${titleSuffix}`}
+                    >
+                      {h.hub_icon ? (
+                        <img
+                          src={h.hub_icon}
+                          alt={h.hub_name}
+                          className="hub-icon-image"
+                        />
+                      ) : (
+                        h.hub_name.slice(0, 2).toUpperCase()
+                      )}
+                    </button>
                     {unread > 0 && (
                       <span className="hub-unread-badge">
                         {unread > 99 ? "99+" : unread}
                       </span>
                     )}
-                  </button>
-                  <span className={`hub-ping ${pingClass}`}>
-                    {ping === null
-                      ? "off"
-                      : ping === undefined
-                      ? "…"
-                      : `${ping}ms`}
-                  </span>
+                  </div>
+                  {offline && <span className="hub-offline-label">offline</span>}
                 </div>
               );
             })}
@@ -2391,27 +2418,6 @@ function App() {
               <p className="muted">No channels yet</p>
             )}
 
-            <div className="sidebar-header sidebar-header-users">
-              <h3>Users — {users.length}</h3>
-            </div>
-            <ul className="user-list">
-              {users.filter((u) => u.online).map((u) => (
-                <li key={u.public_key} className="user-list-item">
-                  <span className="status-dot online" />
-                  <span className="user-name">
-                    {u.display_name || u.public_key.slice(0, 16)}
-                  </span>
-                </li>
-              ))}
-              {users.filter((u) => !u.online).map((u) => (
-                <li key={u.public_key} className="user-list-item offline">
-                  <span className="status-dot offline" />
-                  <span className="user-name">
-                    {u.display_name || u.public_key.slice(0, 16)}
-                  </span>
-                </li>
-              ))}
-            </ul>
               </>
             ) : (
               <>
@@ -2457,9 +2463,26 @@ function App() {
               {voiceChannelId && (
                 <div className="voice-status">
                   <span className="status-dot online" />
-                  <span>
+                  <span className="voice-status-label">
                     In voice: #{channels.find((c) => c.id === voiceChannelId)?.name}
                   </span>
+                  {activeHubId && pingByHub[activeHubId] !== undefined && (
+                    <span
+                      className={`voice-ping ${
+                        pingByHub[activeHubId] === null
+                          ? "offline"
+                          : (pingByHub[activeHubId] as number) < 150
+                          ? "good"
+                          : (pingByHub[activeHubId] as number) < 400
+                          ? "okay"
+                          : "bad"
+                      }`}
+                    >
+                      {pingByHub[activeHubId] === null
+                        ? "offline"
+                        : `${pingByHub[activeHubId]}ms`}
+                    </span>
+                  )}
                   <button onClick={handleVoiceLeave} className="btn-small leave">
                     Leave
                   </button>
@@ -2505,7 +2528,10 @@ function App() {
                     {(dmMessages[selectedConversation.id] || []).map((m, i) => (
                       <div key={i} className="message">
                         <span className="message-sender">
-                          {m.sender_name || m.sender.slice(0, 16)}
+                          {users.find((u) => u.public_key === m.sender)
+                            ?.display_name ||
+                            m.sender_name ||
+                            formatPubkey(m.sender)}
                         </span>
                         <span className="message-content">{m.content}</span>
                       </div>
@@ -2579,7 +2605,10 @@ function App() {
                   {messages.map((m) => (
                     <div key={m.id} className="message">
                       <span className="message-sender">
-                        {m.sender_name || m.sender.slice(0, 16)}
+                        {users.find((u) => u.public_key === m.sender)
+                          ?.display_name ||
+                          m.sender_name ||
+                          formatPubkey(m.sender)}
                       </span>
                       <span className="message-content">{m.content}</span>
                     </div>
@@ -2603,6 +2632,41 @@ function App() {
               </div>
             )}
           </div>
+
+          {view === "channels" && (
+            <aside className="user-list-sidebar">
+              <div className="user-section">
+                <p className="user-section-title">
+                  Online — {users.filter((u) => u.online).length}
+                </p>
+                <ul className="user-list">
+                  {users.filter((u) => u.online).map((u) => (
+                    <li key={u.public_key} className="user-list-item">
+                      <span className="status-dot online" />
+                      <span className="user-name">
+                        {u.display_name || u.public_key.slice(0, 16)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="user-section">
+                <p className="user-section-title">
+                  Offline — {users.filter((u) => !u.online).length}
+                </p>
+                <ul className="user-list">
+                  {users.filter((u) => !u.online).map((u) => (
+                    <li key={u.public_key} className="user-list-item offline">
+                      <span className="status-dot offline" />
+                      <span className="user-name">
+                        {u.display_name || u.public_key.slice(0, 16)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </aside>
+          )}
 
             </>
           )}

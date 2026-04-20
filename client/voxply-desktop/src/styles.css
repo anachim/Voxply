@@ -832,6 +832,8 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
+  padding: 0;
 }
 
 .hub-icon:hover {
@@ -863,29 +865,45 @@ body {
   gap: 2px;
 }
 
-.hub-ping {
+.hub-icon-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.hub-icon.offline {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+.hub-offline-label {
   font-size: 9px;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.voice-status-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-ping {
+  font-size: 11px;
   font-weight: 600;
-  padding: 1px 4px;
-  border-radius: 6px;
-  background: #1e2a47;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #0f1729;
 }
 
-.hub-ping.good {
-  color: #10b981;
-}
-
-.hub-ping.okay {
-  color: #fbbf24;
-}
-
-.hub-ping.bad {
-  color: #f87171;
-}
-
-.hub-ping.offline {
-  color: #6b7280;
-}
+.voice-ping.good   { color: #10b981; }
+.voice-ping.okay   { color: #fbbf24; }
+.voice-ping.bad    { color: #f87171; }
+.voice-ping.offline{ color: #6b7280; }
 
 .hub-icon.dm {
   background: #1e2a47;
@@ -919,8 +937,9 @@ body {
   margin: 4px 0;
 }
 
-.hub-icon {
+.hub-icon-box {
   position: relative;
+  display: inline-block;
 }
 
 .hub-unread-badge {
@@ -1266,8 +1285,27 @@ body {
   color: white;
 }
 
-/* .user-list-sidebar removed — users are now rendered inside .sidebar-scroll
- * as a section below the channel list (see .sidebar-header-users). */
+.user-list-sidebar {
+  width: 220px;
+  background: #16213e;
+  padding: 16px;
+  border-left: 1px solid #333;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.user-section {
+  margin-bottom: 16px;
+}
+
+.user-section-title {
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
 
 .user-section-title {
   color: #8b94b0;

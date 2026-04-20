@@ -70,7 +70,7 @@ async fn fetch_user_roles(
     public_key: &str,
 ) -> Result<Vec<RoleResponse>, (StatusCode, String)> {
     let roles = sqlx::query_as::<_, RoleRow>(
-        "SELECT r.id, r.name, r.priority, r.created_at
+        "SELECT r.id, r.name, r.priority, r.display_separately, r.created_at
          FROM roles r
          INNER JOIN user_roles ur ON r.id = ur.role_id
          WHERE ur.user_public_key = ?
@@ -95,6 +95,7 @@ async fn fetch_user_roles(
             name: role.name,
             permissions: perms,
             priority: role.priority,
+            display_separately: role.display_separately != 0,
             created_at: role.created_at,
         });
     }
@@ -125,5 +126,6 @@ struct RoleRow {
     id: String,
     name: String,
     priority: i64,
+    display_separately: i64,
     created_at: i64,
 }

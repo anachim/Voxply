@@ -111,14 +111,21 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS roles (
-            id         TEXT PRIMARY KEY,
-            name       TEXT NOT NULL UNIQUE,
-            priority   INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL
+            id                 TEXT PRIMARY KEY,
+            name               TEXT NOT NULL UNIQUE,
+            priority           INTEGER NOT NULL DEFAULT 0,
+            display_separately INTEGER NOT NULL DEFAULT 0,
+            created_at         INTEGER NOT NULL
         )",
     )
     .execute(pool)
     .await?;
+
+    let _ = sqlx::query(
+        "ALTER TABLE roles ADD COLUMN display_separately INTEGER NOT NULL DEFAULT 0",
+    )
+    .execute(pool)
+    .await;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS role_permissions (

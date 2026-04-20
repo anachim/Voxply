@@ -207,7 +207,7 @@ pub async fn list_members(
     let mut result = Vec::with_capacity(users.len());
     for u in users {
         let roles = sqlx::query_as::<_, RoleAdminRow>(
-            "SELECT r.id, r.name, r.priority, r.created_at
+            "SELECT r.id, r.name, r.priority, r.display_separately, r.created_at
              FROM roles r
              INNER JOIN user_roles ur ON r.id = ur.role_id
              WHERE ur.user_public_key = ?
@@ -233,6 +233,7 @@ pub async fn list_members(
                 name: r.name,
                 priority: r.priority,
                 permissions: perms_for_role,
+                display_separately: r.display_separately != 0,
                 created_at: r.created_at,
             });
         }
@@ -273,5 +274,6 @@ struct RoleAdminRow {
     id: String,
     name: String,
     priority: i64,
+    display_separately: i64,
     created_at: i64,
 }

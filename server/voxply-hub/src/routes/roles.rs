@@ -15,7 +15,7 @@ pub async fn list_roles(
     _user: AuthUser,
 ) -> Result<Json<Vec<RoleResponse>>, (StatusCode, String)> {
     let roles = sqlx::query_as::<_, RoleRow>(
-        "SELECT id, name, priority, created_at FROM roles ORDER BY priority DESC",
+        "SELECT id, name, priority, display_separately, created_at FROM roles ORDER BY priority DESC",
     )
     .fetch_all(&state.db)
     .await
@@ -29,6 +29,7 @@ pub async fn list_roles(
             name: role.name,
             permissions: perms,
             priority: role.priority,
+            display_separately: role.display_separately != 0,
             created_at: role.created_at,
         });
     }
@@ -54,10 +55,13 @@ pub async fn create_role(
     let id = Uuid::new_v4().to_string();
     let now = crate::auth::handlers::unix_timestamp();
 
-    sqlx::query("INSERT INTO roles (id, name, priority, created_at) VALUES (?, ?, ?, ?)")
+    sqlx::query(
+        "INSERT INTO roles (id, name, priority, display_separately, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
         .bind(&id)
         .bind(&req.name)
         .bind(req.priority)
+        .bind(if req.display_separately { 1i64 } else { 0 })
         .bind(&now)
         .execute(&state.db)
         .await
@@ -85,6 +89,7 @@ pub async fn create_role(
             name: req.name,
             permissions: req.permissions,
             priority: req.priority,
+            display_separately: req.display_separately,
             created_at: now,
         }),
     ))
@@ -149,6 +154,15 @@ pub async fn update_role(
         }
     }
 
+    if let Some(flag) = req.display_separately {
+        sqlx::query("UPDATE roles SET display_separately = ? WHERE id = ?")
+            .bind(if flag { 1i64 } else { 0 })
+            .bind(&role_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
+
     let updated = get_role(&state.db, &role_id).await?;
     let role_perms = role_permissions(&state.db, &role_id).await?;
 
@@ -157,6 +171,7 @@ pub async fn update_role(
         name: updated.name,
         permissions: role_perms,
         priority: updated.priority,
+        display_separately: updated.display_separately != 0,
         created_at: updated.created_at,
     }))
 }
@@ -329,7 +344,7 @@ fn require_not_builtin(role_id: &str) -> Result<(), (StatusCode, String)> {
 
 async fn get_role(db: &sqlx::SqlitePool, role_id: &str) -> Result<RoleRow, (StatusCode, String)> {
     sqlx::query_as::<_, RoleRow>(
-        "SELECT id, name, priority, created_at FROM roles WHERE id = ?",
+        "SELECT id, name, priority, display_separately, created_at FROM roles WHERE id = ?",
     )
     .bind(role_id)
     .fetch_optional(db)
@@ -354,7 +369,7 @@ async fn fetch_user_roles_response(
     public_key: &str,
 ) -> Result<Vec<RoleResponse>, (StatusCode, String)> {
     let roles = sqlx::query_as::<_, RoleRow>(
-        "SELECT r.id, r.name, r.priority, r.created_at
+        "SELECT r.id, r.name, r.priority, r.display_separately, r.created_at
          FROM roles r
          INNER JOIN user_roles ur ON r.id = ur.role_id
          WHERE ur.user_public_key = ?
@@ -373,6 +388,7 @@ async fn fetch_user_roles_response(
             name: role.name,
             permissions: perms,
             priority: role.priority,
+            display_separately: role.display_separately != 0,
             created_at: role.created_at,
         });
     }
@@ -384,5 +400,6 @@ struct RoleRow {
     id: String,
     name: String,
     priority: i64,
+    display_separately: i64,
     created_at: i64,
 }

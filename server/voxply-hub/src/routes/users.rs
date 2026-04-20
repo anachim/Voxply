@@ -18,6 +18,10 @@ pub struct UserInfo {
     pub public_key: String,
     pub display_name: Option<String>,
     pub online: bool,
+    /// Name of the highest-priority role with display_separately=true assigned
+    /// to this user. Used by the client to group members in the sidebar.
+    #[serde(default)]
+    pub group_role: Option<String>,
 }
 
 pub async fn list_users(
@@ -47,15 +51,27 @@ pub async fn list_users(
     }
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| UserInfo {
-                online: online.contains(&r.public_key),
-                public_key: r.public_key,
-                display_name: r.display_name,
-            })
-            .collect(),
-    ))
+    let mut result = Vec::with_capacity(rows.len());
+    for r in rows {
+        let group_role: Option<String> = sqlx::query_scalar(
+            "SELECT r.name FROM roles r
+             INNER JOIN user_roles ur ON r.id = ur.role_id
+             WHERE ur.user_public_key = ? AND r.display_separately = 1
+             ORDER BY r.priority DESC LIMIT 1",
+        )
+        .bind(&r.public_key)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+        result.push(UserInfo {
+            online: online.contains(&r.public_key),
+            public_key: r.public_key,
+            display_name: r.display_name,
+            group_role,
+        });
+    }
+    Ok(Json(result))
 }
 
 pub async fn channel_members(
@@ -86,6 +102,7 @@ pub async fn channel_members(
                 online: online.contains(&r.public_key),
                 public_key: r.public_key,
                 display_name: r.display_name,
+                group_role: None,
             })
             .collect(),
     ))

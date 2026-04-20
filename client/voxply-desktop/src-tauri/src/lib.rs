@@ -103,6 +103,8 @@ struct RoleInfo {
     name: String,
     permissions: Vec<String>,
     priority: i64,
+    #[serde(default)]
+    display_separately: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1728,6 +1730,7 @@ async fn create_role(
     name: String,
     permissions: Vec<String>,
     priority: i64,
+    display_separately: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<RoleInfo, String> {
     let (hub_url, token) = active_session(&state)?;
@@ -1739,6 +1742,7 @@ async fn create_role(
             "name": name,
             "permissions": permissions,
             "priority": priority,
+            "display_separately": display_separately.unwrap_or(false),
         }))
         .send()
         .await
@@ -1755,6 +1759,7 @@ async fn update_role(
     name: Option<String>,
     permissions: Option<Vec<String>>,
     priority: Option<i64>,
+    display_separately: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (hub_url, token) = active_session(&state)?;
@@ -1766,6 +1771,7 @@ async fn update_role(
             "name": name,
             "permissions": permissions,
             "priority": priority,
+            "display_separately": display_separately,
         }))
         .send()
         .await

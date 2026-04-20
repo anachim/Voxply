@@ -49,6 +49,7 @@ interface User {
   public_key: string;
   display_name: string | null;
   online: boolean;
+  group_role: string | null;
 }
 
 interface VoiceParticipant {
@@ -69,6 +70,7 @@ interface RoleInfo {
   name: string;
   permissions: string[];
   priority: number;
+  display_separately?: boolean;
 }
 
 interface MeInfo {
@@ -263,6 +265,72 @@ interface SettingsPageProps {
   onToggleMicTest: () => void;
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
+}
+
+function UserListGrouped({ users }: { users: User[] }) {
+  // Online first, then offline. Within each, bucket by group_role (the name of
+  // the highest-priority role with display_separately=true), with null-role
+  // members falling into a generic "Online" / "Offline" bucket.
+  const online = users.filter((u) => u.online);
+  const offline = users.filter((u) => !u.online);
+
+  function bucket(group: User[], fallback: string): [string, User[]][] {
+    const grouped = new Map<string, User[]>();
+    const ungrouped: User[] = [];
+    for (const u of group) {
+      if (u.group_role) {
+        if (!grouped.has(u.group_role)) grouped.set(u.group_role, []);
+        grouped.get(u.group_role)!.push(u);
+      } else {
+        ungrouped.push(u);
+      }
+    }
+    const out: [string, User[]][] = Array.from(grouped.entries());
+    if (ungrouped.length > 0) out.push([fallback, ungrouped]);
+    return out;
+  }
+
+  const onlineBuckets = bucket(online, "Online");
+  const offlineBuckets = bucket(offline, "Offline");
+
+  return (
+    <>
+      {onlineBuckets.map(([title, list]) => (
+        <div className="user-section" key={`on-${title}`}>
+          <p className="user-section-title">
+            {title} — {list.length}
+          </p>
+          <ul className="user-list">
+            {list.map((u) => (
+              <li key={u.public_key} className="user-list-item">
+                <span className="status-dot online" />
+                <span className="user-name">
+                  {u.display_name || u.public_key.slice(0, 16)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {offlineBuckets.map(([title, list]) => (
+        <div className="user-section" key={`off-${title}`}>
+          <p className="user-section-title">
+            {title} — {list.length}
+          </p>
+          <ul className="user-list">
+            {list.map((u) => (
+              <li key={u.public_key} className="user-list-item offline">
+                <span className="status-dot offline" />
+                <span className="user-name">
+                  {u.display_name || u.public_key.slice(0, 16)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
 }
 
 const MIC_METER_MAX = 0.2;
@@ -495,10 +563,20 @@ interface HubAdminPageProps {
   pendingMembers: PendingUser[];
   onApproveMember: (publicKey: string) => void;
   roles: RoleInfo[];
-  onCreateRole: (name: string, perms: string[], priority: number) => void;
+  onCreateRole: (
+    name: string,
+    perms: string[],
+    priority: number,
+    displaySeparately: boolean
+  ) => void;
   onUpdateRole: (
     id: string,
-    updates: { name?: string; permissions?: string[]; priority?: number }
+    updates: {
+      name?: string;
+      permissions?: string[];
+      priority?: number;
+      display_separately?: boolean;
+    }
   ) => void;
   onDeleteRole: (id: string) => void;
   members: MemberAdminInfo[];
@@ -768,13 +846,17 @@ function RoleEditor({
   const [name, setName] = useState(role.name);
   const [priority, setPriority] = useState(role.priority);
   const [perms, setPerms] = useState<Set<string>>(new Set(role.permissions));
+  const [displaySeparately, setDisplaySeparately] = useState(
+    role.display_separately ?? false
+  );
 
   // Sync local state when the role prop changes (e.g., after a refresh)
   useEffect(() => {
     setName(role.name);
     setPriority(role.priority);
     setPerms(new Set(role.permissions));
-  }, [role.id, role.name, role.priority, role.permissions.join(",")]);
+    setDisplaySeparately(role.display_separately ?? false);
+  }, [role.id, role.name, role.priority, role.permissions.join(","), role.display_separately]);
 
   function togglePerm(p: string) {
     const next = new Set(perms);
@@ -788,6 +870,7 @@ function RoleEditor({
       name: isBuiltin ? undefined : name,
       priority: isBuiltin ? undefined : priority,
       permissions: isOwner ? undefined : Array.from(perms),
+      display_separately: displaySeparately,
     });
   }
 
@@ -822,6 +905,14 @@ function RoleEditor({
           </label>
         ))}
       </div>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={displaySeparately}
+          onChange={(e) => setDisplaySeparately(e.target.checked)}
+        />
+        Display members of this role separately in the user list
+      </label>
       <div className="settings-row">
         <button onClick={save}>Save</button>
         {!isBuiltin && (
@@ -837,11 +928,17 @@ function RoleEditor({
 function RoleCreator({
   onCreate,
 }: {
-  onCreate: (name: string, perms: string[], priority: number) => void;
+  onCreate: (
+    name: string,
+    perms: string[],
+    priority: number,
+    displaySeparately: boolean
+  ) => void;
 }) {
   const [name, setName] = useState("");
   const [priority, setPriority] = useState(10);
   const [perms, setPerms] = useState<Set<string>>(new Set());
+  const [displaySeparately, setDisplaySeparately] = useState(false);
 
   function togglePerm(p: string) {
     const next = new Set(perms);
@@ -853,10 +950,11 @@ function RoleCreator({
   function create() {
     const trimmed = name.trim();
     if (!trimmed) return;
-    onCreate(trimmed, Array.from(perms), priority);
+    onCreate(trimmed, Array.from(perms), priority, displaySeparately);
     setName("");
     setPriority(10);
     setPerms(new Set());
+    setDisplaySeparately(false);
   }
 
   return (
@@ -889,6 +987,14 @@ function RoleCreator({
           </label>
         ))}
       </div>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={displaySeparately}
+          onChange={(e) => setDisplaySeparately(e.target.checked)}
+        />
+        Display members of this role separately in the user list
+      </label>
       <div className="settings-row">
         <button onClick={create}>Create role</button>
       </div>
@@ -1735,10 +1841,16 @@ function App() {
   async function handleCreateRole(
     name: string,
     permissions: string[],
-    priority: number
+    priority: number,
+    displaySeparately: boolean
   ) {
     try {
-      await invoke("create_role", { name, permissions, priority });
+      await invoke("create_role", {
+        name,
+        permissions,
+        priority,
+        displaySeparately,
+      });
       await refreshRoles();
       setToast("Role created");
     } catch (e) {
@@ -1748,7 +1860,12 @@ function App() {
 
   async function handleUpdateRole(
     roleId: string,
-    updates: { name?: string; permissions?: string[]; priority?: number }
+    updates: {
+      name?: string;
+      permissions?: string[];
+      priority?: number;
+      display_separately?: boolean;
+    }
   ) {
     try {
       await invoke("update_role", {
@@ -1756,6 +1873,7 @@ function App() {
         name: updates.name ?? null,
         permissions: updates.permissions ?? null,
         priority: updates.priority ?? null,
+        displaySeparately: updates.display_separately ?? null,
       });
       await refreshRoles();
       setToast("Role updated");
@@ -3136,36 +3254,7 @@ function App() {
 
           {view === "channels" && (
             <aside className="user-list-sidebar">
-              <div className="user-section">
-                <p className="user-section-title">
-                  Online — {users.filter((u) => u.online).length}
-                </p>
-                <ul className="user-list">
-                  {users.filter((u) => u.online).map((u) => (
-                    <li key={u.public_key} className="user-list-item">
-                      <span className="status-dot online" />
-                      <span className="user-name">
-                        {u.display_name || u.public_key.slice(0, 16)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="user-section">
-                <p className="user-section-title">
-                  Offline — {users.filter((u) => !u.online).length}
-                </p>
-                <ul className="user-list">
-                  {users.filter((u) => !u.online).map((u) => (
-                    <li key={u.public_key} className="user-list-item offline">
-                      <span className="status-dot offline" />
-                      <span className="user-name">
-                        {u.display_name || u.public_key.slice(0, 16)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <UserListGrouped users={users} />
             </aside>
           )}
 

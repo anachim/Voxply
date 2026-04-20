@@ -425,6 +425,28 @@ async fn add_hub(
 }
 
 #[tauri::command]
+async fn ping_hub(hub_id: String, state: State<'_, AppState>) -> Result<u64, String> {
+    let hub_url = {
+        let hubs = state.hubs.lock().unwrap();
+        hubs.get(&hub_id).map(|s| s.hub_url.clone())
+    }
+    .ok_or("Hub not connected")?;
+
+    let client = reqwest::Client::new();
+    let start = std::time::Instant::now();
+    let resp = client
+        .get(format!("{hub_url}/health"))
+        .timeout(std::time::Duration::from_secs(3))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    Ok(start.elapsed().as_millis() as u64)
+}
+
+#[tauri::command]
 fn list_hubs(state: State<'_, AppState>) -> Vec<HubInfo> {
     let hubs = state.hubs.lock().unwrap();
     let active = state.active_hub.lock().unwrap().clone();
@@ -1734,6 +1756,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             add_hub,
             list_hubs,
+            ping_hub,
             set_active_hub,
             remove_hub,
             auto_connect_saved,

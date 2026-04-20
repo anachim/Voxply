@@ -1034,6 +1034,7 @@ function App() {
   const [showAddHub, setShowAddHub] = useState(false);
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
   const [unreadByHub, setUnreadByHub] = useState<Record<string, number>>({});
+  const [pingByHub, setPingByHub] = useState<Record<string, number | null>>({});
 
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1709,6 +1710,30 @@ function App() {
     return () => clearInterval(interval);
   }, [hasActiveHub, activeHubId]);
 
+  // Ping every connected hub every 15s so the sidebar shows current latency
+  useEffect(() => {
+    if (hubs.length === 0) return;
+    let cancelled = false;
+    async function tick() {
+      for (const h of hubs) {
+        try {
+          const ms = await invoke<number>("ping_hub", { hubId: h.hub_id });
+          if (cancelled) return;
+          setPingByHub((prev) => ({ ...prev, [h.hub_id]: ms }));
+        } catch {
+          if (cancelled) return;
+          setPingByHub((prev) => ({ ...prev, [h.hub_id]: null }));
+        }
+      }
+    }
+    tick();
+    const interval = setInterval(tick, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [hubs]);
+
   async function selectChannel(channel: Channel) {
     // Unsubscribe from previous channel's WS updates
     if (selectedChannel && selectedChannel.id !== channel.id) {
@@ -2193,27 +2218,50 @@ function App() {
             <div className="hub-sidebar-divider" />
             {hubs.map((h) => {
               const unread = unreadByHub[h.hub_id] || 0;
+              const ping = pingByHub[h.hub_id];
+              const pingClass =
+                ping === null || ping === undefined
+                  ? "offline"
+                  : ping < 150
+                  ? "good"
+                  : ping < 400
+                  ? "okay"
+                  : "bad";
+              const titleSuffix =
+                ping === undefined
+                  ? ""
+                  : ping === null
+                  ? " — offline"
+                  : ` — ${ping}ms`;
               return (
-                <button
-                  key={h.hub_id}
-                  className={`hub-icon ${h.hub_id === activeHubId && view === "channels" ? "active" : ""}`}
-                  onClick={() => {
-                    handleSwitchHub(h.hub_id);
-                    setView("channels");
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    handleRemoveHub(h.hub_id);
-                  }}
-                  title={`${h.hub_name} (${h.hub_url})`}
-                >
-                  {h.hub_name.slice(0, 2).toUpperCase()}
-                  {unread > 0 && (
-                    <span className="hub-unread-badge">
-                      {unread > 99 ? "99+" : unread}
-                    </span>
-                  )}
-                </button>
+                <div key={h.hub_id} className="hub-icon-wrap">
+                  <button
+                    className={`hub-icon ${h.hub_id === activeHubId && view === "channels" ? "active" : ""}`}
+                    onClick={() => {
+                      handleSwitchHub(h.hub_id);
+                      setView("channels");
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      handleRemoveHub(h.hub_id);
+                    }}
+                    title={`${h.hub_name} (${h.hub_url})${titleSuffix}`}
+                  >
+                    {h.hub_name.slice(0, 2).toUpperCase()}
+                    {unread > 0 && (
+                      <span className="hub-unread-badge">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </button>
+                  <span className={`hub-ping ${pingClass}`}>
+                    {ping === null
+                      ? "off"
+                      : ping === undefined
+                      ? "…"
+                      : `${ping}ms`}
+                  </span>
+                </div>
               );
             })}
             <button

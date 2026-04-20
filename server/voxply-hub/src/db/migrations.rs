@@ -239,6 +239,10 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await;
 
+    let _ = sqlx::query("ALTER TABLE users ADD COLUMN avatar TEXT")
+        .execute(pool)
+        .await;
+
     // Games installed per hub (admin installs a manifest; all members can play).
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS hub_games (

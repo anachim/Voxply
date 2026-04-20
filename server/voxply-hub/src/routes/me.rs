@@ -13,22 +13,23 @@ pub async fn me(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
-    let row: Option<(Option<String>, String)> = sqlx::query_as(
-        "SELECT display_name, approval_status FROM users WHERE public_key = ?",
+    let row: Option<(Option<String>, String, Option<String>)> = sqlx::query_as(
+        "SELECT display_name, approval_status, avatar FROM users WHERE public_key = ?",
     )
     .bind(&user.public_key)
     .fetch_optional(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let (display_name, approval_status) = row
-        .unwrap_or((None, "approved".to_string()));
+    let (display_name, approval_status, avatar) = row
+        .unwrap_or((None, "approved".to_string(), None));
 
     let roles = fetch_user_roles(&state.db, &user.public_key).await?;
 
     Ok(Json(MeResponse {
         public_key: user.public_key,
         display_name,
+        avatar,
         approval_status,
         roles,
     }))
@@ -39,27 +40,43 @@ pub async fn update_me(
     user: AuthUser,
     Json(req): Json<UpdateMeRequest>,
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
-    sqlx::query("UPDATE users SET display_name = ? WHERE public_key = ?")
-        .bind(&req.display_name)
-        .bind(&user.public_key)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    if let Some(ref name) = req.display_name {
+        sqlx::query("UPDATE users SET display_name = ? WHERE public_key = ?")
+            .bind(name)
+            .bind(&user.public_key)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
+    if let Some(ref avatar) = req.avatar {
+        // Empty string clears the avatar.
+        let stored = if avatar.is_empty() { None } else { Some(avatar.as_str()) };
+        sqlx::query("UPDATE users SET avatar = ? WHERE public_key = ?")
+            .bind(stored)
+            .bind(&user.public_key)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
 
-    let roles = fetch_user_roles(&state.db, &user.public_key).await?;
-
-    let approval_status: String = sqlx::query_scalar(
-        "SELECT approval_status FROM users WHERE public_key = ?",
+    // Return fresh me
+    let row: Option<(Option<String>, String, Option<String>)> = sqlx::query_as(
+        "SELECT display_name, approval_status, avatar FROM users WHERE public_key = ?",
     )
     .bind(&user.public_key)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
-    .unwrap_or_else(|| "approved".to_string());
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let (display_name, approval_status, avatar) =
+        row.unwrap_or((None, "approved".to_string(), None));
+
+    let roles = fetch_user_roles(&state.db, &user.public_key).await?;
 
     Ok(Json(MeResponse {
         public_key: user.public_key,
-        display_name: Some(req.display_name),
+        display_name,
+        avatar,
         approval_status,
         roles,
     }))
@@ -106,6 +123,8 @@ async fn fetch_user_roles(
 pub struct MeResponse {
     pub public_key: String,
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
     #[serde(default = "default_approval_status")]
     pub approval_status: String,
     #[serde(default)]
@@ -118,7 +137,10 @@ fn default_approval_status() -> String {
 
 #[derive(Deserialize)]
 pub struct UpdateMeRequest {
-    pub display_name: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]

@@ -48,6 +48,7 @@ interface Message {
 interface User {
   public_key: string;
   display_name: string | null;
+  avatar: string | null;
   online: boolean;
   group_role: string | null;
 }
@@ -76,6 +77,7 @@ interface RoleInfo {
 interface MeInfo {
   public_key: string;
   display_name: string | null;
+  avatar: string | null;
   roles: RoleInfo[];
 }
 
@@ -252,6 +254,10 @@ interface SettingsPageProps {
   defaultDisplayName: string;
   onDefaultDisplayNameChange: (v: string) => void;
   onSaveDefaultDisplayName: () => void;
+  defaultAvatar: string;
+  onDefaultAvatarChange: (v: string) => void;
+  hubAvatar: string;
+  onHubAvatarChange: (v: string) => void;
   publicKey: string | null;
   copiedKey: boolean;
   onCopyKey: () => void;
@@ -268,6 +274,75 @@ interface SettingsPageProps {
   onToggleMicTest: () => void;
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
+}
+
+function Avatar({
+  src,
+  name,
+  size = 24,
+}: {
+  src?: string | null;
+  name: string | null | undefined;
+  size?: number;
+}) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="avatar-img"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  const initials = (name || "?").trim().slice(0, 2).toUpperCase();
+  return (
+    <span
+      className="avatar-fallback"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.45) }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+function AvatarEditor({
+  value,
+  onChange,
+  fallbackName,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  fallbackName: string;
+}) {
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 256 * 1024) {
+      alert("Image too large (max 256 KB)");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") onChange(result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div className="avatar-editor">
+      <Avatar src={value} name={fallbackName} size={72} />
+      <div className="settings-row">
+        <input type="file" accept="image/*" onChange={handleFile} />
+        {value && (
+          <button onClick={() => onChange("")} className="btn-secondary">
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function UserListGrouped({ users }: { users: User[] }) {
@@ -306,6 +381,7 @@ function UserListGrouped({ users }: { users: User[] }) {
           <ul className="user-list">
             {list.map((u) => (
               <li key={u.public_key} className="user-list-item">
+                <Avatar src={u.avatar} name={u.display_name || u.public_key} size={24} />
                 <span className="status-dot online" />
                 <span className="user-name">
                   {u.display_name || u.public_key.slice(0, 16)}
@@ -323,6 +399,7 @@ function UserListGrouped({ users }: { users: User[] }) {
           <ul className="user-list">
             {list.map((u) => (
               <li key={u.public_key} className="user-list-item offline">
+                <Avatar src={u.avatar} name={u.display_name || u.public_key} size={24} />
                 <span className="status-dot offline" />
                 <span className="user-name">
                   {u.display_name || u.public_key.slice(0, 16)}
@@ -461,6 +538,29 @@ function SettingsPage(props: SettingsPageProps) {
                 />
                 <button onClick={props.onSaveDisplayName}>Save</button>
               </div>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Default avatar</label>
+              <p className="muted">
+                Applied to new hubs you join. Stored locally. PNG/JPG under
+                256 KB.
+              </p>
+              <AvatarEditor
+                value={props.defaultAvatar}
+                onChange={props.onDefaultAvatarChange}
+                fallbackName={props.displayName || props.defaultDisplayName}
+              />
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Avatar on this hub</label>
+              <p className="muted">
+                Overrides the default avatar on the currently active hub only.
+              </p>
+              <AvatarEditor
+                value={props.hubAvatar}
+                onChange={props.onHubAvatarChange}
+                fallbackName={props.displayName}
+              />
             </div>
             <div className="settings-section">
               <label className="settings-label">Your public key</label>
@@ -1389,6 +1489,8 @@ function App() {
   const [settingsTab, setSettingsTab] = useState<"account" | "voice" | "security" | "about">("account");
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
   const [defaultDisplayName, setDefaultDisplayName] = useState("");
+  const [defaultAvatar, setDefaultAvatar] = useState("");
+  const [hubAvatar, setHubAvatar] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
 
@@ -2321,9 +2423,36 @@ function App() {
       await invoke("save_profile", {
         profile: {
           default_display_name: defaultDisplayName.trim() || null,
+          default_avatar: defaultAvatar || null,
         },
       });
       setToast("Default saved — applies to new hubs");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSaveDefaultAvatar(newValue: string) {
+    setDefaultAvatar(newValue);
+    try {
+      await invoke("save_profile", {
+        profile: {
+          default_display_name: defaultDisplayName.trim() || null,
+          default_avatar: newValue || null,
+        },
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSaveHubAvatar(newValue: string) {
+    setHubAvatar(newValue);
+    try {
+      await invoke("update_avatar", { avatar: newValue });
+      // Refresh user list so other components show the new avatar
+      const u = await invoke<User[]>("list_users");
+      setUsers(u);
     } catch (e) {
       setError(String(e));
     }
@@ -2468,12 +2597,20 @@ function App() {
     const me = users.find((u) => u.public_key === publicKey);
     setSettingsDisplayName(me?.display_name || "");
 
-    // Load the locally-stored default name
+    // Load the locally-stored default name + avatar
     try {
-      const profile = await invoke<{ default_display_name?: string | null }>(
-        "get_profile"
-      );
+      const profile = await invoke<{
+        default_display_name?: string | null;
+        default_avatar?: string | null;
+      }>("get_profile");
       setDefaultDisplayName(profile.default_display_name ?? "");
+      setDefaultAvatar(profile.default_avatar ?? "");
+    } catch {}
+
+    // Load this hub's avatar for the user (from /me)
+    try {
+      const me = await invoke<MeInfo>("get_me");
+      setHubAvatar(me.avatar ?? "");
     } catch {}
 
     // Load voice devices + stored settings
@@ -2740,6 +2877,10 @@ function App() {
             defaultDisplayName={defaultDisplayName}
             onDefaultDisplayNameChange={setDefaultDisplayName}
             onSaveDefaultDisplayName={handleSaveDefaultDisplayName}
+            defaultAvatar={defaultAvatar}
+            onDefaultAvatarChange={handleSaveDefaultAvatar}
+            hubAvatar={hubAvatar}
+            onHubAvatarChange={handleSaveHubAvatar}
             publicKey={publicKey}
             copiedKey={copiedKey}
             onCopyKey={copyPublicKey}
@@ -3213,14 +3354,21 @@ function App() {
                         )
                       );
                     const isEditing = editingMessageId === m.id;
+                    const senderUser = users.find(
+                      (u) => u.public_key === m.sender
+                    );
+                    const senderLabel =
+                      senderUser?.display_name ||
+                      m.sender_name ||
+                      formatPubkey(m.sender);
                     return (
                       <div key={m.id} className="message">
-                        <span className="message-sender">
-                          {users.find((u) => u.public_key === m.sender)
-                            ?.display_name ||
-                            m.sender_name ||
-                            formatPubkey(m.sender)}
-                        </span>
+                        <Avatar
+                          src={senderUser?.avatar}
+                          name={senderLabel}
+                          size={28}
+                        />
+                        <span className="message-sender">{senderLabel}</span>
                         {isEditing ? (
                           <span className="message-edit">
                             <input

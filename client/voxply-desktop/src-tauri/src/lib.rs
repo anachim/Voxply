@@ -111,6 +111,8 @@ struct RoleInfo {
 struct MeInfo {
     public_key: String,
     display_name: Option<String>,
+    #[serde(default)]
+    avatar: Option<String>,
     roles: Vec<RoleInfo>,
 }
 
@@ -179,7 +181,11 @@ struct ChannelInfo {
 struct UserInfo {
     public_key: String,
     display_name: Option<String>,
+    #[serde(default)]
+    avatar: Option<String>,
     online: bool,
+    #[serde(default)]
+    group_role: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -305,6 +311,9 @@ struct LocalProfile {
     /// authenticating with a hub that has no display_name for this user yet.
     #[serde(default)]
     default_display_name: Option<String>,
+    /// Default avatar (base64 data URL). Same "applied on first auth" logic.
+    #[serde(default)]
+    default_avatar: Option<String>,
 }
 
 fn load_profile() -> LocalProfile {
@@ -482,33 +491,56 @@ async fn add_hub(
 
     let token = verify.token;
 
-    // If the user has set a default display name locally, and they don't have
-    // one set on this hub yet, apply it now. Lets a new hub auto-inherit your
-    // name instead of showing your pubkey.
+    // If the user has local defaults (name / avatar), apply them to this hub
+    // whenever the hub doesn't already have a value for the field. Lets a new
+    // hub inherit your identity instead of showing your pubkey.
     let profile = load_profile();
-    if let Some(default_name) = profile.default_display_name.as_deref() {
-        if !default_name.trim().is_empty() {
-            // Read current /me to decide whether to overwrite
-            if let Ok(me_resp) = client
-                .get(format!("{hub_url}/me"))
-                .bearer_auth(&token)
-                .send()
-                .await
-            {
-                if let Ok(me) = me_resp.json::<serde_json::Value>().await {
-                    let has_name = me
-                        .get("display_name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| !s.is_empty())
-                        .unwrap_or(false);
-                    if !has_name {
-                        let _ = client
-                            .patch(format!("{hub_url}/me"))
-                            .bearer_auth(&token)
-                            .json(&serde_json::json!({ "display_name": default_name }))
-                            .send()
-                            .await;
+    if profile.default_display_name.is_some() || profile.default_avatar.is_some() {
+        if let Ok(me_resp) = client
+            .get(format!("{hub_url}/me"))
+            .bearer_auth(&token)
+            .send()
+            .await
+        {
+            if let Ok(me) = me_resp.json::<serde_json::Value>().await {
+                let mut patch = serde_json::Map::new();
+                let has_name = me
+                    .get("display_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                if !has_name {
+                    if let Some(n) = profile.default_display_name.as_deref() {
+                        if !n.trim().is_empty() {
+                            patch.insert(
+                                "display_name".to_string(),
+                                serde_json::Value::String(n.to_string()),
+                            );
+                        }
                     }
+                }
+                let has_avatar = me
+                    .get("avatar")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+                if !has_avatar {
+                    if let Some(a) = profile.default_avatar.as_deref() {
+                        if !a.is_empty() {
+                            patch.insert(
+                                "avatar".to_string(),
+                                serde_json::Value::String(a.to_string()),
+                            );
+                        }
+                    }
+                }
+                if !patch.is_empty() {
+                    let _ = client
+                        .patch(format!("{hub_url}/me"))
+                        .bearer_auth(&token)
+                        .json(&serde_json::Value::Object(patch))
+                        .send()
+                        .await;
                 }
             }
         }
@@ -1411,6 +1443,24 @@ async fn update_display_name(display_name: String, state: State<'_, AppState>) -
 }
 
 #[tauri::command]
+async fn update_avatar(avatar: String, state: State<'_, AppState>) -> Result<(), String> {
+    // Empty string clears the avatar on this hub.
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/me"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "avatar": avatar }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn get_recovery_phrase() -> Result<String, String> {
     let path = Identity::default_path().map_err(|e| e.to_string())?;
     let identity = Identity::load(&path).map_err(|e| e.to_string())?;
@@ -2151,6 +2201,7 @@ pub fn run() {
             mic_test_start,
             mic_test_stop,
             update_display_name,
+            update_avatar,
             get_profile,
             save_profile,
             get_recovery_phrase,

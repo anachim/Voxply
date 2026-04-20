@@ -167,6 +167,25 @@ body {
   color: #e0e0e0;
 }
 
+.avatar-img,
+.avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #1e2a47;
+  color: #c4b5fd;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .mic-meter {
   position: relative;
   width: 100%;

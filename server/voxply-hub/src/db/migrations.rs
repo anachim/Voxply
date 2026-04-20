@@ -58,11 +58,17 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
             channel_id TEXT NOT NULL REFERENCES channels(id),
             sender     TEXT NOT NULL REFERENCES users(public_key),
             content    TEXT NOT NULL,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            edited_at  INTEGER
         )",
     )
     .execute(pool)
     .await?;
+
+    // Additive migration for older DBs
+    let _ = sqlx::query("ALTER TABLE messages ADD COLUMN edited_at INTEGER")
+        .execute(pool)
+        .await;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS peers (

@@ -55,12 +55,30 @@ pub struct MessageResponse {
     pub sender_name: Option<String>,
     pub content: String,
     pub created_at: i64,
+    #[serde(default)]
+    pub edited_at: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct EditMessageRequest {
+    pub content: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct ChatEvent {
-    pub channel_id: String,
-    pub message: MessageResponse,
+pub enum ChatEvent {
+    New { channel_id: String, message: MessageResponse },
+    Edited { channel_id: String, message: MessageResponse },
+    Deleted { channel_id: String, message_id: String },
+}
+
+impl ChatEvent {
+    pub fn channel_id(&self) -> &str {
+        match self {
+            ChatEvent::New { channel_id, .. }
+            | ChatEvent::Edited { channel_id, .. }
+            | ChatEvent::Deleted { channel_id, .. } => channel_id,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -98,6 +116,16 @@ pub enum WsServerMessage {
     ChatMessage {
         channel_id: String,
         message: MessageResponse,
+    },
+    #[serde(rename = "message_edited")]
+    MessageEdited {
+        channel_id: String,
+        message: MessageResponse,
+    },
+    #[serde(rename = "message_deleted")]
+    MessageDeleted {
+        channel_id: String,
+        message_id: String,
     },
     #[serde(rename = "voice_joined")]
     VoiceJoined {

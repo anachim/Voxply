@@ -213,6 +213,8 @@ struct MessageInfo {
     sender_name: Option<String>,
     content: String,
     created_at: i64,
+    #[serde(default)]
+    edited_at: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -222,6 +224,16 @@ enum WsServerMessage {
     ChatMessage {
         channel_id: String,
         message: MessageInfo,
+    },
+    #[serde(rename = "message_edited")]
+    MessageEdited {
+        channel_id: String,
+        message: MessageInfo,
+    },
+    #[serde(rename = "message_deleted")]
+    MessageDeleted {
+        channel_id: String,
+        message_id: String,
     },
     #[serde(rename = "voice_joined")]
     VoiceJoined {
@@ -595,6 +607,20 @@ async fn spawn_ws_task(
                                             "hub_id": hub_id_for_task,
                                             "channel_id": channel_id,
                                             "message": message,
+                                        }));
+                                    }
+                                    WsServerMessage::MessageEdited { channel_id, message } => {
+                                        let _ = app.emit("chat-message-edited", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "channel_id": channel_id,
+                                            "message": message,
+                                        }));
+                                    }
+                                    WsServerMessage::MessageDeleted { channel_id, message_id } => {
+                                        let _ = app.emit("chat-message-deleted", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "channel_id": channel_id,
+                                            "message_id": message_id,
                                         }));
                                     }
                                     WsServerMessage::VoiceJoined { channel_id, hub_udp_port, participants } => {
@@ -985,6 +1011,48 @@ async fn send_message(
         .json()
         .await
         .map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn edit_message(
+    channel_id: String,
+    message_id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<MessageInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/channels/{channel_id}/messages/{message_id}"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "content": content }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn delete_message(
+    channel_id: String,
+    message_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/channels/{channel_id}/messages/{message_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1989,6 +2057,8 @@ pub fn run() {
             list_users,
             get_messages,
             send_message,
+            edit_message,
+            delete_message,
             subscribe_channel,
             unsubscribe_channel,
             voice_join,

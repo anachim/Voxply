@@ -384,3 +384,80 @@ async fn delete_channel_nonexistent_returns_404() {
         .await
         .assert_status(axum::http::StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn author_can_edit_and_delete_their_message() {
+    let server = setup().await;
+    let owner = Identity::generate();
+    let token = authenticate(&server, &owner).await;
+
+    let ch: ChannelResponse = server
+        .post("/channels")
+        .authorization_bearer(&token)
+        .json(&json!({ "name": "general" }))
+        .await
+        .json();
+
+    let msg: MessageResponse = server
+        .post(&format!("/channels/{}/messages", ch.id))
+        .authorization_bearer(&token)
+        .json(&json!({ "content": "first take" }))
+        .await
+        .json();
+    assert!(msg.edited_at.is_none());
+
+    // Edit
+    let edited: MessageResponse = server
+        .patch(&format!("/channels/{}/messages/{}", ch.id, msg.id))
+        .authorization_bearer(&token)
+        .json(&json!({ "content": "better take" }))
+        .await
+        .json();
+    assert_eq!(edited.content, "better take");
+    assert!(edited.edited_at.is_some());
+
+    // Delete
+    server
+        .delete(&format!("/channels/{}/messages/{}", ch.id, msg.id))
+        .authorization_bearer(&token)
+        .await
+        .assert_status(axum::http::StatusCode::NO_CONTENT);
+
+    // List is empty
+    let resp = server
+        .get(&format!("/channels/{}/messages", ch.id))
+        .authorization_bearer(&token)
+        .await;
+    let messages: Vec<MessageResponse> = resp.json();
+    assert!(messages.is_empty());
+}
+
+#[tokio::test]
+async fn non_author_cannot_edit_other_peoples_messages() {
+    let server = setup().await;
+    let alice = Identity::generate();
+    let alice_token = authenticate(&server, &alice).await;
+    let bob = Identity::generate();
+    let bob_token = authenticate(&server, &bob).await;
+
+    let ch: ChannelResponse = server
+        .post("/channels")
+        .authorization_bearer(&alice_token)
+        .json(&json!({ "name": "general" }))
+        .await
+        .json();
+
+    let msg: MessageResponse = server
+        .post(&format!("/channels/{}/messages", ch.id))
+        .authorization_bearer(&alice_token)
+        .json(&json!({ "content": "mine" }))
+        .await
+        .json();
+
+    server
+        .patch(&format!("/channels/{}/messages/{}", ch.id, msg.id))
+        .authorization_bearer(&bob_token)
+        .json(&json!({ "content": "hijacked" }))
+        .await
+        .assert_status(axum::http::StatusCode::FORBIDDEN);
+}

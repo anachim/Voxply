@@ -1081,10 +1081,70 @@ body {
   padding: 6px 12px;
   border-radius: 4px;
   line-height: 1.5;
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .message:hover {
   background: #16213e;
+}
+
+.message-edited-tag {
+  color: #6b7280;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.message-actions {
+  margin-left: auto;
+  display: none;
+  gap: 4px;
+}
+
+.message:hover .message-actions {
+  display: inline-flex;
+}
+
+.message-action {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: #0f1729;
+  color: #9ca3af;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.message-action:hover {
+  background: #1e2a47;
+  color: #e0e0e0;
+}
+
+.message-action.danger:hover {
+  background: #7f1d1d;
+  color: white;
+}
+
+.message-edit {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 auto;
+  align-items: center;
+}
+
+.message-edit input {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  border: 1px solid #7c3aed;
+  border-radius: 4px;
+  background: #0f1729;
+  color: #e0e0e0;
+  font-size: 14px;
 }
 
 .message-sender {

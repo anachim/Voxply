@@ -42,6 +42,7 @@ interface Message {
   sender_name: string | null;
   content: string;
   created_at: number;
+  edited_at: number | null;
 }
 
 interface User {
@@ -1244,6 +1245,10 @@ function App() {
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null);
 
+  // Message edit state — which message id is being edited and its draft
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState("");
+
   // Hub users
   const [users, setUsers] = useState<User[]>([]);
 
@@ -1409,6 +1414,34 @@ function App() {
                 [hub_id]: (prev[hub_id] || 0) + 1,
               }));
             }
+          }
+        )
+      );
+
+      unlistens.push(
+        await listen<{ hub_id: string; channel_id: string; message: Message }>(
+          "chat-message-edited",
+          (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
+            if (event.payload.channel_id !== selectedChannelIdRef.current) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === event.payload.message.id ? event.payload.message : m
+              )
+            );
+          }
+        )
+      );
+
+      unlistens.push(
+        await listen<{ hub_id: string; channel_id: string; message_id: string }>(
+          "chat-message-deleted",
+          (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
+            if (event.payload.channel_id !== selectedChannelIdRef.current) return;
+            setMessages((prev) =>
+              prev.filter((m) => m.id !== event.payload.message_id)
+            );
           }
         )
       );
@@ -2045,6 +2078,49 @@ function App() {
 
       // Subscribe to real-time updates for this channel
       await invoke("subscribe_channel", { channelId: channel.id });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function startEditingMessage(m: Message) {
+    setEditingMessageId(m.id);
+    setEditingDraft(m.content);
+  }
+
+  function cancelEditingMessage() {
+    setEditingMessageId(null);
+    setEditingDraft("");
+  }
+
+  async function handleSaveEditedMessage() {
+    if (!editingMessageId || !selectedChannel) return;
+    const content = editingDraft.trim();
+    if (!content) return;
+    try {
+      const updated = await invoke<Message>("edit_message", {
+        channelId: selectedChannel.id,
+        messageId: editingMessageId,
+        content,
+      });
+      setMessages((prev) =>
+        prev.map((m) => (m.id === updated.id ? updated : m))
+      );
+      cancelEditingMessage();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteMessage(messageId: string) {
+    if (!selectedChannel) return;
+    if (!confirm("Delete this message?")) return;
+    try {
+      await invoke("delete_message", {
+        channelId: selectedChannel.id,
+        messageId,
+      });
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
     } catch (e) {
       setError(String(e));
     }
@@ -2962,17 +3038,82 @@ function App() {
                   </div>
                 )}
                 <div className="messages">
-                  {messages.map((m) => (
-                    <div key={m.id} className="message">
-                      <span className="message-sender">
-                        {users.find((u) => u.public_key === m.sender)
-                          ?.display_name ||
-                          m.sender_name ||
-                          formatPubkey(m.sender)}
-                      </span>
-                      <span className="message-content">{m.content}</span>
-                    </div>
-                  ))}
+                  {messages.map((m) => {
+                    const isMine = m.sender === publicKey;
+                    const canDelete =
+                      isMine ||
+                      myRoles.some((r) =>
+                        r.permissions.some(
+                          (p) => p === "admin" || p === "manage_messages"
+                        )
+                      );
+                    const isEditing = editingMessageId === m.id;
+                    return (
+                      <div key={m.id} className="message">
+                        <span className="message-sender">
+                          {users.find((u) => u.public_key === m.sender)
+                            ?.display_name ||
+                            m.sender_name ||
+                            formatPubkey(m.sender)}
+                        </span>
+                        {isEditing ? (
+                          <span className="message-edit">
+                            <input
+                              type="text"
+                              value={editingDraft}
+                              onChange={(e) => setEditingDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveEditedMessage();
+                                if (e.key === "Escape") cancelEditingMessage();
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={handleSaveEditedMessage}
+                              className="btn-small"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={cancelEditingMessage}
+                              className="btn-small btn-secondary-small"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <>
+                            <span className="message-content">{m.content}</span>
+                            {m.edited_at && (
+                              <span className="message-edited-tag">
+                                (edited)
+                              </span>
+                            )}
+                            <span className="message-actions">
+                              {isMine && (
+                                <button
+                                  className="message-action"
+                                  onClick={() => startEditingMessage(m)}
+                                  title="Edit"
+                                >
+                                  ✎
+                                </button>
+                              )}
+                              {canDelete && (
+                                <button
+                                  className="message-action danger"
+                                  onClick={() => handleDeleteMessage(m.id)}
+                                  title="Delete"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div ref={messagesEndRef} />
                 </div>
                 <div className="input-area">

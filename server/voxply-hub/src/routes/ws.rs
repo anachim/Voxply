@@ -61,12 +61,19 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
             result = chat_rx.recv() => {
                 match result {
                     Ok(event) => {
-                        if subscribe_all || subscribed.contains(&event.channel_id) {
-                            let msg = WsServerMessage::ChatMessage {
-                                channel_id: event.channel_id,
-                                message: event.message,
+                        if subscribe_all || subscribed.contains(event.channel_id()) {
+                            let ws_msg = match event {
+                                crate::routes::chat_models::ChatEvent::New { channel_id, message } => {
+                                    WsServerMessage::ChatMessage { channel_id, message }
+                                }
+                                crate::routes::chat_models::ChatEvent::Edited { channel_id, message } => {
+                                    WsServerMessage::MessageEdited { channel_id, message }
+                                }
+                                crate::routes::chat_models::ChatEvent::Deleted { channel_id, message_id } => {
+                                    WsServerMessage::MessageDeleted { channel_id, message_id }
+                                }
                             };
-                            let json = serde_json::to_string(&msg).unwrap();
+                            let json = serde_json::to_string(&ws_msg).unwrap();
                             if ws_tx.send(Message::Text(json.into())).await.is_err() {
                                 break;
                             }

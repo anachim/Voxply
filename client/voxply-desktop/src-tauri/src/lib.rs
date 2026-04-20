@@ -1030,8 +1030,19 @@ async fn voice_join(
                 }
             });
 
+            // Forward live mic RMS level so the UI can draw a level meter.
+            let level_rx = pipeline.level_rx.take();
+            let level_app = app.clone();
+            let level_task = tokio::spawn(async move {
+                let Some(mut rx) = level_rx else { return };
+                while let Some(level) = rx.recv().await {
+                    let _ = level_app.emit("mic-level", level);
+                }
+            });
+
             let _ = tokio::task::spawn_blocking(move || stop_rx.recv()).await;
             speaking_task.abort();
+            level_task.abort();
             pipeline.stop().await;
         });
     });
@@ -1091,7 +1102,7 @@ fn save_voice_settings(settings: StoredVoiceSettings) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn mic_test_start(state: State<'_, AppState>) -> Result<(), String> {
+fn mic_test_start(state: State<'_, AppState>, app: AppHandle) -> Result<(), String> {
     // Reuse the voice session slot so we don't collide with an in-progress call.
     if state.voice.lock().unwrap().is_some() {
         return Err("Leave the voice channel before testing the mic".to_string());
@@ -1099,6 +1110,7 @@ fn mic_test_start(state: State<'_, AppState>) -> Result<(), String> {
 
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    let level_app = app.clone();
 
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
@@ -1115,7 +1127,7 @@ fn mic_test_start(state: State<'_, AppState>) -> Result<(), String> {
                 output_device: saved.output_device,
                 vad_threshold: saved.vad_threshold,
             };
-            let pipeline =
+            let mut pipeline =
                 match voxply_voice::AudioPipeline::start_loopback_with_settings(vsettings).await {
                     Ok(p) => p,
                     Err(e) => {
@@ -1124,7 +1136,17 @@ fn mic_test_start(state: State<'_, AppState>) -> Result<(), String> {
                     }
                 };
             let _ = ready_tx.send(Ok(()));
+
+            let level_rx = pipeline.level_rx.take();
+            let level_task = tokio::spawn(async move {
+                let Some(mut rx) = level_rx else { return };
+                while let Some(level) = rx.recv().await {
+                    let _ = level_app.emit("mic-level", level);
+                }
+            });
+
             let _ = tokio::task::spawn_blocking(move || stop_rx.recv()).await;
+            level_task.abort();
             pipeline.stop().await;
         });
     });

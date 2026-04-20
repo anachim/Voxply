@@ -38,8 +38,11 @@ pub struct AudioPipeline {
     tasks: Vec<JoinHandle<()>>,
     pub local_udp_port: u16,
     /// Receives `true` when voice activity starts, `false` when it ends.
-    /// Available on pipelines started with `start_p2p`.
+    /// Available on pipelines started with `start_p2p` / `start_loopback_*`.
     pub speaking_rx: Option<mpsc::UnboundedReceiver<bool>>,
+    /// Receives the post-denoise RMS level of each captured frame (decimated
+    /// to ~20 Hz). Range is roughly 0..0.3 for normal speech.
+    pub level_rx: Option<mpsc::UnboundedReceiver<f32>>,
 }
 
 fn resolve_opus_rate(device_rate: u32) -> u32 {
@@ -71,6 +74,7 @@ impl AudioPipeline {
 
         let opus_rate = resolve_opus_rate(capture.actual_sample_rate);
         let frame_size = codec::frame_size_for_rate(opus_rate);
+        let (level_tx, level_rx) = mpsc::unbounded_channel::<f32>();
 
         let task = tokio::spawn(async move {
             let mut encoder = VoiceEncoder::new(opus_rate).expect("Failed to create encoder");
@@ -78,6 +82,7 @@ impl AudioPipeline {
             let mut denoiser = Denoiser::new();
             let mut read_buf = vec![0.0f32; frame_size];
             let mut interval = tokio::time::interval(Duration::from_millis(10));
+            let mut level_tick: u32 = 0;
 
             loop {
                 interval.tick().await;
@@ -89,6 +94,12 @@ impl AudioPipeline {
 
                 // Denoise → encode → decode → playback
                 let denoised = denoiser.process(&read_buf[..count]);
+
+                level_tick = level_tick.wrapping_add(1);
+                if level_tick % 5 == 0 {
+                    let _ = level_tx.send(rms_of(&denoised));
+                }
+
                 let packets = encoder.encode(&denoised);
 
                 for packet in &packets {
@@ -110,6 +121,7 @@ impl AudioPipeline {
             tasks: vec![task],
             local_udp_port: 0,
             speaking_rx: None,
+            level_rx: Some(level_rx),
         })
     }
 
@@ -134,6 +146,7 @@ impl AudioPipeline {
         let playback = AudioPlayback::start_with_device(playback_cons, settings.output_device.as_deref())?;
 
         let vad_threshold = settings.vad_threshold.unwrap_or(DEFAULT_VAD_THRESHOLD);
+        let (level_tx, level_rx) = mpsc::unbounded_channel::<f32>();
 
         let opus_rate = resolve_opus_rate(capture.actual_sample_rate);
         let frame_size = codec::frame_size_for_rate(opus_rate);
@@ -145,7 +158,7 @@ impl AudioPipeline {
 
         let (speaking_tx, speaking_rx) = mpsc::unbounded_channel::<bool>();
 
-        // Send task: capture → encode → UDP, plus RMS-based VAD
+        // Send task: capture → encode → UDP, plus RMS-based VAD + level meter
         let send_socket = socket.clone();
         let send_task = tokio::spawn(async move {
             let mut encoder = VoiceEncoder::new(opus_rate).expect("Failed to create encoder");
@@ -157,6 +170,7 @@ impl AudioPipeline {
 
             let mut is_speaking = false;
             let mut last_active_at: Option<std::time::Instant> = None;
+            let mut level_tick: u32 = 0;
 
             loop {
                 interval.tick().await;
@@ -179,6 +193,13 @@ impl AudioPipeline {
 
                 // Voice activity detection on post-denoise samples.
                 let rms = rms_of(&denoised);
+
+                // Decimate level emission to ~20 Hz (every 5 ticks of 10 ms).
+                level_tick = level_tick.wrapping_add(1);
+                if level_tick % 5 == 0 {
+                    let _ = level_tx.send(rms);
+                }
+
                 if rms > vad_threshold {
                     last_active_at = Some(std::time::Instant::now());
                     if !is_speaking {
@@ -243,6 +264,7 @@ impl AudioPipeline {
             tasks: vec![send_task, recv_task],
             local_udp_port: actual_local_port,
             speaking_rx: Some(speaking_rx),
+            level_rx: Some(level_rx),
         })
     }
 

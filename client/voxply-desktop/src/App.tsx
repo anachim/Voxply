@@ -236,10 +236,69 @@ interface SettingsPageProps {
   onOutputDeviceChange: (v: string) => void;
   vadThreshold: number;
   onVadChange: (v: number) => void;
+  micLevel: number;
   micTesting: boolean;
   onToggleMicTest: () => void;
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
+}
+
+const MIC_METER_MAX = 0.2;
+
+function MicLevelMeter({
+  level,
+  threshold,
+  onChange,
+}: {
+  level: number;
+  threshold: number;
+  onChange: (v: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  function valueAt(clientX: number): number {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return threshold;
+    const pct = (clientX - rect.left) / rect.width;
+    const v = Math.max(0.001, Math.min(MIC_METER_MAX, pct * MIC_METER_MAX));
+    return v;
+  }
+
+  function handleDown(e: React.MouseEvent) {
+    dragging.current = true;
+    onChange(valueAt(e.clientX));
+  }
+
+  useEffect(() => {
+    function up() {
+      dragging.current = false;
+    }
+    function move(e: MouseEvent) {
+      if (!dragging.current) return;
+      onChange(valueAt(e.clientX));
+    }
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, [onChange]);
+
+  const fillPct = Math.min(100, (level / MIC_METER_MAX) * 100);
+  const markerPct = Math.min(100, (threshold / MIC_METER_MAX) * 100);
+  const triggered = level >= threshold;
+
+  return (
+    <div className="mic-meter" ref={ref} onMouseDown={handleDown}>
+      <div
+        className={`mic-meter-fill ${triggered ? "triggered" : ""}`}
+        style={{ width: `${fillPct}%` }}
+      />
+      <div className="mic-meter-marker" style={{ left: `${markerPct}%` }} />
+    </div>
+  );
 }
 
 function SettingsPage(props: SettingsPageProps) {
@@ -344,16 +403,14 @@ function SettingsPage(props: SettingsPageProps) {
                 Mic sensitivity — threshold {props.vadThreshold.toFixed(3)}
               </label>
               <p className="muted">
-                Lower values trigger the speaking indicator more easily. Changes
-                apply the next time you join a voice channel.
+                Drag the marker. Voice is detected when the green bar crosses
+                it. Fill animates only while you're in voice or running a mic
+                test. Changes apply on the next voice channel you join.
               </p>
-              <input
-                type="range"
-                min={0.001}
-                max={0.2}
-                step={0.001}
-                value={props.vadThreshold}
-                onChange={(e) => props.onVadChange(Number(e.target.value))}
+              <MicLevelMeter
+                level={props.micLevel}
+                threshold={props.vadThreshold}
+                onChange={props.onVadChange}
               />
             </div>
             <div className="settings-section">
@@ -1121,6 +1178,7 @@ function App() {
   const [voiceOutputDevice, setVoiceOutputDevice] = useState<string>("");
   const [vadThreshold, setVadThreshold] = useState<number>(0.02);
   const [micTesting, setMicTesting] = useState(false);
+  const [micLevel, setMicLevel] = useState<number>(0);
 
   // Friends
   const [showFriends, setShowFriends] = useState(false);
@@ -1303,6 +1361,12 @@ function App() {
             });
           }
         )
+      );
+
+      unlistens.push(
+        await listen<number>("mic-level", (event) => {
+          setMicLevel(event.payload);
+        })
       );
 
       unlistens.push(
@@ -2225,6 +2289,7 @@ function App() {
               setVadThreshold(v);
               persistVoiceSettings(voiceInputDevice, voiceOutputDevice, v);
             }}
+            micLevel={micLevel}
             micTesting={micTesting}
             onToggleMicTest={toggleMicTest}
             recoveryPhrase={recoveryPhrase}

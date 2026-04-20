@@ -226,6 +226,26 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await;
 
+    // Games installed per hub (admin installs a manifest; all members can play).
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS hub_games (
+            id             TEXT PRIMARY KEY,
+            name           TEXT NOT NULL,
+            description    TEXT,
+            version        TEXT NOT NULL,
+            entry_url      TEXT NOT NULL,
+            thumbnail_url  TEXT,
+            author         TEXT,
+            min_players    INTEGER NOT NULL DEFAULT 1,
+            max_players    INTEGER NOT NULL DEFAULT 1,
+            installed_by   TEXT NOT NULL REFERENCES users(public_key),
+            installed_at   INTEGER NOT NULL,
+            manifest_url   TEXT NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS alliances (
             id         TEXT PRIMARY KEY,

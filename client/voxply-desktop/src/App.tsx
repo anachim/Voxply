@@ -107,6 +107,21 @@ interface PendingUser {
   first_seen_at: number;
 }
 
+interface InstalledGame {
+  id: string;
+  name: string;
+  description: string | null;
+  version: string;
+  entry_url: string;
+  thumbnail_url: string | null;
+  author: string | null;
+  min_players: number;
+  max_players: number;
+  installed_by: string;
+  installed_at: number;
+  manifest_url: string;
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -1218,6 +1233,12 @@ function App() {
   const [requireApproval, setRequireApproval] = useState(false);
   const [pendingMembers, setPendingMembers] = useState<PendingUser[]>([]);
 
+  // Games
+  const [installedGames, setInstalledGames] = useState<InstalledGame[]>([]);
+  const [selectedGame, setSelectedGame] = useState<InstalledGame | null>(null);
+  const [showInstallGame, setShowInstallGame] = useState(false);
+  const [installManifestUrl, setInstallManifestUrl] = useState("");
+
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
   // Context menu
@@ -1254,7 +1275,7 @@ function App() {
   const [friendRequestKey, setFriendRequestKey] = useState("");
 
   // DMs
-  const [view, setView] = useState<"channels" | "dms">("channels");
+  const [view, setView] = useState<"channels" | "dms" | "game">("channels");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [dmMessages, setDmMessages] = useState<Record<string, DmMessage[]>>({});
@@ -1282,6 +1303,26 @@ function App() {
     const t = setTimeout(() => setToast(null), 5000);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // Game SDK bridge: reply to postMessage calls from game iframes.
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (!e.data || typeof e.data !== "object") return;
+      if (e.data.type === "voxply:getUser") {
+        const me = users.find((u) => u.public_key === publicKey);
+        const reply = {
+          type: "voxply:user",
+          data: {
+            public_key: publicKey,
+            display_name: me?.display_name ?? null,
+          },
+        };
+        (e.source as Window | null)?.postMessage(reply, "*");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [users, publicKey]);
 
   // ESC closes the settings view (and stops the mic test if one is running)
   useEffect(() => {
@@ -1507,9 +1548,85 @@ function App() {
       } catch {
         setMyRoles([]);
       }
+      try {
+        const games = await invoke<InstalledGame[]>("list_installed_games");
+        setInstalledGames(games);
+      } catch {
+        setInstalledGames([]);
+      }
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function refreshGames() {
+    try {
+      const g = await invoke<InstalledGame[]>("list_installed_games");
+      setInstalledGames(g);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleInstallGameFromUrl() {
+    const url = installManifestUrl.trim();
+    if (!url) return;
+    try {
+      await invoke("install_game", { manifestUrl: url, manifest: null });
+      setInstallManifestUrl("");
+      setShowInstallGame(false);
+      await refreshGames();
+      setToast("Game installed");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleInstallDemoGame() {
+    // Bundled demo game — manifest is inline, entry_url points at the
+    // static asset served by the client.
+    const demoManifest = {
+      id: "voxply-demo-dice",
+      name: "Voxply Dice",
+      description: "A tiny dice roller — included as a demo of the game SDK.",
+      version: "1.0.0",
+      entry_url: "/demo-games/dice.html",
+      thumbnail_url: null,
+      author: "Voxply",
+      min_players: 1,
+      max_players: 1,
+    };
+    try {
+      await invoke("install_game", {
+        manifestUrl: "builtin:voxply-demo-dice",
+        manifest: demoManifest,
+      });
+      setShowInstallGame(false);
+      await refreshGames();
+      setToast("Demo game installed");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUninstallGame(gameId: string, name: string) {
+    if (!confirm(`Uninstall "${name}"?`)) return;
+    try {
+      await invoke("uninstall_game", { gameId });
+      await refreshGames();
+      if (selectedGame?.id === gameId) {
+        setSelectedGame(null);
+        setView("channels");
+      }
+      setToast("Game uninstalled");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function launchGame(game: InstalledGame) {
+    setSelectedGame(game);
+    setView("game");
   }
 
   async function openHubAdmin() {
@@ -2596,6 +2713,42 @@ function App() {
               <p className="muted">No channels yet</p>
             )}
 
+            <div className="sidebar-header sidebar-header-games">
+              <h3>Games</h3>
+              {isAdmin && (
+                <button
+                  className="btn-icon"
+                  onClick={() => setShowInstallGame(true)}
+                  title="Install game"
+                >
+                  +
+                </button>
+              )}
+            </div>
+            <ul className="channel-list">
+              {installedGames.map((g) => (
+                <li
+                  key={g.id}
+                  className={`channel-item ${
+                    view === "game" && selectedGame?.id === g.id ? "selected" : ""
+                  }`}
+                  onClick={() => launchGame(g)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (isAdmin) handleUninstallGame(g.id, g.name);
+                  }}
+                  title={g.description ?? ""}
+                >
+                  🎮 {g.name}
+                </li>
+              ))}
+            </ul>
+            {installedGames.length === 0 && (
+              <p className="muted">
+                {isAdmin ? "No games yet — click + to install." : "No games yet."}
+              </p>
+            )}
+
               </>
             ) : (
               <>
@@ -2687,7 +2840,36 @@ function App() {
           </div>
 
           <div className="content">
-            {view === "dms" ? (
+            {view === "game" && selectedGame ? (
+              <>
+                <div className="channel-header">
+                  <div className="channel-header-info">
+                    <h3>🎮 {selectedGame.name}</h3>
+                    {selectedGame.description && (
+                      <p className="channel-description">
+                        {selectedGame.description}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    className="btn-small"
+                    onClick={() => {
+                      setSelectedGame(null);
+                      setView("channels");
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+                <iframe
+                  key={selectedGame.id}
+                  src={selectedGame.entry_url}
+                  className="game-frame"
+                  sandbox="allow-scripts"
+                  title={selectedGame.name}
+                />
+              </>
+            ) : view === "dms" ? (
               selectedConversation ? (
                 <>
                   <div className="channel-header">
@@ -2892,6 +3074,45 @@ function App() {
                   Cancel
                 </button>
                 <button onClick={handleCreateChannel}>Create</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showInstallGame && (
+          <div className="modal-overlay" onClick={() => setShowInstallGame(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Install game</h3>
+              <p className="muted">
+                Paste a manifest URL (JSON). The game will be available to
+                everyone on this hub.
+              </p>
+              <input
+                type="text"
+                value={installManifestUrl}
+                onChange={(e) => setInstallManifestUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleInstallGameFromUrl();
+                  if (e.key === "Escape") setShowInstallGame(false);
+                }}
+                placeholder="https://example.com/my-game/manifest.json"
+                autoFocus
+              />
+              <div className="modal-actions">
+                <button
+                  onClick={handleInstallDemoGame}
+                  className="btn-secondary"
+                  title="Install a tiny bundled demo to verify the platform works"
+                >
+                  Install demo dice game
+                </button>
+                <button
+                  onClick={() => setShowInstallGame(false)}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button onClick={handleInstallGameFromUrl}>Install</button>
               </div>
             </div>
           </div>

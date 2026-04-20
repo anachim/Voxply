@@ -527,10 +527,20 @@ body {
   color: #10b981;
 }
 
-.sidebar-header-users {
+.sidebar-header-users,
+.sidebar-header-games {
   margin-top: 16px;
   border-top: 1px solid #1a1a2e;
   padding-top: 12px;
+}
+
+.game-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: #0f1729;
+  min-height: 0;
 }
 
 .channel-item {

@@ -46,6 +46,8 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/hub/settings", get(routes::hub::get_hub_settings))
         .route("/hub/pending", get(routes::hub::list_pending))
         .route("/hub/pending/{target_key}/approve", post(routes::hub::approve_user))
+        .route("/hub/games", get(routes::games::list_games).post(routes::games::install_game))
+        .route("/hub/games/{game_id}", axum::routing::delete(routes::games::uninstall_game))
         .merge(auth_routes)
         .merge(write_routes)
         .route("/me", get(routes::me::me).patch(routes::me::update_me))

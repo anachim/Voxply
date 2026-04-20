@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voxply Dice</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    overflow: hidden;
+    user-select: none;
+  }
+  h1 { color: #7c3aed; font-size: 24px; }
+  .greeting { color: #9ca3af; font-size: 14px; min-height: 20px; }
+  .die {
+    width: 160px; height: 160px;
+    border-radius: 24px;
+    background: #0f1729;
+    color: #10b981;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 96px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    transition: transform 0.15s;
+  }
+  .die.rolling { animation: shake 0.4s ease-in-out; }
+  @keyframes shake {
+    0%, 100% { transform: rotate(0) scale(1); }
+    25% { transform: rotate(-10deg) scale(1.05); }
+    75% { transform: rotate(10deg) scale(1.05); }
+  }
+  button {
+    padding: 12px 32px;
+    border: none;
+    border-radius: 8px;
+    background: #7c3aed;
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: #6d28d9; }
+  .count { color: #6b7280; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>🎲 Voxply Dice</h1>
+  <div class="greeting" id="greeting">Loading…</div>
+  <div class="die" id="die">—</div>
+  <button id="roll">Roll</button>
+  <div class="count" id="count">Rolls: 0</div>
+
+<script>
+// --- Voxply game SDK v1 ---
+// The parent client injects an ack postMessage when ready. We ask for user
+// info; it replies with { type: 'voxply:user', data: { ... } }.
+const voxply = {
+  user: null,
+  _resolvers: [],
+  getUser() {
+    return new Promise((resolve) => {
+      if (this.user) return resolve(this.user);
+      this._resolvers.push(resolve);
+      window.parent.postMessage({ type: "voxply:getUser" }, "*");
+    });
+  },
+};
+window.addEventListener("message", (e) => {
+  if (e.data?.type === "voxply:user") {
+    voxply.user = e.data.data;
+    voxply._resolvers.forEach((r) => r(voxply.user));
+    voxply._resolvers = [];
+  }
+});
+
+// --- Game code ---
+const dieEl = document.getElementById("die");
+const countEl = document.getElementById("count");
+const greetingEl = document.getElementById("greeting");
+const FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+let rolls = 0;
+
+document.getElementById("roll").addEventListener("click", () => {
+  dieEl.classList.add("rolling");
+  setTimeout(() => dieEl.classList.remove("rolling"), 400);
+  const value = Math.floor(Math.random() * 6);
+  dieEl.textContent = FACES[value];
+  rolls++;
+  countEl.textContent = `Rolls: ${rolls}`;
+});
+
+(async () => {
+  const user = await voxply.getUser();
+  const name = user?.display_name || "player";
+  greetingEl.textContent = `Hello, ${name}`;
+})();
+</script>
+</body>
+</html>

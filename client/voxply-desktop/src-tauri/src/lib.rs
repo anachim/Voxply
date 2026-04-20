@@ -133,6 +133,35 @@ struct PendingUser {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct InstalledGame {
+    id: String,
+    name: String,
+    description: Option<String>,
+    version: String,
+    entry_url: String,
+    thumbnail_url: Option<String>,
+    author: Option<String>,
+    min_players: i64,
+    max_players: i64,
+    installed_by: String,
+    installed_at: i64,
+    manifest_url: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct GameManifest {
+    id: String,
+    name: String,
+    description: Option<String>,
+    version: String,
+    entry_url: String,
+    thumbnail_url: Option<String>,
+    author: Option<String>,
+    min_players: i64,
+    max_players: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct ChannelInfo {
     id: String,
     name: String,
@@ -1403,6 +1432,64 @@ async fn list_pending_members(
 }
 
 #[tauri::command]
+async fn list_installed_games(
+    state: State<'_, AppState>,
+) -> Result<Vec<InstalledGame>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/hub/games"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn install_game(
+    manifest_url: String,
+    manifest: Option<GameManifest>,
+    state: State<'_, AppState>,
+) -> Result<InstalledGame, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/hub/games"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "manifest_url": manifest_url,
+            "manifest": manifest,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn uninstall_game(game_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/hub/games/{game_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn approve_member(
     target_public_key: String,
     state: State<'_, AppState>,
@@ -1924,6 +2011,9 @@ pub fn run() {
             get_hub_settings,
             list_pending_members,
             approve_member,
+            list_installed_games,
+            install_game,
+            uninstall_game,
             list_hub_members,
             kick_user_cmd,
             ban_user_cmd,

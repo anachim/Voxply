@@ -2197,6 +2197,20 @@ function App() {
     }
   }
 
+  async function handleMoveChannel(channelId: string, parentId: string | null) {
+    try {
+      await invoke("move_channel", { channelId, parentId });
+      setChannels((prev) =>
+        prev.map((c) =>
+          c.id === channelId ? { ...c, parent_id: parentId } : c
+        )
+      );
+      setContextMenu(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function handleDeleteChannel(channelId: string) {
     if (!confirm("Delete this channel? Messages will be lost.")) return;
     try {
@@ -2900,12 +2914,40 @@ function App() {
               onClick={(e) => e.stopPropagation()}
             >
               {!contextMenu.channel.is_category && (
-                <button
-                  className="context-menu-item"
-                  onClick={() => openEditDescription(contextMenu.channel)}
-                >
-                  Edit description
-                </button>
+                <>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => openEditDescription(contextMenu.channel)}
+                  >
+                    Edit description
+                  </button>
+                  {contextMenu.channel.parent_id && (
+                    <button
+                      className="context-menu-item"
+                      onClick={() =>
+                        handleMoveChannel(contextMenu.channel.id, null)
+                      }
+                    >
+                      Move to top level
+                    </button>
+                  )}
+                  {channels
+                    .filter(
+                      (c) =>
+                        c.is_category && c.id !== contextMenu.channel.parent_id
+                    )
+                    .map((cat) => (
+                      <button
+                        key={cat.id}
+                        className="context-menu-item"
+                        onClick={() =>
+                          handleMoveChannel(contextMenu.channel.id, cat.id)
+                        }
+                      >
+                        Move to {cat.name}
+                      </button>
+                    ))}
+                </>
               )}
               <button
                 className="context-menu-item danger"

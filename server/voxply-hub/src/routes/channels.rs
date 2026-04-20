@@ -102,12 +102,48 @@ pub async fn update_channel(
         return Err((StatusCode::NOT_FOUND, "Channel not found".to_string()));
     }
 
-    sqlx::query("UPDATE channels SET description = ? WHERE id = ?")
-        .bind(&req.description)
-        .bind(&channel_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    if let Some(parent_option) = &req.parent_id {
+        if let Some(parent_id) = parent_option {
+            if parent_id == &channel_id {
+                return Err((StatusCode::BAD_REQUEST, "A channel can't be its own parent".to_string()));
+            }
+            let parent_is_category: Option<i64> =
+                sqlx::query_scalar("SELECT is_category FROM channels WHERE id = ?")
+                    .bind(parent_id)
+                    .fetch_optional(&state.db)
+                    .await
+                    .map_err(|e| {
+                        (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}"))
+                    })?;
+            match parent_is_category {
+                None => {
+                    return Err((StatusCode::NOT_FOUND, "Parent channel not found".to_string()))
+                }
+                Some(0) => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "Parent must be a category".to_string(),
+                    ))
+                }
+                _ => {}
+            }
+        }
+        sqlx::query("UPDATE channels SET parent_id = ? WHERE id = ?")
+            .bind(parent_option.as_deref())
+            .bind(&channel_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
+
+    if req.description.is_some() {
+        sqlx::query("UPDATE channels SET description = ? WHERE id = ?")
+            .bind(&req.description)
+            .bind(&channel_id)
+            .execute(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
 
     Ok(StatusCode::OK)
 }

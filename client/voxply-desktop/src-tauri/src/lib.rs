@@ -709,6 +709,30 @@ async fn update_channel_description(
 }
 
 #[tauri::command]
+async fn move_channel(
+    channel_id: String,
+    parent_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    // Body always contains the parent_id key so the server treats it as a real
+    // change (Option<Option<String>> tri-state).
+    let body = serde_json::json!({ "parent_id": parent_id });
+    let resp = client
+        .patch(format!("{hub_url}/channels/{channel_id}"))
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn reorder_channels(
     channel_ids: Vec<String>,
     state: State<'_, AppState>,
@@ -1804,6 +1828,7 @@ pub fn run() {
             list_channels,
             create_channel,
             update_channel_description,
+            move_channel,
             delete_channel,
             reorder_channels,
             list_users,

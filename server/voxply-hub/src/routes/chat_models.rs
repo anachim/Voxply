@@ -23,10 +23,23 @@ pub struct ChannelResponse {
     pub created_at: i64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct UpdateChannelRequest {
     #[serde(default)]
     pub description: Option<String>,
+    /// Tri-state: absent = don't touch, `Some(Some(id))` = set parent,
+    /// `Some(None)` = move to top level.
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub parent_id: Option<Option<String>>,
+}
+
+/// Lets us distinguish "field missing" from "field explicitly null" in JSON.
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 #[derive(Serialize, Deserialize)]

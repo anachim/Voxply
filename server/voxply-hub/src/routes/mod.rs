@@ -6,6 +6,7 @@ pub mod dms;
 pub mod friends;
 pub mod chat_models;
 pub mod health;
+pub mod hub;
 pub mod me;
 pub mod messages;
 pub mod invite_models;

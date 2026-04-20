@@ -33,8 +33,12 @@ pub async fn info(State(state): State<Arc<AppState>>) -> Json<InfoResponse> {
     .map(|v| v == "true")
     .unwrap_or(false);
 
+    let branding = crate::routes::hub::read_branding(&state).await;
+
     Json(InfoResponse {
-        name: state.hub_name.clone(),
+        name: branding.name,
+        description: branding.description,
+        icon: branding.icon,
         version: env!("CARGO_PKG_VERSION").to_string(),
         public_key: state.hub_identity.public_key_hex(),
         min_security_level,
@@ -50,6 +54,10 @@ pub struct HealthResponse {
 #[derive(Serialize, Deserialize)]
 pub struct InfoResponse {
     pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
     pub version: String,
     pub public_key: String,
     pub min_security_level: u32,

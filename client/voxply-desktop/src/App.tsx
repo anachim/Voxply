@@ -62,6 +62,19 @@ interface Hub {
   is_active: boolean;
 }
 
+interface RoleInfo {
+  id: string;
+  name: string;
+  permissions: string[];
+  priority: number;
+}
+
+interface MeInfo {
+  public_key: string;
+  display_name: string | null;
+  roles: RoleInfo[];
+}
+
 interface Friend {
   public_key: string;
   display_name: string | null;
@@ -359,6 +372,149 @@ function SettingsPage(props: SettingsPageProps) {
   );
 }
 
+type HubAdminTab = "overview" | "roles" | "members" | "bans" | "invites";
+
+interface HubAdminPageProps {
+  tab: HubAdminTab;
+  onTab: (t: HubAdminTab) => void;
+  onClose: () => void;
+  hubName: string;
+  onHubNameChange: (v: string) => void;
+  hubDescription: string;
+  onHubDescriptionChange: (v: string) => void;
+  hubIcon: string;
+  onHubIconChange: (v: string) => void;
+  onSave: () => void;
+}
+
+function HubAdminPage(props: HubAdminPageProps) {
+  const tabs: { id: HubAdminTab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "roles", label: "Roles" },
+    { id: "members", label: "Members" },
+    { id: "bans", label: "Bans" },
+    { id: "invites", label: "Invites" },
+  ];
+
+  function handleIconFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 256 * 1024) {
+      alert("Image too large (max 256 KB)");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") props.onHubIconChange(result);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div className="settings-page">
+      <aside className="settings-nav">
+        <h2>Hub settings</h2>
+        <ul>
+          {tabs.map((t) => (
+            <li key={t.id}>
+              <button
+                className={`settings-nav-item ${props.tab === t.id ? "active" : ""}`}
+                onClick={() => props.onTab(t.id)}
+              >
+                {t.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <button className="settings-nav-close" onClick={props.onClose}>
+          Close (ESC)
+        </button>
+      </aside>
+      <main className="settings-content">
+        <button className="settings-close-x" onClick={props.onClose} title="Close">
+          ×
+        </button>
+        {props.tab === "overview" && (
+          <section>
+            <h1>Overview</h1>
+            <div className="settings-section">
+              <label className="settings-label">Hub name</label>
+              <input
+                type="text"
+                value={props.hubName}
+                onChange={(e) => props.onHubNameChange(e.target.value)}
+                placeholder="My Hub"
+              />
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Description</label>
+              <p className="muted">Shown to visitors before they join.</p>
+              <textarea
+                rows={3}
+                value={props.hubDescription}
+                onChange={(e) => props.onHubDescriptionChange(e.target.value)}
+                placeholder="What's this hub for?"
+              />
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Icon</label>
+              <p className="muted">
+                PNG or JPG, max 256 KB. Stored inline on the hub.
+              </p>
+              <div className="hub-icon-editor">
+                {props.hubIcon ? (
+                  <img src={props.hubIcon} alt="Hub icon" className="hub-icon-preview" />
+                ) : (
+                  <div className="hub-icon-preview placeholder">No icon</div>
+                )}
+                <div className="settings-row">
+                  <input type="file" accept="image/*" onChange={handleIconFile} />
+                  {props.hubIcon && (
+                    <button
+                      className="btn-secondary"
+                      onClick={() => props.onHubIconChange("")}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="settings-section">
+              <button onClick={props.onSave}>Save changes</button>
+            </div>
+          </section>
+        )}
+        {props.tab === "roles" && (
+          <section>
+            <h1>Roles</h1>
+            <p className="muted">Role management UI is coming soon.</p>
+          </section>
+        )}
+        {props.tab === "members" && (
+          <section>
+            <h1>Members</h1>
+            <p className="muted">Member table + moderation actions are coming soon.</p>
+          </section>
+        )}
+        {props.tab === "bans" && (
+          <section>
+            <h1>Bans</h1>
+            <p className="muted">Ban list is coming soon.</p>
+          </section>
+        )}
+        {props.tab === "invites" && (
+          <section>
+            <h1>Invites</h1>
+            <p className="muted">Invite management is coming soon.</p>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
+
 function App() {
   // Multi-hub state
   const [hubs, setHubs] = useState<Hub[]>([]);
@@ -395,6 +551,19 @@ function App() {
   // Edit description dialog
   const [editDescriptionChannel, setEditDescriptionChannel] = useState<Channel | null>(null);
   const [editDescriptionValue, setEditDescriptionValue] = useState("");
+
+  // Hub admin panel
+  const [hubDropdownOpen, setHubDropdownOpen] = useState(false);
+  const [showHubAdmin, setShowHubAdmin] = useState(false);
+  const [hubAdminTab, setHubAdminTab] = useState<
+    "overview" | "roles" | "members" | "bans" | "invites"
+  >("overview");
+  const [myRoles, setMyRoles] = useState<RoleInfo[]>([]);
+  const [adminHubName, setAdminHubName] = useState("");
+  const [adminHubDescription, setAdminHubDescription] = useState("");
+  const [adminHubIcon, setAdminHubIcon] = useState("");
+
+  const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null);
@@ -467,6 +636,16 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showSettings]);
+
+  // ESC closes the hub admin view
+  useEffect(() => {
+    if (!showHubAdmin) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowHubAdmin(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showHubAdmin]);
 
   async function copyPublicKey() {
     if (!publicKey) return;
@@ -630,6 +809,47 @@ function App() {
       setSelectedChannel(null);
       setSelectedConversation(null);
       setMessages([]);
+      // Refresh our own roles on this hub so admin-gated UI can show/hide
+      try {
+        const me = await invoke<MeInfo>("get_me");
+        setMyRoles(me.roles);
+      } catch {
+        setMyRoles([]);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function openHubAdmin() {
+    setHubDropdownOpen(false);
+    setShowHubAdmin(true);
+    setHubAdminTab("overview");
+    try {
+      const branding = await invoke<{
+        name: string;
+        description: string | null;
+        icon: string | null;
+      }>("get_hub_branding");
+      setAdminHubName(branding.name);
+      setAdminHubDescription(branding.description ?? "");
+      setAdminHubIcon(branding.icon ?? "");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSaveHubBranding() {
+    try {
+      await invoke("update_hub_branding", {
+        name: adminHubName.trim() || null,
+        description: adminHubDescription,
+        icon: adminHubIcon,
+      });
+      // Refresh hub list so the new name flows into the hub-icon title
+      const refreshed = await invoke<Hub[]>("list_hubs");
+      setHubs(refreshed);
+      setToast("Hub settings saved");
     } catch (e) {
       setError(String(e));
     }
@@ -1147,7 +1367,20 @@ function App() {
         </div>
       )}
       <>
-        {showSettings ? (
+        {showHubAdmin ? (
+          <HubAdminPage
+            tab={hubAdminTab}
+            onTab={setHubAdminTab}
+            onClose={() => setShowHubAdmin(false)}
+            hubName={adminHubName}
+            onHubNameChange={setAdminHubName}
+            hubDescription={adminHubDescription}
+            onHubDescriptionChange={setAdminHubDescription}
+            hubIcon={adminHubIcon}
+            onHubIconChange={setAdminHubIcon}
+            onSave={handleSaveHubBranding}
+          />
+        ) : showSettings ? (
           <SettingsPage
             tab={settingsTab}
             onTab={setSettingsTab}
@@ -1239,6 +1472,51 @@ function App() {
           ) : (
             <>
           <div className="sidebar">
+            {view === "channels" && (
+              <div className="hub-header">
+                <button
+                  className="hub-header-button"
+                  onClick={() => setHubDropdownOpen(!hubDropdownOpen)}
+                >
+                  <span className="hub-header-name">
+                    {hubs.find((h) => h.hub_id === activeHubId)?.hub_name ?? "Hub"}
+                  </span>
+                  <span className="hub-header-chevron">
+                    {hubDropdownOpen ? "▴" : "▾"}
+                  </span>
+                </button>
+                {hubDropdownOpen && (
+                  <div className="hub-dropdown">
+                    <button
+                      className="hub-dropdown-item"
+                      onClick={() => {
+                        setHubDropdownOpen(false);
+                        setToast("Invite management coming soon");
+                      }}
+                    >
+                      Invite people
+                    </button>
+                    {isAdmin && (
+                      <button
+                        className="hub-dropdown-item"
+                        onClick={openHubAdmin}
+                      >
+                        Hub settings
+                      </button>
+                    )}
+                    <button
+                      className="hub-dropdown-item danger"
+                      onClick={() => {
+                        setHubDropdownOpen(false);
+                        if (activeHubId) handleRemoveHub(activeHubId);
+                      }}
+                    >
+                      Leave hub
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="sidebar-scroll">
             {view === "channels" ? (
               <>

@@ -88,7 +88,33 @@ struct SavedHub {
 #[derive(Serialize, Deserialize)]
 struct InfoResponse {
     name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
     public_key: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct RoleInfo {
+    id: String,
+    name: String,
+    permissions: Vec<String>,
+    priority: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct MeInfo {
+    public_key: String,
+    display_name: Option<String>,
+    roles: Vec<RoleInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct HubBranding {
+    name: String,
+    description: Option<String>,
+    icon: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1127,6 +1153,76 @@ fn get_my_public_key() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn get_me(state: State<'_, AppState>) -> Result<MeInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{hub_url}/me"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn get_hub_branding(state: State<'_, AppState>) -> Result<HubBranding, String> {
+    let (hub_url, _) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let info: InfoResponse = client
+        .get(format!("{hub_url}/info"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))?;
+    Ok(HubBranding {
+        name: info.name,
+        description: info.description,
+        icon: info.icon,
+    })
+}
+
+#[tauri::command]
+async fn update_hub_branding(
+    name: Option<String>,
+    description: Option<String>,
+    icon: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/hub"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "name": name,
+            "description": description,
+            "icon": icon,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+
+    // Update the in-memory hub_name in the active session so list_hubs reflects it.
+    if let Some(new_name) = name {
+        if let Some(active_id) = state.active_hub.lock().unwrap().clone() {
+            if let Some(s) = state.hubs.lock().unwrap().get_mut(&active_id) {
+                s.hub_name = new_name;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn list_friends(state: State<'_, AppState>) -> Result<Vec<FriendInfo>, String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
@@ -1326,6 +1422,9 @@ pub fn run() {
             update_display_name,
             get_recovery_phrase,
             get_my_public_key,
+            get_me,
+            get_hub_branding,
+            update_hub_branding,
             list_friends,
             list_pending_friends,
             send_friend_request,

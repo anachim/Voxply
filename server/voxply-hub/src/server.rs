@@ -41,6 +41,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(routes::health::health))
         .route("/info", get(routes::health::info))
+        .route("/hub", axum::routing::patch(routes::hub::update_hub))
         .merge(auth_routes)
         .merge(write_routes)
         .route("/me", get(routes::me::me).patch(routes::me::update_me))

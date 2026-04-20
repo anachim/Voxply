@@ -249,6 +249,9 @@ interface SettingsPageProps {
   displayName: string;
   onDisplayNameChange: (v: string) => void;
   onSaveDisplayName: () => void;
+  defaultDisplayName: string;
+  onDefaultDisplayNameChange: (v: string) => void;
+  onSaveDefaultDisplayName: () => void;
   publicKey: string | null;
   copiedKey: boolean;
   onCopyKey: () => void;
@@ -427,16 +430,34 @@ function SettingsPage(props: SettingsPageProps) {
           <section>
             <h1>Account</h1>
             <div className="settings-section">
-              <label className="settings-label">Display name</label>
+              <label className="settings-label">Default display name</label>
               <p className="muted">
-                How you appear on hubs you've joined. Same name everywhere for now.
+                Used on new hubs you join. Stored only on this device.
+                Change your name on a specific hub below to override this.
+              </p>
+              <div className="settings-row">
+                <input
+                  type="text"
+                  value={props.defaultDisplayName}
+                  onChange={(e) =>
+                    props.onDefaultDisplayNameChange(e.target.value)
+                  }
+                  placeholder="e.g. Antonio"
+                />
+                <button onClick={props.onSaveDefaultDisplayName}>Save</button>
+              </div>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Display name on this hub</label>
+              <p className="muted">
+                Overrides your default on the currently active hub only.
               </p>
               <div className="settings-row">
                 <input
                   type="text"
                   value={props.displayName}
                   onChange={(e) => props.onDisplayNameChange(e.target.value)}
-                  placeholder="Your display name"
+                  placeholder="Override just for this hub"
                 />
                 <button onClick={props.onSaveDisplayName}>Save</button>
               </div>
@@ -1367,6 +1388,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"account" | "voice" | "security" | "about">("account");
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
+  const [defaultDisplayName, setDefaultDisplayName] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
 
@@ -2288,6 +2310,20 @@ function App() {
       // Refresh user list to show new name
       const u = await invoke<User[]>("list_users");
       setUsers(u);
+      setToast("Saved for this hub");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSaveDefaultDisplayName() {
+    try {
+      await invoke("save_profile", {
+        profile: {
+          default_display_name: defaultDisplayName.trim() || null,
+        },
+      });
+      setToast("Default saved — applies to new hubs");
     } catch (e) {
       setError(String(e));
     }
@@ -2431,6 +2467,14 @@ function App() {
     // Pre-fill with current display name if known
     const me = users.find((u) => u.public_key === publicKey);
     setSettingsDisplayName(me?.display_name || "");
+
+    // Load the locally-stored default name
+    try {
+      const profile = await invoke<{ default_display_name?: string | null }>(
+        "get_profile"
+      );
+      setDefaultDisplayName(profile.default_display_name ?? "");
+    } catch {}
 
     // Load voice devices + stored settings
     try {
@@ -2693,6 +2737,9 @@ function App() {
             displayName={settingsDisplayName}
             onDisplayNameChange={setSettingsDisplayName}
             onSaveDisplayName={handleSaveDisplayName}
+            defaultDisplayName={defaultDisplayName}
+            onDefaultDisplayNameChange={setDefaultDisplayName}
+            onSaveDefaultDisplayName={handleSaveDefaultDisplayName}
             publicKey={publicKey}
             copiedKey={copiedKey}
             onCopyKey={copyPublicKey}

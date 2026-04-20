@@ -294,6 +294,50 @@ fn voice_settings_path() -> Result<std::path::PathBuf, String> {
     Ok(home.join(".voxply").join("voice.json"))
 }
 
+fn profile_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("profile.json"))
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct LocalProfile {
+    /// Default display name used on new hubs. If set, we PATCH /me after
+    /// authenticating with a hub that has no display_name for this user yet.
+    #[serde(default)]
+    default_display_name: Option<String>,
+}
+
+fn load_profile() -> LocalProfile {
+    if let Ok(path) = profile_path() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(p) = serde_json::from_str::<LocalProfile>(&data) {
+                return p;
+            }
+        }
+    }
+    LocalProfile::default()
+}
+
+fn save_profile_to_disk(profile: &LocalProfile) -> Result<(), String> {
+    let path = profile_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Mkdir failed: {e}"))?;
+    }
+    let json = serde_json::to_string_pretty(profile).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("Write failed: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_profile() -> LocalProfile {
+    load_profile()
+}
+
+#[tauri::command]
+fn save_profile(profile: LocalProfile) -> Result<(), String> {
+    save_profile_to_disk(&profile)
+}
+
 fn load_voice_settings() -> StoredVoiceSettings {
     if let Ok(path) = voice_settings_path() {
         if let Ok(data) = std::fs::read_to_string(&path) {
@@ -437,6 +481,38 @@ async fn add_hub(
         .map_err(|e| format!("Invalid verify: {e}"))?;
 
     let token = verify.token;
+
+    // If the user has set a default display name locally, and they don't have
+    // one set on this hub yet, apply it now. Lets a new hub auto-inherit your
+    // name instead of showing your pubkey.
+    let profile = load_profile();
+    if let Some(default_name) = profile.default_display_name.as_deref() {
+        if !default_name.trim().is_empty() {
+            // Read current /me to decide whether to overwrite
+            if let Ok(me_resp) = client
+                .get(format!("{hub_url}/me"))
+                .bearer_auth(&token)
+                .send()
+                .await
+            {
+                if let Ok(me) = me_resp.json::<serde_json::Value>().await {
+                    let has_name = me
+                        .get("display_name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false);
+                    if !has_name {
+                        let _ = client
+                            .patch(format!("{hub_url}/me"))
+                            .bearer_auth(&token)
+                            .json(&serde_json::json!({ "display_name": default_name }))
+                            .send()
+                            .await;
+                    }
+                }
+            }
+        }
+    }
 
     // Spawn WS task with hub_id tagging
     let (cmd_tx, ws_task) = spawn_ws_task(hub_id.clone(), hub_url.clone(), token.clone(), app.clone()).await?;
@@ -2075,6 +2151,8 @@ pub fn run() {
             mic_test_start,
             mic_test_stop,
             update_display_name,
+            get_profile,
+            save_profile,
             get_recovery_phrase,
             get_my_public_key,
             get_me,

@@ -314,6 +314,10 @@ struct LocalProfile {
     /// Default avatar (base64 data URL). Same "applied on first auth" logic.
     #[serde(default)]
     default_avatar: Option<String>,
+    /// Visual theme preference: "calm" | "classic" | "linear". Missing or
+    /// unknown values fall back to calm at the client.
+    #[serde(default)]
+    theme: Option<String>,
 }
 
 fn load_profile() -> LocalProfile {

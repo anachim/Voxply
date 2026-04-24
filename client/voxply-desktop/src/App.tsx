@@ -258,6 +258,8 @@ interface SettingsPageProps {
   onDefaultAvatarChange: (v: string) => void;
   hubAvatar: string;
   onHubAvatarChange: (v: string) => void;
+  theme: "calm" | "classic" | "linear";
+  onThemeChange: (t: "calm" | "classic" | "linear") => void;
   publicKey: string | null;
   copiedKey: boolean;
   onCopyKey: () => void;
@@ -274,6 +276,72 @@ interface SettingsPageProps {
   onToggleMicTest: () => void;
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
+}
+
+/**
+ * Theme picker — three radio cards. Each shows the theme's name, its three
+ * representative swatches (bg / surface / accent), and a "DEFAULT" tag on
+ * Calm. Swatch colors are hardcoded here because they need to render the
+ * theme's palette regardless of which theme is currently active.
+ */
+const THEMES: {
+  id: "calm" | "classic" | "linear";
+  name: string;
+  tagline: string;
+  swatches: [string, string, string];
+}[] = [
+  {
+    id: "calm",
+    name: "Calm",
+    tagline: "Warm dark, dusty teal. Soft on the eyes — fits everyone.",
+    swatches: ["#1c1a1f", "#2c2a31", "#88b8a8"],
+  },
+  {
+    id: "classic",
+    name: "Classic",
+    tagline: "Deep navy + violet purple. Familiar and tech-forward.",
+    swatches: ["#1a1a2e", "#1e2a47", "#7c3aed"],
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    tagline: "Near-black with a sharp violet-blue accent. Minimal.",
+    swatches: ["#0c0d11", "#1a1c22", "#6571f0"],
+  },
+];
+
+function ThemePicker({
+  value,
+  onChange,
+}: {
+  value: "calm" | "classic" | "linear";
+  onChange: (t: "calm" | "classic" | "linear") => void;
+}) {
+  return (
+    <div className="theme-cards">
+      {THEMES.map((t) => (
+        <button
+          key={t.id}
+          className={`theme-card ${value === t.id ? "active" : ""}`}
+          onClick={() => onChange(t.id)}
+          type="button"
+        >
+          {t.id === "calm" && <span className="theme-card-default">Default</span>}
+          <div className="theme-card-name">{t.name}</div>
+          <div className="theme-card-swatches">
+            {t.swatches.map((color) => (
+              <span
+                key={color}
+                className="theme-swatch"
+                style={{ background: color }}
+              />
+            ))}
+          </div>
+          <p className="theme-card-tagline">{t.tagline}</p>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function Avatar({
@@ -538,6 +606,14 @@ function SettingsPage(props: SettingsPageProps) {
                 />
                 <button onClick={props.onSaveDisplayName}>Save</button>
               </div>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Appearance</label>
+              <p className="muted">
+                How Voxply looks. Pick whichever feels right — you can change
+                it any time.
+              </p>
+              <ThemePicker value={props.theme} onChange={props.onThemeChange} />
             </div>
             <div className="settings-section">
               <label className="settings-label">Default avatar</label>
@@ -1490,6 +1566,7 @@ function App() {
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
   const [defaultDisplayName, setDefaultDisplayName] = useState("");
   const [defaultAvatar, setDefaultAvatar] = useState("");
+  const [theme, setTheme] = useState<"calm" | "classic" | "linear">("calm");
   const [hubAvatar, setHubAvatar] = useState("");
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
@@ -2242,6 +2319,17 @@ function App() {
   // Auto-connect saved hubs on app start + load our own public key once
   useEffect(() => {
     (async () => {
+      // Apply persisted theme as early as possible to avoid a flash of the
+      // default palette.
+      try {
+        const profile = await invoke<{ theme?: string | null }>("get_profile");
+        const t = (profile.theme ?? "calm") as "calm" | "classic" | "linear";
+        const valid = t === "calm" || t === "classic" || t === "linear" ? t : "calm";
+        setTheme(valid);
+        document.documentElement.dataset.theme = valid;
+      } catch {
+        document.documentElement.dataset.theme = "calm";
+      }
       try {
         const key = await invoke<string>("get_my_public_key");
         setPublicKey(key);
@@ -2424,6 +2512,7 @@ function App() {
         profile: {
           default_display_name: defaultDisplayName.trim() || null,
           default_avatar: defaultAvatar || null,
+          theme,
         },
       });
       setToast("Default saved — applies to new hubs");
@@ -2439,6 +2528,23 @@ function App() {
         profile: {
           default_display_name: defaultDisplayName.trim() || null,
           default_avatar: newValue || null,
+          theme,
+        },
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSetTheme(t: "calm" | "classic" | "linear") {
+    setTheme(t);
+    document.documentElement.dataset.theme = t;
+    try {
+      await invoke("save_profile", {
+        profile: {
+          default_display_name: defaultDisplayName.trim() || null,
+          default_avatar: defaultAvatar || null,
+          theme: t,
         },
       });
     } catch (e) {
@@ -2602,9 +2708,14 @@ function App() {
       const profile = await invoke<{
         default_display_name?: string | null;
         default_avatar?: string | null;
+        theme?: string | null;
       }>("get_profile");
       setDefaultDisplayName(profile.default_display_name ?? "");
       setDefaultAvatar(profile.default_avatar ?? "");
+      const t = profile.theme;
+      if (t === "calm" || t === "classic" || t === "linear") {
+        setTheme(t);
+      }
     } catch {}
 
     // Load this hub's avatar for the user (from /me)
@@ -2881,6 +2992,8 @@ function App() {
             onDefaultAvatarChange={handleSaveDefaultAvatar}
             hubAvatar={hubAvatar}
             onHubAvatarChange={handleSaveHubAvatar}
+            theme={theme}
+            onThemeChange={handleSetTheme}
             publicKey={publicKey}
             copiedKey={copiedKey}
             onCopyKey={copyPublicKey}

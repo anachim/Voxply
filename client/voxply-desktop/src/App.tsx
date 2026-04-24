@@ -74,6 +74,13 @@ interface RoleInfo {
   display_separately?: boolean;
 }
 
+interface NamedProfile {
+  id: string;
+  label: string;
+  display_name: string;
+  avatar: string | null;
+}
+
 interface MeInfo {
   public_key: string;
   display_name: string | null;
@@ -248,16 +255,18 @@ interface SettingsPageProps {
   tab: SettingsTab;
   onTab: (t: SettingsTab) => void;
   onClose: () => void;
-  displayName: string;
-  onDisplayNameChange: (v: string) => void;
-  onSaveDisplayName: () => void;
-  defaultDisplayName: string;
-  onDefaultDisplayNameChange: (v: string) => void;
-  onSaveDefaultDisplayName: () => void;
-  defaultAvatar: string;
-  onDefaultAvatarChange: (v: string) => void;
-  hubAvatar: string;
-  onHubAvatarChange: (v: string) => void;
+  // Profile system: multiple named profiles with one marked default.
+  profiles: NamedProfile[];
+  defaultProfileId: string | null;
+  onCreateProfile: () => void;
+  onUpdateProfile: (
+    id: string,
+    patch: Partial<Omit<NamedProfile, "id">>
+  ) => void;
+  onDeleteProfile: (id: string) => void;
+  onSetDefaultProfile: (id: string) => void;
+  onApplyProfileToHub: (id: string) => void;
+
   theme: "calm" | "classic" | "linear";
   onThemeChange: (t: "calm" | "classic" | "linear") => void;
   hasActiveHub: boolean;
@@ -280,131 +289,164 @@ interface SettingsPageProps {
 }
 
 /**
- * Profile tab — toggle between editing the local default profile (used on
- * new hubs) and the active hub's override. Renders the relevant inputs for
- * the chosen scope so the page never shows two competing fields at once.
+ * Profile tab — multiple named profiles. One is marked as default and gets
+ * auto-applied to new hubs. The user can create as many as they like, edit
+ * each, and apply any one of them to the currently active hub.
+ *
+ * Avatar sits to the LEFT of the display name in the editor, which reads
+ * more like a profile card and matches conventions in apps the user knows.
  */
 function ProfileTab({
   hasActiveHub,
-  defaultDisplayName,
-  onDefaultDisplayNameChange,
-  onSaveDefaultDisplayName,
-  displayName,
-  onDisplayNameChange,
-  onSaveDisplayName,
-  defaultAvatar,
-  onDefaultAvatarChange,
-  hubAvatar,
-  onHubAvatarChange,
+  profiles,
+  defaultProfileId,
+  onCreateProfile,
+  onUpdateProfile,
+  onDeleteProfile,
+  onSetDefaultProfile,
+  onApplyProfileToHub,
 }: {
   hasActiveHub: boolean;
-  defaultDisplayName: string;
-  onDefaultDisplayNameChange: (v: string) => void;
-  onSaveDefaultDisplayName: () => void;
-  displayName: string;
-  onDisplayNameChange: (v: string) => void;
-  onSaveDisplayName: () => void;
-  defaultAvatar: string;
-  onDefaultAvatarChange: (v: string) => void;
-  hubAvatar: string;
-  onHubAvatarChange: (v: string) => void;
+  profiles: NamedProfile[];
+  defaultProfileId: string | null;
+  onCreateProfile: () => void;
+  onUpdateProfile: (id: string, patch: Partial<Omit<NamedProfile, "id">>) => void;
+  onDeleteProfile: (id: string) => void;
+  onSetDefaultProfile: (id: string) => void;
+  onApplyProfileToHub: (id: string) => void;
 }) {
-  const [scope, setScope] = useState<"default" | "hub">(
-    hasActiveHub ? "default" : "default"
+  const [selectedId, setSelectedId] = useState<string | null>(
+    defaultProfileId ?? profiles[0]?.id ?? null
   );
 
-  // If the user is on the hub scope and disconnects from the active hub,
-  // bounce them back to default so the inputs aren't writing into a void.
+  // Keep selection valid as profiles list changes.
   useEffect(() => {
-    if (!hasActiveHub && scope === "hub") setScope("default");
-  }, [hasActiveHub, scope]);
+    if (profiles.length === 0) {
+      setSelectedId(null);
+    } else if (!profiles.find((p) => p.id === selectedId)) {
+      setSelectedId(defaultProfileId ?? profiles[0].id);
+    }
+  }, [profiles, defaultProfileId, selectedId]);
 
-  const isDefault = scope === "default";
+  const selected = profiles.find((p) => p.id === selectedId) ?? null;
 
   return (
     <section>
       <h1>Profile</h1>
-      <div className="scope-toggle">
+      <p className="muted" style={{ marginBottom: "var(--space-4)" }}>
+        Create as many profiles as you like — say, one for friends and one
+        for work. The one marked Default is what new hubs use automatically.
+        Use <strong>Apply to this hub</strong> to switch profiles on the
+        hub you're currently viewing.
+      </p>
+
+      <div className="profile-cards">
+        {profiles.map((p) => (
+          <button
+            key={p.id}
+            className={`profile-card ${selectedId === p.id ? "active" : ""}`}
+            onClick={() => setSelectedId(p.id)}
+            type="button"
+          >
+            {defaultProfileId === p.id && (
+              <span className="profile-card-default">Default</span>
+            )}
+            <Avatar
+              src={p.avatar}
+              name={p.display_name || p.label}
+              size={48}
+            />
+            <div className="profile-card-text">
+              <div className="profile-card-label">{p.label}</div>
+              <div className="profile-card-name">
+                {p.display_name || (
+                  <span className="muted">no display name</span>
+                )}
+              </div>
+            </div>
+          </button>
+        ))}
         <button
-          className={`scope-toggle-btn ${isDefault ? "active" : ""}`}
-          onClick={() => setScope("default")}
+          className="profile-card profile-card-add"
+          onClick={onCreateProfile}
           type="button"
         >
-          Default profile
-          <span className="scope-toggle-hint">applies to new hubs</span>
-        </button>
-        <button
-          className={`scope-toggle-btn ${!isDefault ? "active" : ""}`}
-          onClick={() => setScope("hub")}
-          disabled={!hasActiveHub}
-          type="button"
-          title={hasActiveHub ? "" : "Join a hub first"}
-        >
-          This hub
-          <span className="scope-toggle-hint">override for the active hub</span>
+          <div className="profile-card-add-plus">+</div>
+          <div className="profile-card-text">
+            <div className="profile-card-label">New profile</div>
+          </div>
         </button>
       </div>
 
-      {isDefault ? (
-        <>
-          <div className="settings-section">
-            <label className="settings-label">Display name</label>
-            <p className="muted">
-              How you appear by default on every new hub. Stored only on this
-              device.
-            </p>
-            <div className="settings-row">
+      {selected && (
+        <div className="settings-section profile-editor">
+          <div className="profile-editor-row">
+            <AvatarEditor
+              value={selected.avatar ?? ""}
+              onChange={(v) =>
+                onUpdateProfile(selected.id, { avatar: v || null })
+              }
+              fallbackName={selected.display_name || selected.label}
+            />
+            <div className="profile-editor-fields">
+              <label className="settings-label">Display name</label>
               <input
                 type="text"
-                value={defaultDisplayName}
-                onChange={(e) => onDefaultDisplayNameChange(e.target.value)}
+                value={selected.display_name}
+                onChange={(e) =>
+                  onUpdateProfile(selected.id, { display_name: e.target.value })
+                }
                 placeholder="e.g. Antonio"
               />
-              <button onClick={onSaveDefaultDisplayName}>Save</button>
-            </div>
-          </div>
-          <div className="settings-section">
-            <label className="settings-label">Avatar</label>
-            <p className="muted">
-              Applied to new hubs you join. PNG/JPG under 256 KB.
-            </p>
-            <AvatarEditor
-              value={defaultAvatar}
-              onChange={onDefaultAvatarChange}
-              fallbackName={defaultDisplayName}
-            />
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="settings-section">
-            <label className="settings-label">Display name on this hub</label>
-            <p className="muted">
-              Overrides your default. Only changes how you appear on the hub
-              you're currently viewing.
-            </p>
-            <div className="settings-row">
+              <label className="settings-label" style={{ marginTop: "var(--space-3)" }}>
+                Profile label
+              </label>
               <input
                 type="text"
-                value={displayName}
-                onChange={(e) => onDisplayNameChange(e.target.value)}
-                placeholder="Override just for this hub"
+                value={selected.label}
+                onChange={(e) =>
+                  onUpdateProfile(selected.id, { label: e.target.value })
+                }
+                placeholder="e.g. Friends, Work, Gaming"
               />
-              <button onClick={onSaveDisplayName}>Save</button>
             </div>
           </div>
-          <div className="settings-section">
-            <label className="settings-label">Avatar on this hub</label>
-            <p className="muted">
-              Overrides your default avatar on the active hub only.
-            </p>
-            <AvatarEditor
-              value={hubAvatar}
-              onChange={onHubAvatarChange}
-              fallbackName={displayName}
-            />
+
+          <div className="profile-editor-actions">
+            {defaultProfileId !== selected.id && (
+              <button
+                className="btn-secondary"
+                onClick={() => onSetDefaultProfile(selected.id)}
+              >
+                ★ Set as default
+              </button>
+            )}
+            <button
+              onClick={() => onApplyProfileToHub(selected.id)}
+              disabled={!hasActiveHub}
+              title={hasActiveHub ? "" : "Join a hub first"}
+            >
+              Apply to this hub
+            </button>
+            <button
+              className="btn-secondary"
+              onClick={() => onDeleteProfile(selected.id)}
+              disabled={profiles.length <= 1}
+              title={
+                profiles.length <= 1 ? "You need at least one profile" : ""
+              }
+            >
+              Delete
+            </button>
           </div>
-        </>
+        </div>
+      )}
+
+      {profiles.length === 0 && (
+        <p className="muted">
+          No profiles yet — click <strong>+ New profile</strong> above to
+          create one.
+        </p>
       )}
     </section>
   );
@@ -708,16 +750,13 @@ function SettingsPage(props: SettingsPageProps) {
         {props.tab === "profile" && (
           <ProfileTab
             hasActiveHub={props.hasActiveHub}
-            defaultDisplayName={props.defaultDisplayName}
-            onDefaultDisplayNameChange={props.onDefaultDisplayNameChange}
-            onSaveDefaultDisplayName={props.onSaveDefaultDisplayName}
-            displayName={props.displayName}
-            onDisplayNameChange={props.onDisplayNameChange}
-            onSaveDisplayName={props.onSaveDisplayName}
-            defaultAvatar={props.defaultAvatar}
-            onDefaultAvatarChange={props.onDefaultAvatarChange}
-            hubAvatar={props.hubAvatar}
-            onHubAvatarChange={props.onHubAvatarChange}
+            profiles={props.profiles}
+            defaultProfileId={props.defaultProfileId}
+            onCreateProfile={props.onCreateProfile}
+            onUpdateProfile={props.onUpdateProfile}
+            onDeleteProfile={props.onDeleteProfile}
+            onSetDefaultProfile={props.onSetDefaultProfile}
+            onApplyProfileToHub={props.onApplyProfileToHub}
           />
         )}
         {props.tab === "account" && (
@@ -1662,11 +1701,9 @@ function App() {
   // Settings
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("profile");
-  const [settingsDisplayName, setSettingsDisplayName] = useState("");
-  const [defaultDisplayName, setDefaultDisplayName] = useState("");
-  const [defaultAvatar, setDefaultAvatar] = useState("");
   const [theme, setTheme] = useState<"calm" | "classic" | "linear">("calm");
-  const [hubAvatar, setHubAvatar] = useState("");
+  const [profiles, setProfiles] = useState<NamedProfile[]>([]);
+  const [defaultProfileId, setDefaultProfileId] = useState<string | null>(null);
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
 
@@ -2591,45 +2628,92 @@ function App() {
     }
   }
 
-  async function handleSaveDisplayName() {
-    const name = settingsDisplayName.trim();
-    if (!name) return;
+  /** Persist the full LocalProfile to disk. Pass the parts you want to change;
+   *  current state is used for the rest. */
+  async function persistProfileFile(overrides: {
+    profiles?: NamedProfile[];
+    defaultProfileId?: string | null;
+    theme?: "calm" | "classic" | "linear";
+  } = {}) {
+    const next = {
+      profiles: overrides.profiles ?? profiles,
+      default_profile_id: overrides.defaultProfileId ?? defaultProfileId,
+      theme: overrides.theme ?? theme,
+    };
     try {
-      await invoke("update_display_name", { displayName: name });
-      // Refresh user list to show new name
+      await invoke("save_profile", { profile: next });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function newProfileId(): string {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return `p_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  }
+
+  async function handleCreateProfile() {
+    const fresh: NamedProfile = {
+      id: newProfileId(),
+      label: `Profile ${profiles.length + 1}`,
+      display_name: "",
+      avatar: null,
+    };
+    const next = [...profiles, fresh];
+    setProfiles(next);
+    // First profile created becomes the default automatically.
+    const nextDefault = profiles.length === 0 ? fresh.id : defaultProfileId;
+    if (nextDefault !== defaultProfileId) setDefaultProfileId(nextDefault);
+    await persistProfileFile({ profiles: next, defaultProfileId: nextDefault });
+  }
+
+  async function handleUpdateProfile(
+    id: string,
+    patch: Partial<Omit<NamedProfile, "id">>
+  ) {
+    const next = profiles.map((p) =>
+      p.id === id ? { ...p, ...patch } : p
+    );
+    setProfiles(next);
+    await persistProfileFile({ profiles: next });
+  }
+
+  async function handleDeleteProfile(id: string) {
+    if (profiles.length <= 1) {
+      setError("You need at least one profile.");
+      return;
+    }
+    if (!confirm("Delete this profile?")) return;
+    const next = profiles.filter((p) => p.id !== id);
+    setProfiles(next);
+    let nextDefault = defaultProfileId;
+    if (defaultProfileId === id) {
+      nextDefault = next[0]?.id ?? null;
+      setDefaultProfileId(nextDefault);
+    }
+    await persistProfileFile({ profiles: next, defaultProfileId: nextDefault });
+  }
+
+  async function handleSetDefaultProfile(id: string) {
+    setDefaultProfileId(id);
+    await persistProfileFile({ defaultProfileId: id });
+    setToast("Default profile updated");
+  }
+
+  async function handleApplyProfileToHub(id: string) {
+    if (!hasActiveHub) return;
+    const p = profiles.find((x) => x.id === id);
+    if (!p) return;
+    try {
+      if (p.display_name.trim()) {
+        await invoke("update_display_name", { displayName: p.display_name });
+      }
+      await invoke("update_avatar", { avatar: p.avatar ?? "" });
       const u = await invoke<User[]>("list_users");
       setUsers(u);
-      setToast("Saved for this hub");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleSaveDefaultDisplayName() {
-    try {
-      await invoke("save_profile", {
-        profile: {
-          default_display_name: defaultDisplayName.trim() || null,
-          default_avatar: defaultAvatar || null,
-          theme,
-        },
-      });
-      setToast("Default saved — applies to new hubs");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleSaveDefaultAvatar(newValue: string) {
-    setDefaultAvatar(newValue);
-    try {
-      await invoke("save_profile", {
-        profile: {
-          default_display_name: defaultDisplayName.trim() || null,
-          default_avatar: newValue || null,
-          theme,
-        },
-      });
+      setToast(`Applied "${p.label}" to this hub`);
     } catch (e) {
       setError(String(e));
     }
@@ -2638,29 +2722,7 @@ function App() {
   async function handleSetTheme(t: "calm" | "classic" | "linear") {
     setTheme(t);
     document.documentElement.dataset.theme = t;
-    try {
-      await invoke("save_profile", {
-        profile: {
-          default_display_name: defaultDisplayName.trim() || null,
-          default_avatar: defaultAvatar || null,
-          theme: t,
-        },
-      });
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleSaveHubAvatar(newValue: string) {
-    setHubAvatar(newValue);
-    try {
-      await invoke("update_avatar", { avatar: newValue });
-      // Refresh user list so other components show the new avatar
-      const u = await invoke<User[]>("list_users");
-      setUsers(u);
-    } catch (e) {
-      setError(String(e));
-    }
+    await persistProfileFile({ theme: t });
   }
 
   async function handleShowRecovery() {
@@ -2799,28 +2861,19 @@ function App() {
     setShowSettings(true);
     setRecoveryPhrase(null);
     // Pre-fill with current display name if known
-    const me = users.find((u) => u.public_key === publicKey);
-    setSettingsDisplayName(me?.display_name || "");
-
-    // Load the locally-stored default name + avatar
+    // Load profiles + theme
     try {
       const profile = await invoke<{
-        default_display_name?: string | null;
-        default_avatar?: string | null;
+        profiles?: NamedProfile[];
+        default_profile_id?: string | null;
         theme?: string | null;
       }>("get_profile");
-      setDefaultDisplayName(profile.default_display_name ?? "");
-      setDefaultAvatar(profile.default_avatar ?? "");
+      setProfiles(profile.profiles ?? []);
+      setDefaultProfileId(profile.default_profile_id ?? null);
       const t = profile.theme;
       if (t === "calm" || t === "classic" || t === "linear") {
         setTheme(t);
       }
-    } catch {}
-
-    // Load this hub's avatar for the user (from /me)
-    try {
-      const me = await invoke<MeInfo>("get_me");
-      setHubAvatar(me.avatar ?? "");
     } catch {}
 
     // Load voice devices + stored settings
@@ -3081,16 +3134,6 @@ function App() {
             tab={settingsTab}
             onTab={setSettingsTab}
             onClose={closeSettings}
-            displayName={settingsDisplayName}
-            onDisplayNameChange={setSettingsDisplayName}
-            onSaveDisplayName={handleSaveDisplayName}
-            defaultDisplayName={defaultDisplayName}
-            onDefaultDisplayNameChange={setDefaultDisplayName}
-            onSaveDefaultDisplayName={handleSaveDefaultDisplayName}
-            defaultAvatar={defaultAvatar}
-            onDefaultAvatarChange={handleSaveDefaultAvatar}
-            hubAvatar={hubAvatar}
-            onHubAvatarChange={handleSaveHubAvatar}
             theme={theme}
             onThemeChange={handleSetTheme}
             hasActiveHub={hasActiveHub}

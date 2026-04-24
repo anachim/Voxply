@@ -305,19 +305,49 @@ fn profile_path() -> Result<std::path::PathBuf, String> {
     Ok(home.join(".voxply").join("profile.json"))
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct NamedProfile {
+    /// Stable identifier (UUID generated on the client when the profile is
+    /// created).
+    id: String,
+    /// User-given label for this profile, e.g. "Work" or "Gaming".
+    label: String,
+    /// Display name applied when this profile is used.
+    #[serde(default)]
+    display_name: String,
+    /// Optional avatar (base64 data URL).
+    #[serde(default)]
+    avatar: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct LocalProfile {
-    /// Default display name used on new hubs. If set, we PATCH /me after
-    /// authenticating with a hub that has no display_name for this user yet.
+    /// All profiles the user has defined. Empty on fresh installs.
     #[serde(default)]
-    default_display_name: Option<String>,
-    /// Default avatar (base64 data URL). Same "applied on first auth" logic.
+    profiles: Vec<NamedProfile>,
+    /// Which profile to auto-apply on new hubs. Falls back to the first
+    /// profile in the list when missing or stale.
     #[serde(default)]
-    default_avatar: Option<String>,
+    default_profile_id: Option<String>,
+
     /// Visual theme preference: "calm" | "classic" | "linear". Missing or
     /// unknown values fall back to calm at the client.
     #[serde(default)]
     theme: Option<String>,
+}
+
+impl LocalProfile {
+    fn default_profile(&self) -> Option<&NamedProfile> {
+        if self.profiles.is_empty() {
+            return None;
+        }
+        if let Some(id) = self.default_profile_id.as_ref() {
+            if let Some(p) = self.profiles.iter().find(|p| &p.id == id) {
+                return Some(p);
+            }
+        }
+        self.profiles.first()
+    }
 }
 
 fn load_profile() -> LocalProfile {
@@ -495,11 +525,11 @@ async fn add_hub(
 
     let token = verify.token;
 
-    // If the user has local defaults (name / avatar), apply them to this hub
-    // whenever the hub doesn't already have a value for the field. Lets a new
-    // hub inherit your identity instead of showing your pubkey.
+    // Auto-apply the user's default profile to this hub whenever the hub
+    // doesn't already have a value for the field. Lets a new hub inherit
+    // your identity instead of showing your pubkey.
     let profile = load_profile();
-    if profile.default_display_name.is_some() || profile.default_avatar.is_some() {
+    if let Some(default_profile) = profile.default_profile().cloned() {
         if let Ok(me_resp) = client
             .get(format!("{hub_url}/me"))
             .bearer_auth(&token)
@@ -513,15 +543,11 @@ async fn add_hub(
                     .and_then(|v| v.as_str())
                     .map(|s| !s.is_empty())
                     .unwrap_or(false);
-                if !has_name {
-                    if let Some(n) = profile.default_display_name.as_deref() {
-                        if !n.trim().is_empty() {
-                            patch.insert(
-                                "display_name".to_string(),
-                                serde_json::Value::String(n.to_string()),
-                            );
-                        }
-                    }
+                if !has_name && !default_profile.display_name.trim().is_empty() {
+                    patch.insert(
+                        "display_name".to_string(),
+                        serde_json::Value::String(default_profile.display_name.clone()),
+                    );
                 }
                 let has_avatar = me
                     .get("avatar")
@@ -529,7 +555,7 @@ async fn add_hub(
                     .map(|s| !s.is_empty())
                     .unwrap_or(false);
                 if !has_avatar {
-                    if let Some(a) = profile.default_avatar.as_deref() {
+                    if let Some(a) = default_profile.avatar.as_deref() {
                         if !a.is_empty() {
                             patch.insert(
                                 "avatar".to_string(),

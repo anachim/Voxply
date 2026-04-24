@@ -242,7 +242,7 @@ function formatPubkey(key: string | null | undefined): string {
   return `${head}…${tail}`;
 }
 
-type SettingsTab = "account" | "voice" | "security" | "about";
+type SettingsTab = "profile" | "account" | "appearance" | "voice" | "security" | "about";
 
 interface SettingsPageProps {
   tab: SettingsTab;
@@ -260,6 +260,7 @@ interface SettingsPageProps {
   onHubAvatarChange: (v: string) => void;
   theme: "calm" | "classic" | "linear";
   onThemeChange: (t: "calm" | "classic" | "linear") => void;
+  hasActiveHub: boolean;
   publicKey: string | null;
   copiedKey: boolean;
   onCopyKey: () => void;
@@ -276,6 +277,137 @@ interface SettingsPageProps {
   onToggleMicTest: () => void;
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
+}
+
+/**
+ * Profile tab — toggle between editing the local default profile (used on
+ * new hubs) and the active hub's override. Renders the relevant inputs for
+ * the chosen scope so the page never shows two competing fields at once.
+ */
+function ProfileTab({
+  hasActiveHub,
+  defaultDisplayName,
+  onDefaultDisplayNameChange,
+  onSaveDefaultDisplayName,
+  displayName,
+  onDisplayNameChange,
+  onSaveDisplayName,
+  defaultAvatar,
+  onDefaultAvatarChange,
+  hubAvatar,
+  onHubAvatarChange,
+}: {
+  hasActiveHub: boolean;
+  defaultDisplayName: string;
+  onDefaultDisplayNameChange: (v: string) => void;
+  onSaveDefaultDisplayName: () => void;
+  displayName: string;
+  onDisplayNameChange: (v: string) => void;
+  onSaveDisplayName: () => void;
+  defaultAvatar: string;
+  onDefaultAvatarChange: (v: string) => void;
+  hubAvatar: string;
+  onHubAvatarChange: (v: string) => void;
+}) {
+  const [scope, setScope] = useState<"default" | "hub">(
+    hasActiveHub ? "default" : "default"
+  );
+
+  // If the user is on the hub scope and disconnects from the active hub,
+  // bounce them back to default so the inputs aren't writing into a void.
+  useEffect(() => {
+    if (!hasActiveHub && scope === "hub") setScope("default");
+  }, [hasActiveHub, scope]);
+
+  const isDefault = scope === "default";
+
+  return (
+    <section>
+      <h1>Profile</h1>
+      <div className="scope-toggle">
+        <button
+          className={`scope-toggle-btn ${isDefault ? "active" : ""}`}
+          onClick={() => setScope("default")}
+          type="button"
+        >
+          Default profile
+          <span className="scope-toggle-hint">applies to new hubs</span>
+        </button>
+        <button
+          className={`scope-toggle-btn ${!isDefault ? "active" : ""}`}
+          onClick={() => setScope("hub")}
+          disabled={!hasActiveHub}
+          type="button"
+          title={hasActiveHub ? "" : "Join a hub first"}
+        >
+          This hub
+          <span className="scope-toggle-hint">override for the active hub</span>
+        </button>
+      </div>
+
+      {isDefault ? (
+        <>
+          <div className="settings-section">
+            <label className="settings-label">Display name</label>
+            <p className="muted">
+              How you appear by default on every new hub. Stored only on this
+              device.
+            </p>
+            <div className="settings-row">
+              <input
+                type="text"
+                value={defaultDisplayName}
+                onChange={(e) => onDefaultDisplayNameChange(e.target.value)}
+                placeholder="e.g. Antonio"
+              />
+              <button onClick={onSaveDefaultDisplayName}>Save</button>
+            </div>
+          </div>
+          <div className="settings-section">
+            <label className="settings-label">Avatar</label>
+            <p className="muted">
+              Applied to new hubs you join. PNG/JPG under 256 KB.
+            </p>
+            <AvatarEditor
+              value={defaultAvatar}
+              onChange={onDefaultAvatarChange}
+              fallbackName={defaultDisplayName}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="settings-section">
+            <label className="settings-label">Display name on this hub</label>
+            <p className="muted">
+              Overrides your default. Only changes how you appear on the hub
+              you're currently viewing.
+            </p>
+            <div className="settings-row">
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => onDisplayNameChange(e.target.value)}
+                placeholder="Override just for this hub"
+              />
+              <button onClick={onSaveDisplayName}>Save</button>
+            </div>
+          </div>
+          <div className="settings-section">
+            <label className="settings-label">Avatar on this hub</label>
+            <p className="muted">
+              Overrides your default avatar on the active hub only.
+            </p>
+            <AvatarEditor
+              value={hubAvatar}
+              onChange={onHubAvatarChange}
+              fallbackName={displayName}
+            />
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 /**
@@ -541,7 +673,9 @@ function MicLevelMeter({
 
 function SettingsPage(props: SettingsPageProps) {
   const tabs: { id: SettingsTab; label: string }[] = [
+    { id: "profile", label: "Profile" },
     { id: "account", label: "Account" },
+    { id: "appearance", label: "Appearance" },
     { id: "voice", label: "Voice & Video" },
     { id: "security", label: "Security" },
     { id: "about", label: "About" },
@@ -571,77 +705,29 @@ function SettingsPage(props: SettingsPageProps) {
         <button className="settings-close-x" onClick={props.onClose} title="Close">
           ×
         </button>
+        {props.tab === "profile" && (
+          <ProfileTab
+            hasActiveHub={props.hasActiveHub}
+            defaultDisplayName={props.defaultDisplayName}
+            onDefaultDisplayNameChange={props.onDefaultDisplayNameChange}
+            onSaveDefaultDisplayName={props.onSaveDefaultDisplayName}
+            displayName={props.displayName}
+            onDisplayNameChange={props.onDisplayNameChange}
+            onSaveDisplayName={props.onSaveDisplayName}
+            defaultAvatar={props.defaultAvatar}
+            onDefaultAvatarChange={props.onDefaultAvatarChange}
+            hubAvatar={props.hubAvatar}
+            onHubAvatarChange={props.onHubAvatarChange}
+          />
+        )}
         {props.tab === "account" && (
           <section>
             <h1>Account</h1>
             <div className="settings-section">
-              <label className="settings-label">Default display name</label>
-              <p className="muted">
-                Used on new hubs you join. Stored only on this device.
-                Change your name on a specific hub below to override this.
-              </p>
-              <div className="settings-row">
-                <input
-                  type="text"
-                  value={props.defaultDisplayName}
-                  onChange={(e) =>
-                    props.onDefaultDisplayNameChange(e.target.value)
-                  }
-                  placeholder="e.g. Antonio"
-                />
-                <button onClick={props.onSaveDefaultDisplayName}>Save</button>
-              </div>
-            </div>
-            <div className="settings-section">
-              <label className="settings-label">Display name on this hub</label>
-              <p className="muted">
-                Overrides your default on the currently active hub only.
-              </p>
-              <div className="settings-row">
-                <input
-                  type="text"
-                  value={props.displayName}
-                  onChange={(e) => props.onDisplayNameChange(e.target.value)}
-                  placeholder="Override just for this hub"
-                />
-                <button onClick={props.onSaveDisplayName}>Save</button>
-              </div>
-            </div>
-            <div className="settings-section">
-              <label className="settings-label">Appearance</label>
-              <p className="muted">
-                How Voxply looks. Pick whichever feels right — you can change
-                it any time.
-              </p>
-              <ThemePicker value={props.theme} onChange={props.onThemeChange} />
-            </div>
-            <div className="settings-section">
-              <label className="settings-label">Default avatar</label>
-              <p className="muted">
-                Applied to new hubs you join. Stored locally. PNG/JPG under
-                256 KB.
-              </p>
-              <AvatarEditor
-                value={props.defaultAvatar}
-                onChange={props.onDefaultAvatarChange}
-                fallbackName={props.displayName || props.defaultDisplayName}
-              />
-            </div>
-            <div className="settings-section">
-              <label className="settings-label">Avatar on this hub</label>
-              <p className="muted">
-                Overrides the default avatar on the currently active hub only.
-              </p>
-              <AvatarEditor
-                value={props.hubAvatar}
-                onChange={props.onHubAvatarChange}
-                fallbackName={props.displayName}
-              />
-            </div>
-            <div className="settings-section">
               <label className="settings-label">Your public key</label>
               <p className="muted">
-                Share this with someone to send you a friend request.
+                Your unique identity. Share this with someone to send you a
+                friend request. Same key works on every hub.
               </p>
               <div className="settings-row">
                 <code className="pubkey-display" title={props.publicKey ?? ""}>
@@ -651,6 +737,19 @@ function SettingsPage(props: SettingsPageProps) {
                   {props.copiedKey ? "Copied" : "Copy full key"}
                 </button>
               </div>
+            </div>
+          </section>
+        )}
+        {props.tab === "appearance" && (
+          <section>
+            <h1>Appearance</h1>
+            <div className="settings-section">
+              <label className="settings-label">Theme</label>
+              <p className="muted">
+                How Voxply looks. Pick whichever feels right — you can change
+                it any time.
+              </p>
+              <ThemePicker value={props.theme} onChange={props.onThemeChange} />
             </div>
           </section>
         )}
@@ -1562,7 +1661,7 @@ function App() {
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"account" | "voice" | "security" | "about">("account");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("profile");
   const [settingsDisplayName, setSettingsDisplayName] = useState("");
   const [defaultDisplayName, setDefaultDisplayName] = useState("");
   const [defaultAvatar, setDefaultAvatar] = useState("");
@@ -2994,6 +3093,7 @@ function App() {
             onHubAvatarChange={handleSaveHubAvatar}
             theme={theme}
             onThemeChange={handleSetTheme}
+            hasActiveHub={hasActiveHub}
             publicKey={publicKey}
             copiedKey={copiedKey}
             onCopyKey={copyPublicKey}

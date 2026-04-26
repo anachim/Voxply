@@ -1565,6 +1565,230 @@ struct BanInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct AllianceInfo {
+    id: String,
+    name: String,
+    created_by: String,
+    created_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AllianceMemberInfo {
+    hub_public_key: String,
+    hub_name: String,
+    hub_url: String,
+    joined_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AllianceDetail {
+    id: String,
+    name: String,
+    created_by: String,
+    created_at: i64,
+    members: Vec<AllianceMemberInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AllianceInvite {
+    token: String,
+    alliance_id: String,
+    alliance_name: String,
+    hub_url: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct AllianceSharedChannel {
+    channel_id: String,
+    channel_name: String,
+    hub_public_key: String,
+    hub_name: String,
+}
+
+#[tauri::command]
+async fn list_alliances(state: State<'_, AppState>) -> Result<Vec<AllianceInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/alliances"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn create_alliance(
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<AllianceInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/alliances"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "name": name }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn get_alliance(
+    alliance_id: String,
+    state: State<'_, AppState>,
+) -> Result<AllianceDetail, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/alliances/{alliance_id}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn create_alliance_invite(
+    alliance_id: String,
+    state: State<'_, AppState>,
+) -> Result<AllianceInvite, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/alliances/{alliance_id}/invite"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn join_alliance(
+    inviter_hub_url: String,
+    alliance_id: String,
+    invite_token: String,
+    own_hub_public_url: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (_, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    // Strip a trailing slash so we don't construct "/alliances/.../join/"
+    let base = inviter_hub_url.trim_end_matches('/');
+    let resp = client
+        .post(format!("{base}/alliances/{alliance_id}/join"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "invite_token": invite_token,
+            "hub_url": own_hub_public_url,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn leave_alliance(
+    alliance_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/alliances/{alliance_id}/leave"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_alliance_shared_channels(
+    alliance_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<AllianceSharedChannel>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/alliances/{alliance_id}/channels"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn share_channel_with_alliance(
+    alliance_id: String,
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/alliances/{alliance_id}/channels"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "channel_id": channel_id }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn unshare_channel_from_alliance(
+    alliance_id: String,
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!(
+            "{hub_url}/alliances/{alliance_id}/channels/{channel_id}"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct InviteInfo {
     code: String,
     created_by: String,
@@ -2421,6 +2645,15 @@ pub fn run() {
             list_invites,
             create_invite,
             revoke_invite,
+            list_alliances,
+            create_alliance,
+            get_alliance,
+            create_alliance_invite,
+            join_alliance,
+            leave_alliance,
+            list_alliance_shared_channels,
+            share_channel_with_alliance,
+            unshare_channel_from_alliance,
             list_friends,
             list_pending_friends,
             send_friend_request,

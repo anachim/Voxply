@@ -821,6 +821,109 @@ select,
 }
 
 /* ============================================================
+   ALLIANCES (admin)
+   ============================================================ */
+.alliance-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.alliance-item {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  background: var(--bg-sunken);
+  color: var(--text);
+  transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+
+.alliance-item:hover {
+  background: var(--surface);
+}
+
+.alliance-item.active {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.alliance-detail {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.alliance-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.alliance-detail-header h2 {
+  margin: 0;
+}
+
+.alliance-members,
+.alliance-share-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.alliance-members li {
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+}
+
+.alliance-invite-block {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.alliance-invite-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.alliance-invite-row code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+  user-select: text;
+}
+
+.alliance-token {
+  color: var(--accent);
+}
+
+.alliance-join-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.alliance-join-form input {
+  width: 100%;
+}
+
+/* ============================================================
    MEMBERS TABLE (admin)
    ============================================================ */
 .members-table {

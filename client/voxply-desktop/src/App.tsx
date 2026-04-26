@@ -3257,6 +3257,31 @@ function App() {
     }
   }
 
+  async function handleSendAllianceMessage() {
+    if (!selectedAllianceChannel) return;
+    const content = inputText.trim();
+    if (!content) return;
+    try {
+      await invoke("send_alliance_channel_message", {
+        allianceId: selectedAllianceChannel.alliance_id,
+        channelId: selectedAllianceChannel.channel.channel_id,
+        content,
+      });
+      setInputText("");
+      // Refetch since we don't subscribe to remote alliance channels yet --
+      // there's no WS push for federated messages.
+      try {
+        const msgs = await invoke<Message[]>("get_alliance_channel_messages", {
+          allianceId: selectedAllianceChannel.alliance_id,
+          channelId: selectedAllianceChannel.channel.channel_id,
+        });
+        setAllianceMessages(msgs);
+      } catch {}
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function selectAllianceChannel(
     alliance: AllianceInfo,
     ch: AllianceSharedChannel
@@ -4577,13 +4602,20 @@ function App() {
                     </p>
                   )}
                 </div>
-                <div className="message-input alliance-readonly">
-                  <p className="muted">
-                    Sending across alliances isn't wired yet — read-only for
-                    now. Open a member account on{" "}
-                    <strong>{selectedAllianceChannel.channel.hub_name}</strong>{" "}
-                    to post.
-                  </p>
+                <div className="input-area">
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendAllianceMessage();
+                      }
+                    }}
+                    placeholder={`Message ${selectedAllianceChannel.channel.hub_name} · #${selectedAllianceChannel.channel.channel_name}`}
+                  />
+                  <button onClick={handleSendAllianceMessage}>Send</button>
                 </div>
               </>
             ) : (

@@ -266,4 +266,40 @@ async fn two_hubs_form_alliance() {
         .unwrap();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].content, "wipe at 3");
+
+    // Hub A: send a message to Hub B's #guild-chat via the alliance proxy.
+    // It should land on Hub B with a [user via hub-a] prefix preserving
+    // attribution since federation auth is hub-level.
+    let resp = client
+        .post(format!(
+            "{hub_a_url}/alliances/{}/channels/{}/messages",
+            alliance.id, b_channel.id
+        ))
+        .bearer_auth(&token_a)
+        .json(&json!({ "content": "from hub A" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201, "{}", resp.text().await.unwrap());
+
+    // Read back from Hub B directly to confirm it landed.
+    let messages: Vec<MessageResponse> = client
+        .get(format!("{hub_b_url}/channels/{}/messages", b_channel.id))
+        .bearer_auth(&token_b)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(messages.len(), 2);
+    let proxied = messages
+        .iter()
+        .find(|m| m.content.contains("from hub A"))
+        .expect("proxied message should land on Hub B");
+    assert!(
+        proxied.content.contains("via hub-a"),
+        "expected attribution prefix in {:?}",
+        proxied.content
+    );
 }

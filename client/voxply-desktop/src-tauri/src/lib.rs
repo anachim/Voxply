@@ -1771,6 +1771,30 @@ async fn get_alliance_channel_messages(
 }
 
 #[tauri::command]
+async fn send_alliance_channel_message(
+    alliance_id: String,
+    channel_id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!(
+            "{hub_url}/alliances/{alliance_id}/channels/{channel_id}/messages"
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "content": content }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn list_alliance_shared_channels(
     alliance_id: String,
     state: State<'_, AppState>,
@@ -2697,6 +2721,7 @@ pub fn run() {
             leave_alliance,
             list_alliance_shared_channels,
             get_alliance_channel_messages,
+            send_alliance_channel_message,
             share_channel_with_alliance,
             unshare_channel_from_alliance,
             list_friends,

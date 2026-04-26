@@ -963,8 +963,18 @@ function UserListGrouped({
   const onlineBuckets = bucket(online, "Online");
   const offlineBuckets = bucket(offline, "Offline");
 
+  const onlineCount = users.filter((u) => u.online).length;
   return (
     <>
+      <div className="user-list-header">
+        <span className="user-list-total">
+          {users.length} {users.length === 1 ? "member" : "members"}
+        </span>
+        <span className="user-list-online" title="Online">
+          <span className="status-dot online" />
+          {onlineCount}
+        </span>
+      </div>
       <div className="user-list-filter">
         <input
           type="text"

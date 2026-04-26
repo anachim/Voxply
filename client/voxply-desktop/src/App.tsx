@@ -1337,7 +1337,13 @@ function PendingAttachments({
   );
 }
 
-function MessageAttachments({ items }: { items: Attachment[] }) {
+function MessageAttachments({
+  items,
+  onImageClick,
+}: {
+  items: Attachment[];
+  onImageClick?: (url: string, alt: string) => void;
+}) {
   if (!items || items.length === 0) return null;
   return (
     <div className="message-attachments">
@@ -1345,9 +1351,15 @@ function MessageAttachments({ items }: { items: Attachment[] }) {
         const url = `data:${a.mime};base64,${a.data_b64}`;
         if (a.mime.startsWith("image/")) {
           return (
-            <a key={i} href={url} target="_blank" rel="noreferrer">
+            <button
+              key={i}
+              type="button"
+              className="message-attachment-img-button"
+              onClick={() => onImageClick?.(url, a.name)}
+              title="Click to enlarge"
+            >
               <img src={url} alt={a.name} className="message-attachment-img" />
-            </a>
+            </button>
           );
         }
         return (
@@ -1361,6 +1373,42 @@ function MessageAttachments({ items }: { items: Attachment[] }) {
           </a>
         );
       })}
+    </div>
+  );
+}
+
+function Lightbox({
+  src,
+  alt,
+  onClose,
+}: {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="lightbox" onClick={onClose}>
+      <img
+        src={src}
+        alt={alt}
+        className="lightbox-img"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button
+        className="lightbox-close"
+        onClick={onClose}
+        title="Close (Esc)"
+      >
+        ×
+      </button>
     </div>
   );
 }
@@ -2650,6 +2698,11 @@ function App() {
 
   // Ctrl+K quick-switcher palette.
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Lightbox: when set, renders a full-screen image overlay. Used by image
+  // attachments so clicking opens a zoom view instead of a new browser tab.
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const openImage = (src: string, alt: string) => setLightbox({ src, alt });
 
   // Alliance sidebar state. We surface every alliance the active hub belongs
   // to plus the channels each member shares with it. Selecting a remote one
@@ -5241,7 +5294,7 @@ function App() {
                         </span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                         {m.attachments && m.attachments.length > 0 && (
-                          <MessageAttachments items={m.attachments} />
+                          <MessageAttachments items={m.attachments} onImageClick={openImage} />
                         )}
                       </div>
                     ))}
@@ -5487,7 +5540,7 @@ function App() {
                         ) : (
                           <>
                             <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
-                        {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} />}
+                        {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} onImageClick={openImage} />}
                             {m.edited_at && (
                               <span className="message-edited-tag">
                                 (edited)
@@ -5647,7 +5700,7 @@ function App() {
                         <Avatar src={null} name={senderLabel} size={28} />
                         <span className="message-sender">{senderLabel}</span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
-                        {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} />}
+                        {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} onImageClick={openImage} />}
                         <span className="message-time">
                           {formatRelative(m.created_at)}
                         </span>
@@ -6019,6 +6072,14 @@ function App() {
               setPaletteOpen(false);
               selectChannel(c);
             }}
+          />
+        )}
+
+        {lightbox && (
+          <Lightbox
+            src={lightbox.src}
+            alt={lightbox.alt}
+            onClose={() => setLightbox(null)}
           />
         )}
       </>

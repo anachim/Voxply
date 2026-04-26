@@ -1975,6 +1975,55 @@ select:focus {
   cursor: zoom-in;
 }
 
+.message-attachment-img-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: var(--space-4);
+  cursor: zoom-out;
+}
+
+.lightbox-img {
+  max-width: 95vw;
+  max-height: 95vh;
+  border-radius: var(--r-md);
+  cursor: default;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: white;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 .message-attachment-file {
   display: inline-flex;
   align-items: center;

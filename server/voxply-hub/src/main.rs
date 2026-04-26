@@ -13,7 +13,20 @@ use voxply_hub::server;
 use voxply_hub::state::AppState;
 use voxply_identity::Identity;
 
-const VOICE_UDP_PORT: u16 = 3001;
+const DEFAULT_HTTP_PORT: u16 = 3000;
+const DEFAULT_VOICE_UDP_PORT: u16 = 3001;
+
+/// Read a u16 port from `var`, falling back to `default` if unset, and
+/// erroring out if it's set but unparseable. We'd rather fail loudly on a
+/// typo than silently bind to the default.
+fn port_from_env(var: &str, default: u16) -> Result<u16> {
+    match std::env::var(var) {
+        Ok(s) => s
+            .parse::<u16>()
+            .with_context(|| format!("{var}={s:?} is not a valid port (1..=65535)")),
+        Err(_) => Ok(default),
+    }
+}
 
 /// TLS configuration read from the environment.
 /// Both VOXPLY_TLS_CERT and VOXPLY_TLS_KEY must be set to enable HTTPS.
@@ -49,6 +62,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    let http_port = port_from_env("VOXPLY_HTTP_PORT", DEFAULT_HTTP_PORT)?;
+    let voice_udp_port = port_from_env("VOXPLY_VOICE_UDP_PORT", DEFAULT_VOICE_UDP_PORT)?;
+
     let (hub_identity, is_new) = Identity::load_or_create(Path::new("hub_identity.json"))?;
     if is_new {
         tracing::info!("Generated new hub identity: {}", hub_identity);
@@ -76,15 +92,15 @@ async fn main() -> Result<()> {
         federation_client: FederationClient::new(),
         peer_tokens: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
-        voice_udp_port: VOICE_UDP_PORT,
+        voice_udp_port,
         voice_event_tx,
         dm_tx,
         online_users: RwLock::new(std::collections::HashSet::new()),
     });
 
     // Bind voice UDP socket and start forwarding task
-    let voice_socket = UdpSocket::bind(format!("0.0.0.0:{VOICE_UDP_PORT}")).await?;
-    tracing::info!("Voice UDP listening on port {VOICE_UDP_PORT}");
+    let voice_socket = UdpSocket::bind(format!("0.0.0.0:{voice_udp_port}")).await?;
+    tracing::info!("Voice UDP listening on port {voice_udp_port}");
 
     let voice_state = state.clone();
     tokio::spawn(async move {
@@ -120,19 +136,19 @@ async fn main() -> Result<()> {
     dm_worker::spawn(state.clone());
 
     let app = server::create_router(state);
-    let addr: std::net::SocketAddr = "0.0.0.0:3000".parse()?;
+    let addr: std::net::SocketAddr = format!("0.0.0.0:{http_port}").parse()?;
 
     if let Some(tls) = tls_config_from_env() {
         let rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key)
             .await
             .with_context(|| format!("Failed to load TLS cert/key from {:?} / {:?}", tls.cert, tls.key))?;
-        tracing::info!("Hub server listening on https://0.0.0.0:3000 (TLS enabled)");
+        tracing::info!("Hub server listening on https://0.0.0.0:{http_port} (TLS enabled)");
         axum_server::bind_rustls(addr, rustls_config)
             .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await?;
     } else {
         tracing::info!(
-            "Hub server listening on http://0.0.0.0:3000 (plaintext — set VOXPLY_TLS_CERT and VOXPLY_TLS_KEY to enable TLS)"
+            "Hub server listening on http://0.0.0.0:{http_port} (plaintext — set VOXPLY_TLS_CERT and VOXPLY_TLS_KEY to enable TLS)"
         );
         let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(

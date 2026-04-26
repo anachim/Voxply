@@ -192,7 +192,9 @@ pub async fn list_shared_channels(
     _user: AuthUser,
     Path(alliance_id): Path<String>,
 ) -> Result<Json<Vec<SharedChannelResponse>>, (StatusCode, String)> {
-    // Get locally shared channels
+    let hub_key = state.hub_identity.public_key_hex();
+
+    // 1) Locally shared channels
     let rows = sqlx::query_as::<_, SharedChannelRow>(
         "SELECT asc_.channel_id, c.name as channel_name
          FROM alliance_shared_channels asc_
@@ -204,18 +206,77 @@ pub async fn list_shared_channels(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let hub_key = state.hub_identity.public_key_hex();
+    let mut out: Vec<SharedChannelResponse> = rows
+        .into_iter()
+        .map(|r| SharedChannelResponse {
+            channel_id: r.channel_id,
+            channel_name: r.channel_name,
+            hub_public_key: hub_key.clone(),
+            hub_name: state.hub_name.clone(),
+        })
+        .collect();
 
-    Ok(Json(
-        rows.into_iter()
-            .map(|r| SharedChannelResponse {
-                channel_id: r.channel_id,
-                channel_name: r.channel_name,
-                hub_public_key: hub_key.clone(),
-                hub_name: state.hub_name.clone(),
-            })
-            .collect(),
-    ))
+    // 2) Remote members' shared channels via federation. Skip ourselves; if a
+    //    peer is unreachable or auth fails, drop them silently — the user gets
+    //    a partial view rather than a hard error.
+    let members = sqlx::query_as::<_, MemberRow>(
+        "SELECT hub_public_key, hub_name, hub_url, joined_at FROM alliance_members WHERE alliance_id = ? AND hub_public_key != ?",
+    )
+    .bind(&alliance_id)
+    .bind(&hub_key)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    for member in members {
+        let token = {
+            let map = state.peer_tokens.read().await;
+            map.get(&member.hub_public_key).cloned()
+        };
+        let token = match token {
+            Some(t) => t,
+            None => match state
+                .federation_client
+                .authenticate(&member.hub_url, &state.hub_identity)
+                .await
+            {
+                Ok(t) => {
+                    state
+                        .peer_tokens
+                        .write()
+                        .await
+                        .insert(member.hub_public_key.clone(), t.clone());
+                    t
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Skipping alliance peer {}: auth failed: {e}",
+                        &member.hub_public_key[..16.min(member.hub_public_key.len())]
+                    );
+                    continue;
+                }
+            },
+        };
+
+        match state
+            .federation_client
+            .get_alliance_shared_channels(&member.hub_url, &token, &alliance_id)
+            .await
+        {
+            Ok(remote) => {
+                // The peer fills in its own hub_public_key/hub_name; trust that.
+                out.extend(remote);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Skipping alliance peer {}: fetch failed: {e}",
+                    &member.hub_public_key[..16.min(member.hub_public_key.len())]
+                );
+            }
+        }
+    }
+
+    Ok(Json(out))
 }
 
 pub async fn leave_alliance(
@@ -292,6 +353,128 @@ pub async fn create_invite(
         alliance_name: alliance.name,
         hub_url: format!("self"), // The receiving hub knows our URL from the API call
     }))
+}
+
+// Joining-side: this hub's admin pastes an invite. We call the inviter to
+// register, fetch the alliance details, and mirror them into our own DB.
+// Without this our `list_alliances` would never show alliances we joined.
+pub async fn join_alliance_local(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Json(req): Json<JoinAllianceLocalRequest>,
+) -> Result<Json<AllianceDetailResponse>, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(ADMIN)?;
+
+    let inviter_url = req.inviter_hub_url.trim_end_matches('/').to_string();
+
+    // Authenticate to the inviter so we can call their join endpoint as
+    // ourselves (the hub identity), not as the user.
+    let token = state
+        .federation_client
+        .authenticate(&inviter_url, &state.hub_identity)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Auth to inviter failed: {e}")))?;
+
+    let join_resp = state
+        .federation_client
+        .post_alliance_join(&inviter_url, &token, &req.alliance_id, &req.invite_token, &req.own_hub_url)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Join request failed: {e}")))?;
+    if !join_resp.status().is_success() {
+        let status = join_resp.status();
+        let body = join_resp.text().await.unwrap_or_default();
+        return Err((
+            StatusCode::from_u16(status.as_u16())
+                .unwrap_or(StatusCode::BAD_GATEWAY),
+            format!("Inviter rejected join: {body}"),
+        ));
+    }
+
+    let detail = state
+        .federation_client
+        .get_alliance_detail(&inviter_url, &token, &req.alliance_id)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Detail fetch failed: {e}")))?;
+
+    // Mirror locally
+    let now = crate::auth::handlers::unix_timestamp();
+    sqlx::query(
+        "INSERT OR IGNORE INTO alliances (id, name, created_by, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&detail.id)
+    .bind(&detail.name)
+    .bind(&detail.created_by)
+    .bind(detail.created_at)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    for m in &detail.members {
+        sqlx::query(
+            "INSERT OR IGNORE INTO alliance_members (alliance_id, hub_public_key, hub_name, hub_url, joined_at) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&detail.id)
+        .bind(&m.hub_public_key)
+        .bind(&m.hub_name)
+        // For our own row store "self" so list_shared_channels skips us.
+        .bind(if m.hub_public_key == state.hub_identity.public_key_hex() {
+            "self".to_string()
+        } else {
+            m.hub_url.clone()
+        })
+        .bind(m.joined_at)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    }
+
+    // Cache the inviter's token for federation calls (e.g. listing remote
+    // shared channels). Other peers will get authenticated lazily on demand.
+    let inviter_pubkey: Option<String> = sqlx::query_scalar(
+        "SELECT hub_public_key FROM alliance_members WHERE alliance_id = ? AND hub_url = ?",
+    )
+    .bind(&detail.id)
+    .bind(&inviter_url)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten();
+    if let Some(pk) = inviter_pubkey {
+        state.peer_tokens.write().await.insert(pk, token.clone());
+
+        // Also persist as a peer if we don't already know them
+        let exists: Option<String> =
+            sqlx::query_scalar("SELECT public_key FROM peers WHERE public_key = ?")
+                .bind(&detail.created_by)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+        if exists.is_none() {
+            // Best-effort: insert the inviter as a peer record
+            for m in &detail.members {
+                if m.hub_url != "self" && m.hub_url == inviter_url {
+                    let _ = sqlx::query(
+                        "INSERT OR IGNORE INTO peers (public_key, name, url, added_at) VALUES (?, ?, ?, ?)",
+                    )
+                    .bind(&m.hub_public_key)
+                    .bind(&m.hub_name)
+                    .bind(&m.hub_url)
+                    .bind(now)
+                    .execute(&state.db)
+                    .await;
+                }
+            }
+        }
+    }
+
+    tracing::info!(
+        "Joined alliance '{}' via {}",
+        detail.name,
+        &inviter_url
+    );
+
+    Ok(Json(detail))
 }
 
 // Join: a remote hub calls this with an invite token to join the alliance

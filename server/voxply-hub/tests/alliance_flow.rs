@@ -146,13 +146,17 @@ async fn two_hubs_form_alliance() {
         .unwrap();
     assert_eq!(invite.alliance_name, "WoW Alliance");
 
-    // Hub B: Join the alliance using the invite token
+    // Hub B: Join the alliance via Hub B's own /alliances/join endpoint --
+    // that endpoint calls Hub A internally AND mirrors the alliance into
+    // Hub B's local DB so Hub B's list_alliances includes it.
     let resp = client
-        .post(format!("{hub_a_url}/alliances/{}/join", alliance.id))
+        .post(format!("{hub_b_url}/alliances/join"))
         .bearer_auth(&token_b)
         .json(&json!({
+            "inviter_hub_url": hub_a_url,
+            "alliance_id": alliance.id,
             "invite_token": invite.token,
-            "hub_url": hub_b_url,
+            "own_hub_url": hub_b_url,
         }))
         .send()
         .await
@@ -171,7 +175,42 @@ async fn two_hubs_form_alliance() {
         .unwrap();
     assert_eq!(detail.members.len(), 2);
 
-    // Hub A: List shared channels
+    // Hub B: Verify it sees the alliance in its own list
+    let b_alliances: Vec<AllianceResponse> = client
+        .get(format!("{hub_b_url}/alliances"))
+        .bearer_auth(&token_b)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(b_alliances.len(), 1);
+    assert_eq!(b_alliances[0].id, alliance.id);
+
+    // Hub B: Create and share its own channel with the alliance
+    let b_channel: ChannelResponse = client
+        .post(format!("{hub_b_url}/channels"))
+        .bearer_auth(&token_b)
+        .json(&json!({ "name": "guild-chat" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let resp = client
+        .post(format!("{hub_b_url}/alliances/{}/channels", alliance.id))
+        .bearer_auth(&token_b)
+        .json(&json!({ "channel_id": b_channel.id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Hub A: List shared channels -- should now include both raids (local)
+    // and guild-chat (federated from Hub B).
     let shared: Vec<SharedChannelResponse> = client
         .get(format!("{hub_a_url}/alliances/{}/channels", alliance.id))
         .bearer_auth(&token_a)
@@ -181,6 +220,11 @@ async fn two_hubs_form_alliance() {
         .json()
         .await
         .unwrap();
-    assert_eq!(shared.len(), 1);
-    assert_eq!(shared[0].channel_name, "raids");
+    let names: Vec<&str> = shared.iter().map(|s| s.channel_name.as_str()).collect();
+    assert!(names.contains(&"raids"), "expected raids in {names:?}");
+    assert!(
+        names.contains(&"guild-chat"),
+        "expected guild-chat (from Hub B via federation) in {names:?}"
+    );
+    assert_eq!(shared.len(), 2);
 }

@@ -97,6 +97,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/moderation/voice-mutes/{target_key}", axum::routing::delete(routes::moderation::voice_unmute))
         .route("/channels/{channel_id}/talk-power", get(routes::moderation::get_talk_power).post(routes::moderation::set_talk_power))
         .route("/alliances", get(routes::alliances::list_alliances).post(routes::alliances::create_alliance))
+        .route("/alliances/join", post(routes::alliances::join_alliance_local))
         .route("/alliances/{alliance_id}", get(routes::alliances::get_alliance))
         .route("/alliances/{alliance_id}/invite", post(routes::alliances::create_invite))
         .route("/alliances/{alliance_id}/join", post(routes::alliances::join_alliance))

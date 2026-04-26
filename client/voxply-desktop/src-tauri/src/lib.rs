@@ -1686,17 +1686,19 @@ async fn join_alliance(
     invite_token: String,
     own_hub_public_url: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    let (_, token) = active_session(&state)?;
+) -> Result<AllianceDetail, String> {
+    let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
-    // Strip a trailing slash so we don't construct "/alliances/.../join/"
-    let base = inviter_hub_url.trim_end_matches('/');
+    // The join endpoint runs on OUR hub; our hub then talks to the inviter
+    // and mirrors the alliance into our local DB so it shows up in our list.
     let resp = client
-        .post(format!("{base}/alliances/{alliance_id}/join"))
+        .post(format!("{hub_url}/alliances/join"))
         .bearer_auth(&token)
         .json(&serde_json::json!({
+            "inviter_hub_url": inviter_hub_url,
+            "alliance_id": alliance_id,
             "invite_token": invite_token,
-            "hub_url": own_hub_public_url,
+            "own_hub_url": own_hub_public_url,
         }))
         .send()
         .await
@@ -1704,7 +1706,7 @@ async fn join_alliance(
     if !resp.status().is_success() {
         return Err(resp.text().await.unwrap_or_default());
     }
-    Ok(())
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]

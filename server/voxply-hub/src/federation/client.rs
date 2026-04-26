@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::auth::models::{ChallengeResponse, VerifyResponse};
+use crate::routes::alliance_models::{AllianceDetailResponse, SharedChannelResponse};
 use crate::routes::chat_models::{ChannelResponse, MessageResponse};
 use crate::routes::dm_models::FederatedDmRequest;
 use crate::routes::health::InfoResponse;
@@ -110,6 +111,60 @@ impl FederationClient {
             .json()
             .await
             .context("Invalid messages response")
+    }
+
+    pub async fn post_alliance_join(
+        &self,
+        base_url: &str,
+        token: &str,
+        alliance_id: &str,
+        invite_token: &str,
+        own_hub_url: &str,
+    ) -> Result<reqwest::Response> {
+        self.http
+            .post(format!("{base_url}/alliances/{alliance_id}/join"))
+            .bearer_auth(token)
+            .json(&serde_json::json!({
+                "invite_token": invite_token,
+                "hub_url": own_hub_url,
+            }))
+            .send()
+            .await
+            .context("Failed to call alliance join endpoint")
+    }
+
+    pub async fn get_alliance_detail(
+        &self,
+        base_url: &str,
+        token: &str,
+        alliance_id: &str,
+    ) -> Result<AllianceDetailResponse> {
+        self.http
+            .get(format!("{base_url}/alliances/{alliance_id}"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .context("Failed to fetch alliance detail")?
+            .json()
+            .await
+            .context("Invalid alliance detail response")
+    }
+
+    pub async fn get_alliance_shared_channels(
+        &self,
+        base_url: &str,
+        token: &str,
+        alliance_id: &str,
+    ) -> Result<Vec<SharedChannelResponse>> {
+        self.http
+            .get(format!("{base_url}/alliances/{alliance_id}/channels"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .context("Failed to fetch alliance channels from peer")?
+            .json()
+            .await
+            .context("Invalid alliance channels response")
     }
 
     pub async fn post_federated_dm(

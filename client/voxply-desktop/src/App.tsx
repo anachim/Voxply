@@ -928,11 +928,21 @@ function UserListGrouped({
   users: User[];
   onContextMenu?: (e: React.MouseEvent, user: User) => void;
 }) {
+  const [filter, setFilter] = useState("");
+  // Filter on lowercased display_name OR pubkey prefix so users can find
+  // someone they know by name even when their display_name is null.
+  const q = filter.trim().toLowerCase();
+  const matched = q
+    ? users.filter((u) =>
+        ((u.display_name ?? "") + " " + u.public_key).toLowerCase().includes(q),
+      )
+    : users;
+
   // Online first, then offline. Within each, bucket by group_role (the name of
   // the highest-priority role with display_separately=true), with null-role
   // members falling into a generic "Online" / "Offline" bucket.
-  const online = users.filter((u) => u.online);
-  const offline = users.filter((u) => !u.online);
+  const online = matched.filter((u) => u.online);
+  const offline = matched.filter((u) => !u.online);
 
   function bucket(group: User[], fallback: string): [string, User[]][] {
     const grouped = new Map<string, User[]>();
@@ -955,6 +965,17 @@ function UserListGrouped({
 
   return (
     <>
+      <div className="user-list-filter">
+        <input
+          type="text"
+          placeholder="Filter members…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+        {filter && matched.length === 0 && (
+          <p className="muted user-list-empty">No matches</p>
+        )}
+      </div>
       {onlineBuckets.map(([title, list]) => (
         <div className="user-section" key={`on-${title}`}>
           <p className="user-section-title">

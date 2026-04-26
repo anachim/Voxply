@@ -72,6 +72,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                                 crate::routes::chat_models::ChatEvent::Deleted { channel_id, message_id } => {
                                     WsServerMessage::MessageDeleted { channel_id, message_id }
                                 }
+                                crate::routes::chat_models::ChatEvent::ReactionsUpdated { channel_id, message_id, reactions } => {
+                                    WsServerMessage::ReactionsUpdated { channel_id, message_id, reactions }
+                                }
                             };
                             let json = serde_json::to_string(&ws_msg).unwrap();
                             if ws_tx.send(Message::Text(json.into())).await.is_err() {

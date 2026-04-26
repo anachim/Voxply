@@ -41,6 +41,12 @@ interface Attachment {
   data_b64: string;
 }
 
+interface Reaction {
+  emoji: string;
+  count: number;
+  me: boolean;
+}
+
 interface Message {
   id: string;
   channel_id: string;
@@ -50,7 +56,10 @@ interface Message {
   created_at: number;
   edited_at: number | null;
   attachments?: Attachment[];
+  reactions?: Reaction[];
 }
+
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🔥", "👀", "😢", "🙏"];
 
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // matches the hub cap
 
@@ -1207,6 +1216,66 @@ function InvitesSection({
         </table>
       )}
     </section>
+  );
+}
+
+function MessageReactions({
+  reactions,
+  onToggle,
+}: {
+  reactions: Reaction[];
+  onToggle: (emoji: string) => void;
+}) {
+  if (!reactions || reactions.length === 0) return null;
+  return (
+    <div className="message-reactions">
+      {reactions.map((r) => (
+        <button
+          key={r.emoji}
+          className={`reaction-chip ${r.me ? "mine" : ""}`}
+          onClick={() => onToggle(r.emoji)}
+          title={r.me ? "Remove your reaction" : "Add your reaction"}
+        >
+          <span className="reaction-emoji">{r.emoji}</span>
+          <span className="reaction-count">{r.count}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ReactionPicker({
+  onPick,
+}: {
+  onPick: (emoji: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="reaction-picker">
+      <button
+        className="reaction-add-btn"
+        onClick={() => setOpen((v) => !v)}
+        title="Add reaction"
+      >
+        🙂+
+      </button>
+      {open && (
+        <div className="reaction-picker-popup">
+          {QUICK_REACTIONS.map((e) => (
+            <button
+              key={e}
+              className="reaction-picker-emoji"
+              onClick={() => {
+                onPick(e);
+                setOpen(false);
+              }}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2675,6 +2744,36 @@ function App() {
         await listen<{
           hub_id: string;
           channel_id: string;
+          message_id: string;
+          reactions: { emoji: string; count: number; me: boolean }[];
+        }>("chat-reactions-updated", (event) => {
+          if (event.payload.hub_id !== activeHubIdRef.current) return;
+          if (event.payload.channel_id !== selectedChannelIdRef.current) return;
+          // The server can't know per-recipient `me` for broadcasts, so it
+          // sends `me: false`. We patch our own flag locally based on the
+          // existing message reactions before the update.
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== event.payload.message_id) return m;
+              const myEmojis = new Set(
+                (m.reactions ?? []).filter((r) => r.me).map((r) => r.emoji)
+              );
+              return {
+                ...m,
+                reactions: event.payload.reactions.map((r) => ({
+                  ...r,
+                  me: myEmojis.has(r.emoji),
+                })),
+              };
+            })
+          );
+        })
+      );
+
+      unlistens.push(
+        await listen<{
+          hub_id: string;
+          channel_id: string;
           hub_udp_port: number;
           participants: VoiceParticipant[];
         }>("voice-joined", (event) => {
@@ -3604,6 +3703,52 @@ function App() {
         messageId,
       });
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    if (!selectedChannel) return;
+    // Optimistic update so the click feels instant; the WS broadcast will
+    // reconcile if there's drift.
+    let optimisticMine = false;
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const reactions = m.reactions ? [...m.reactions] : [];
+        const idx = reactions.findIndex((r) => r.emoji === emoji);
+        if (idx === -1) {
+          reactions.push({ emoji, count: 1, me: true });
+          optimisticMine = true;
+        } else {
+          const r = reactions[idx];
+          if (r.me) {
+            const next = { ...r, count: r.count - 1, me: false };
+            if (next.count <= 0) reactions.splice(idx, 1);
+            else reactions[idx] = next;
+          } else {
+            reactions[idx] = { ...r, count: r.count + 1, me: true };
+            optimisticMine = true;
+          }
+        }
+        return { ...m, reactions };
+      })
+    );
+    try {
+      if (optimisticMine) {
+        await invoke("add_reaction", {
+          channelId: selectedChannel.id,
+          messageId,
+          emoji,
+        });
+      } else {
+        await invoke("remove_reaction", {
+          channelId: selectedChannel.id,
+          messageId,
+          emoji,
+        });
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -4873,6 +5018,9 @@ function App() {
                               </span>
                             )}
                             <span className="message-actions">
+                              <ReactionPicker
+                                onPick={(emoji) => toggleReaction(m.id, emoji)}
+                              />
                               {isMine && (
                                 <button
                                   className="message-action"
@@ -4892,6 +5040,12 @@ function App() {
                                 </button>
                               )}
                             </span>
+                            {m.reactions && m.reactions.length > 0 && (
+                              <MessageReactions
+                                reactions={m.reactions}
+                                onToggle={(emoji) => toggleReaction(m.id, emoji)}
+                              />
+                            )}
                           </>
                         )}
                       </div>

@@ -444,6 +444,9 @@ pub async fn get_alliance_channel_messages(
                         .filter(|s| !s.is_empty())
                         .and_then(|s| serde_json::from_str(s).ok())
                         .unwrap_or_default(),
+                    // Reactions intentionally empty in the alliance read path
+                    // for now -- federated reaction sync is a follow-up.
+                    reactions: Vec::new(),
                 })
                 .collect(),
         ));

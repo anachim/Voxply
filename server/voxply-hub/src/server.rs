@@ -64,6 +64,14 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             axum::routing::patch(routes::messages::edit_message)
                 .delete(routes::messages::delete_message),
         )
+        .route(
+            "/channels/{channel_id}/messages/{message_id}/reactions",
+            post(routes::messages::add_reaction),
+        )
+        .route(
+            "/channels/{channel_id}/messages/{message_id}/reactions/{emoji}",
+            axum::routing::delete(routes::messages::remove_reaction),
+        )
         .route("/users", get(routes::users::list_users))
         .route("/channels/{channel_id}/members", get(routes::users::channel_members))
         .route("/ws", get(routes::ws::ws_handler))

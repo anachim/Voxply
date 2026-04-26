@@ -65,6 +65,16 @@ pub struct SendMessageRequest {
     pub attachments: Vec<Attachment>,
 }
 
+/// Aggregated reaction count for one emoji on one message. `me` flags
+/// whether the requesting user is one of the reactors so the client can
+/// render the toggle state.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ReactionSummary {
+    pub emoji: String,
+    pub count: i64,
+    pub me: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MessageResponse {
     pub id: String,
@@ -77,6 +87,13 @@ pub struct MessageResponse {
     pub edited_at: Option<i64>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub reactions: Vec<ReactionSummary>,
+}
+
+#[derive(Deserialize)]
+pub struct ReactionRequest {
+    pub emoji: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -89,6 +106,15 @@ pub enum ChatEvent {
     New { channel_id: String, message: MessageResponse },
     Edited { channel_id: String, message: MessageResponse },
     Deleted { channel_id: String, message_id: String },
+    /// Reactions changed on a message. We send the full per-message
+    /// summary list rather than diffs so the client can replace the
+    /// counts atomically without bookkeeping. `me` is intentionally
+    /// false here -- it's per-viewer, the client recomputes it.
+    ReactionsUpdated {
+        channel_id: String,
+        message_id: String,
+        reactions: Vec<ReactionSummary>,
+    },
 }
 
 impl ChatEvent {
@@ -96,7 +122,8 @@ impl ChatEvent {
         match self {
             ChatEvent::New { channel_id, .. }
             | ChatEvent::Edited { channel_id, .. }
-            | ChatEvent::Deleted { channel_id, .. } => channel_id,
+            | ChatEvent::Deleted { channel_id, .. }
+            | ChatEvent::ReactionsUpdated { channel_id, .. } => channel_id,
         }
     }
 }
@@ -149,6 +176,12 @@ pub enum WsServerMessage {
     MessageDeleted {
         channel_id: String,
         message_id: String,
+    },
+    #[serde(rename = "reactions_updated")]
+    ReactionsUpdated {
+        channel_id: String,
+        message_id: String,
+        reactions: Vec<ReactionSummary>,
     },
     #[serde(rename = "voice_joined")]
     VoiceJoined {

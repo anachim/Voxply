@@ -9,7 +9,7 @@ use crate::auth::middleware::AuthUser;
 use crate::permissions;
 use crate::routes::chat_models::{
     Attachment, ChatEvent, EditMessageRequest, MessageResponse, PaginationParams,
-    SendMessageRequest, MAX_ATTACHMENTS_BYTES,
+    ReactionRequest, ReactionSummary, SendMessageRequest, MAX_ATTACHMENTS_BYTES,
 };
 use crate::state::AppState;
 
@@ -96,6 +96,7 @@ pub async fn send_message(
         created_at: now,
         edited_at: None,
         attachments: req.attachments,
+        reactions: Vec::new(),
     };
 
     let _ = state.chat_tx.send(ChatEvent::New {
@@ -209,6 +210,7 @@ async fn load_message(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+    let reactions = load_reactions_anon(&state.db, &row.id).await?;
     Ok(MessageResponse {
         id: row.id,
         channel_id: row.channel_id,
@@ -218,12 +220,13 @@ async fn load_message(
         created_at: row.created_at,
         edited_at: row.edited_at,
         attachments: parse_attachments(row.attachments),
+        reactions,
     })
 }
 
 pub async fn get_messages(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Path(channel_id): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Vec<MessageResponse>>, (StatusCode, String)> {
@@ -279,9 +282,10 @@ pub async fn get_messages(
     }
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    let messages = rows
-        .into_iter()
-        .map(|r| MessageResponse {
+    let mut messages: Vec<MessageResponse> = Vec::with_capacity(rows.len());
+    for r in rows {
+        let reactions = load_reactions(&state.db, &r.id, &user.public_key).await?;
+        messages.push(MessageResponse {
             id: r.id,
             channel_id: r.channel_id,
             sender: r.sender,
@@ -290,8 +294,9 @@ pub async fn get_messages(
             created_at: r.created_at,
             edited_at: r.edited_at,
             attachments: parse_attachments(r.attachments),
-        })
-        .collect();
+            reactions,
+        });
+    }
 
     Ok(Json(messages))
 }
@@ -306,4 +311,142 @@ struct MessageRow {
     attachments: Option<String>,
     created_at: i64,
     edited_at: Option<i64>,
+}
+
+/// Load aggregated reaction counts for one message, with `me` flagged for
+/// rows the viewer reacted to.
+async fn load_reactions(
+    db: &sqlx::SqlitePool,
+    message_id: &str,
+    viewer: &str,
+) -> Result<Vec<ReactionSummary>, (StatusCode, String)> {
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT emoji, COUNT(*) as cnt, MAX(CASE WHEN user_key = ? THEN 1 ELSE 0 END) as mine
+         FROM message_reactions
+         WHERE message_id = ?
+         GROUP BY emoji
+         ORDER BY MIN(created_at) ASC",
+    )
+    .bind(viewer)
+    .bind(message_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(emoji, count, mine)| ReactionSummary {
+            emoji,
+            count,
+            me: mine != 0,
+        })
+        .collect())
+}
+
+/// Same as load_reactions but for broadcast: `me` is false because we
+/// don't know who the recipient will be.
+async fn load_reactions_anon(
+    db: &sqlx::SqlitePool,
+    message_id: &str,
+) -> Result<Vec<ReactionSummary>, (StatusCode, String)> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT emoji, COUNT(*) as cnt
+         FROM message_reactions
+         WHERE message_id = ?
+         GROUP BY emoji
+         ORDER BY MIN(created_at) ASC",
+    )
+    .bind(message_id)
+    .fetch_all(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(emoji, count)| ReactionSummary {
+            emoji,
+            count,
+            me: false,
+        })
+        .collect())
+}
+
+pub async fn add_reaction(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((channel_id, message_id)): Path<(String, String)>,
+    Json(req): Json<ReactionRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(permissions::SEND_MESSAGES)?;
+
+    let emoji = req.emoji.trim();
+    if emoji.is_empty() || emoji.chars().count() > 16 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "emoji must be 1..16 chars".to_string(),
+        ));
+    }
+
+    // Sanity-check the message belongs to the channel claimed in the path.
+    let row: Option<String> =
+        sqlx::query_scalar("SELECT channel_id FROM messages WHERE id = ?")
+            .bind(&message_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    match row {
+        None => return Err((StatusCode::NOT_FOUND, "message not found".to_string())),
+        Some(c) if c != channel_id => {
+            return Err((StatusCode::NOT_FOUND, "message not in channel".to_string()))
+        }
+        _ => {}
+    }
+
+    let now = crate::auth::handlers::unix_timestamp();
+    sqlx::query(
+        "INSERT OR IGNORE INTO message_reactions (message_id, emoji, user_key, created_at)
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(&message_id)
+    .bind(emoji)
+    .bind(&user.public_key)
+    .bind(now)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let summary = load_reactions_anon(&state.db, &message_id).await?;
+    let _ = state.chat_tx.send(ChatEvent::ReactionsUpdated {
+        channel_id,
+        message_id,
+        reactions: summary,
+    });
+
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn remove_reaction(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path((channel_id, message_id, emoji)): Path<(String, String, String)>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    sqlx::query(
+        "DELETE FROM message_reactions WHERE message_id = ? AND emoji = ? AND user_key = ?",
+    )
+    .bind(&message_id)
+    .bind(&emoji)
+    .bind(&user.public_key)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let summary = load_reactions_anon(&state.db, &message_id).await?;
+    let _ = state.chat_tx.send(ChatEvent::ReactionsUpdated {
+        channel_id,
+        message_id,
+        reactions: summary,
+    });
+
+    Ok(StatusCode::NO_CONTENT)
 }

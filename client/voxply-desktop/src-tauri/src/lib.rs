@@ -230,6 +230,13 @@ struct AttachmentInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct ReactionInfo {
+    emoji: String,
+    count: i64,
+    me: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -241,6 +248,8 @@ struct MessageInfo {
     edited_at: Option<i64>,
     #[serde(default)]
     attachments: Vec<AttachmentInfo>,
+    #[serde(default)]
+    reactions: Vec<ReactionInfo>,
 }
 
 #[derive(Deserialize)]
@@ -260,6 +269,12 @@ enum WsServerMessage {
     MessageDeleted {
         channel_id: String,
         message_id: String,
+    },
+    #[serde(rename = "reactions_updated")]
+    ReactionsUpdated {
+        channel_id: String,
+        message_id: String,
+        reactions: Vec<ReactionInfo>,
     },
     #[serde(rename = "voice_joined")]
     VoiceJoined {
@@ -812,6 +827,14 @@ async fn spawn_ws_task(
                                             "message_id": message_id,
                                         }));
                                     }
+                                    WsServerMessage::ReactionsUpdated { channel_id, message_id, reactions } => {
+                                        let _ = app.emit("chat-reactions-updated", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "channel_id": channel_id,
+                                            "message_id": message_id,
+                                            "reactions": reactions,
+                                        }));
+                                    }
                                     WsServerMessage::VoiceJoined { channel_id, hub_udp_port, participants } => {
                                         let _ = app.emit("voice-joined", serde_json::json!({
                                             "hub_id": hub_id_for_task,
@@ -1187,6 +1210,75 @@ async fn get_messages(
 
     messages.reverse();
     Ok(messages)
+}
+
+#[tauri::command]
+async fn add_reaction(
+    channel_id: String,
+    message_id: String,
+    emoji: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!(
+            "{hub_url}/channels/{channel_id}/messages/{message_id}/reactions"
+        ))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "emoji": emoji }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn remove_reaction(
+    channel_id: String,
+    message_id: String,
+    emoji: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    // URL-encoding emoji is important since some are multi-byte and can
+    // include reserved chars (variation selectors, etc.).
+    let encoded = urlencoding_emoji(&emoji);
+    let resp = client
+        .delete(format!(
+            "{hub_url}/channels/{channel_id}/messages/{message_id}/reactions/{encoded}"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+/// Minimal percent-encoder for emoji path segments. We can't add a new
+/// crate dep just for this; this hand-rolled version covers the chars
+/// that appear in real emoji strings.
+fn urlencoding_emoji(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -2857,6 +2949,8 @@ pub fn run() {
             list_users,
             get_messages,
             search_messages,
+            add_reaction,
+            remove_reaction,
             send_message,
             edit_message,
             delete_message,

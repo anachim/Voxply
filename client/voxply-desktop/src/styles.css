@@ -2048,6 +2048,97 @@ select:focus {
   border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  margin-left: 36px;
+}
+
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.reaction-chip:hover {
+  border-color: var(--accent);
+}
+
+.reaction-chip.mine {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+}
+
+.reaction-emoji {
+  font-size: var(--text-md);
+}
+
+.reaction-count {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+}
+
+.reaction-chip.mine .reaction-count {
+  color: var(--accent);
+}
+
+.reaction-picker {
+  position: relative;
+  display: inline-block;
+}
+
+.reaction-add-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.reaction-add-btn:hover {
+  color: var(--text);
+}
+
+.reaction-picker-popup {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--space-1);
+  display: flex;
+  gap: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.reaction-picker-emoji {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-lg);
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+}
+
+.reaction-picker-emoji:hover {
+  background: var(--bg-sunken);
+}
+
 /* ============================================================
    INPUT AREA
    ============================================================ */

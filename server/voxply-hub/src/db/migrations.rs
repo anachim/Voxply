@@ -72,6 +72,26 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await;
 
+    // One row per (message, emoji, user). PRIMARY KEY collapses re-reacts
+    // into idempotent inserts.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS message_reactions (
+            message_id  TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            emoji       TEXT NOT NULL,
+            user_key    TEXT NOT NULL REFERENCES users(public_key),
+            created_at  INTEGER NOT NULL,
+            PRIMARY KEY (message_id, emoji, user_key)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id)",
+    )
+    .execute(pool)
+    .await?;
+
     // Additive migration for older DBs
     let _ = sqlx::query("ALTER TABLE messages ADD COLUMN edited_at INTEGER")
         .execute(pool)

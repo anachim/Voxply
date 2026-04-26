@@ -67,7 +67,134 @@ interface Message {
   reply_to?: ReplyContext | null;
 }
 
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🔥", "👀", "😢", "🙏"];
+/**
+ * Curated emoji catalog for the picker. Each entry is [emoji, keywords].
+ * Keywords are matched as substrings against the user's query so "thumb"
+ * finds 👍 and "fire" finds 🔥. The first 8 also serve as the always-visible
+ * frequent set when the search is empty.
+ */
+const EMOJI_CATALOG: [string, string][] = [
+  ["👍", "thumbs up yes ok approve"],
+  ["❤️", "heart love"],
+  ["😂", "laugh joy lol cry"],
+  ["🎉", "party celebrate tada"],
+  ["🔥", "fire lit hot"],
+  ["👀", "eyes look watch see"],
+  ["😢", "sad cry tear"],
+  ["🙏", "pray thanks please"],
+  ["👎", "thumbs down no nope"],
+  ["✅", "check yes done correct"],
+  ["❌", "x cross no wrong"],
+  ["💯", "100 perfect score"],
+  ["🤔", "think thinking hmm"],
+  ["😅", "sweat smile awkward"],
+  ["😎", "cool sunglasses"],
+  ["😭", "crying sob bawl"],
+  ["😡", "angry mad rage"],
+  ["🤯", "mind blown shocked"],
+  ["🥳", "party celebrate happy"],
+  ["🤝", "handshake deal agree"],
+  ["💪", "muscle strong flex"],
+  ["👏", "clap applause bravo"],
+  ["🙌", "raised hands praise"],
+  ["✨", "sparkle shiny stars"],
+  ["⭐", "star favorite"],
+  ["💡", "idea bulb"],
+  ["⚡", "lightning fast bolt"],
+  ["🐛", "bug insect"],
+  ["🚀", "rocket launch ship"],
+  ["🎯", "target dart bullseye"],
+  ["💀", "skull dead rip"],
+  ["👻", "ghost spooky"],
+  ["🤖", "robot bot"],
+  ["☕", "coffee mug"],
+  ["🍕", "pizza"],
+  ["🍔", "burger food"],
+  ["🍺", "beer drink"],
+  ["🍰", "cake birthday"],
+  ["🌮", "taco food"],
+  ["🎵", "music note song"],
+  ["🎮", "game controller play"],
+  ["📺", "tv television"],
+  ["💻", "laptop computer"],
+  ["📱", "phone mobile"],
+  ["⌨️", "keyboard"],
+  ["🖱️", "mouse"],
+  ["🐶", "dog puppy"],
+  ["🐱", "cat kitten"],
+  ["🦊", "fox"],
+  ["🦁", "lion"],
+  ["🐧", "penguin"],
+  ["🦄", "unicorn magic"],
+  ["🐢", "turtle slow"],
+  ["🌈", "rainbow"],
+  ["☀️", "sun sunny day"],
+  ["🌙", "moon night"],
+  ["🌧️", "rain"],
+  ["❄️", "snow snowflake winter"],
+  ["🌊", "wave water ocean"],
+  ["🌍", "earth world globe"],
+  ["💚", "green heart"],
+  ["💙", "blue heart"],
+  ["💜", "purple heart"],
+  ["🖤", "black heart"],
+  ["💛", "yellow heart"],
+  ["💔", "broken heart sad"],
+  ["💕", "two hearts love"],
+  ["😀", "grin smile"],
+  ["😊", "smile happy"],
+  ["😉", "wink"],
+  ["😌", "relieved calm"],
+  ["😘", "kiss"],
+  ["😏", "smirk smug"],
+  ["😴", "sleep zzz tired"],
+  ["🤐", "zip mouth shut"],
+  ["🤫", "shush quiet"],
+  ["🤣", "rofl laugh"],
+  ["😬", "grimace awkward"],
+  ["🙃", "upside down silly"],
+  ["😱", "scream shock fear"],
+  ["😳", "flushed embarrassed"],
+  ["🥺", "pleading puppy eyes"],
+  ["😷", "mask sick"],
+  ["🤒", "thermometer sick fever"],
+  ["🥵", "hot heat sweat"],
+  ["🥶", "cold freeze"],
+  ["😈", "devil mischief"],
+  ["💩", "poop"],
+  ["🎂", "cake birthday"],
+  ["🎁", "gift present"],
+  ["🏆", "trophy win"],
+  ["🥇", "gold medal first"],
+  ["💎", "diamond gem"],
+  ["💰", "money cash bag"],
+  ["📈", "chart up growth"],
+  ["📉", "chart down decline"],
+  ["🔔", "bell notification"],
+  ["🔒", "lock secure"],
+  ["🔑", "key"],
+  ["🛠️", "tools wrench fix"],
+  ["📌", "pin"],
+  ["📎", "paperclip attach"],
+  ["📝", "memo write note"],
+  ["📚", "books read"],
+  ["🎓", "graduation cap"],
+  ["🌟", "glowing star"],
+  ["🐝", "bee"],
+  ["🦋", "butterfly"],
+  ["🍎", "apple"],
+  ["🍌", "banana"],
+  ["🍇", "grapes"],
+  ["🥑", "avocado"],
+  ["🥦", "broccoli"],
+  ["🍿", "popcorn"],
+  ["🧀", "cheese"],
+  ["🍩", "donut"],
+  ["🍪", "cookie"],
+  ["🍷", "wine"],
+  ["🥤", "soda drink"],
+];
+const QUICK_REACTIONS = EMOJI_CATALOG.slice(0, 8).map(([e]) => e);
 
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // matches the hub cap
 
@@ -1382,6 +1509,19 @@ function ReactionPicker({
   onPick: (emoji: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return EMOJI_CATALOG;
+    return EMOJI_CATALOG.filter(([_emoji, kw]) => kw.includes(q));
+  }, [query]);
+
+  function handleClose() {
+    setOpen(false);
+    setQuery("");
+  }
+
   return (
     <div className="reaction-picker">
       <button
@@ -1392,19 +1532,43 @@ function ReactionPicker({
         🙂+
       </button>
       {open && (
-        <div className="reaction-picker-popup">
-          {QUICK_REACTIONS.map((e) => (
-            <button
-              key={e}
-              className="reaction-picker-emoji"
-              onClick={() => {
-                onPick(e);
-                setOpen(false);
-              }}
-            >
-              {e}
-            </button>
-          ))}
+        <div
+          className="reaction-picker-popup"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            autoFocus
+            className="reaction-picker-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") handleClose();
+              else if (e.key === "Enter" && filtered.length > 0) {
+                onPick(filtered[0][0]);
+                handleClose();
+              }
+            }}
+            placeholder="Search emoji…"
+          />
+          <div className="reaction-picker-grid">
+            {filtered.length === 0 ? (
+              <span className="muted reaction-picker-empty">No matches</span>
+            ) : (
+              filtered.map(([emoji]) => (
+                <button
+                  key={emoji}
+                  className="reaction-picker-emoji"
+                  onClick={() => {
+                    onPick(emoji);
+                    handleClose();
+                  }}
+                  title={emoji}
+                >
+                  {emoji}
+                </button>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -2520,11 +2520,42 @@ select:focus {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: var(--space-1);
+  padding: var(--space-2);
   display: flex;
-  gap: 2px;
+  flex-direction: column;
+  gap: var(--space-2);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 10;
+  width: 280px;
+}
+
+.reaction-picker-search {
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.reaction-picker-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.reaction-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.reaction-picker-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: var(--space-3);
 }
 
 .reaction-picker-emoji {

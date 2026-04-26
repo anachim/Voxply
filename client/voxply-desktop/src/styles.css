@@ -1122,6 +1122,25 @@ select,
   color: var(--accent-text);
 }
 
+.channel-item.unread:not(.selected) {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.channel-unread-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.channel-item.selected .channel-unread-dot {
+  background: var(--accent-text);
+}
+
 .muted {
   color: var(--text-faint);
   font-size: var(--text-xs);

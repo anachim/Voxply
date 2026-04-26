@@ -323,6 +323,32 @@ fn voice_settings_path() -> Result<std::path::PathBuf, String> {
     Ok(home.join(".voxply").join("voice.json"))
 }
 
+fn unread_state_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("unread.json"))
+}
+
+#[tauri::command]
+fn load_unread_state() -> Result<serde_json::Value, String> {
+    let path = unread_state_path()?;
+    if !path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))
+}
+
+#[tauri::command]
+fn save_unread_state(state: serde_json::Value) -> Result<(), String> {
+    let path = unread_state_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    let text = serde_json::to_string(&state).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("write: {e}"))?;
+    Ok(())
+}
+
 fn profile_path() -> Result<std::path::PathBuf, String> {
     let home = dirs::home_dir().ok_or("No home directory")?;
     Ok(home.join(".voxply").join("profile.json"))
@@ -2875,6 +2901,8 @@ pub fn run() {
             channel_unban_user,
             list_channel_bans,
             set_tray_unread,
+            load_unread_state,
+            save_unread_state,
             get_talk_power,
             set_talk_power_cmd,
             assign_role,

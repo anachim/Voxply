@@ -183,11 +183,13 @@ interface DmMessageFull {
 function SortableChannelItem({
   channel,
   selected,
+  unread,
   onClick,
   onContextMenu,
 }: {
   channel: Channel;
   selected: boolean;
+  unread: boolean;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
@@ -197,7 +199,9 @@ function SortableChannelItem({
   return (
     <li
       ref={setNodeRef}
-      className={`channel-item ${selected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
+      className={`channel-item ${selected ? "selected" : ""} ${
+        unread ? "unread" : ""
+      } ${isDragging ? "dragging" : ""}`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -207,6 +211,7 @@ function SortableChannelItem({
       {...attributes}
       {...listeners}
     >
+      {unread && <span className="channel-unread-dot" />}
       # {channel.name}
     </li>
   );
@@ -2208,7 +2213,54 @@ function App() {
   const [activeHubId, setActiveHubId] = useState<string | null>(null);
   const [showAddHub, setShowAddHub] = useState(false);
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
-  const [unreadByHub, setUnreadByHub] = useState<Record<string, number>>({});
+  // Per-channel unread tracking: hub_id -> { channel_id: true }. Persisted
+  // across restarts via Tauri so dots survive the app being closed. Derived
+  // counts (per hub, total) drive the badges and tray tooltip.
+  const [unreadByChannel, setUnreadByChannel] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
+
+  function bumpUnread(hubId: string, channelId: string) {
+    setUnreadByChannel((prev) => {
+      const hubMap = prev[hubId] ?? {};
+      if (hubMap[channelId]) return prev; // already marked
+      const next = {
+        ...prev,
+        [hubId]: { ...hubMap, [channelId]: true as boolean },
+      };
+      invoke("save_unread_state", { state: next }).catch(() => {});
+      return next;
+    });
+  }
+
+  function clearUnread(hubId: string, channelId: string) {
+    setUnreadByChannel((prev) => {
+      const hubMap = prev[hubId];
+      if (!hubMap || !hubMap[channelId]) return prev;
+      const { [channelId]: _, ...rest } = hubMap;
+      const next = { ...prev, [hubId]: rest };
+      invoke("save_unread_state", { state: next }).catch(() => {});
+      return next;
+    });
+  }
+
+  function clearHubUnread(hubId: string) {
+    setUnreadByChannel((prev) => {
+      if (!prev[hubId] || Object.keys(prev[hubId]).length === 0) return prev;
+      const next = { ...prev, [hubId]: {} };
+      invoke("save_unread_state", { state: next }).catch(() => {});
+      return next;
+    });
+  }
+
+  const unreadByHub: Record<string, number> = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [hub, m] of Object.entries(unreadByChannel)) {
+      out[hub] = Object.keys(m).length;
+    }
+    return out;
+  }, [unreadByChannel]);
+
   // Push the aggregated unread count into the system tray tooltip whenever
   // it changes. The Tauri side updates the tray label so users see the
   // count without opening the window.
@@ -2216,6 +2268,13 @@ function App() {
     const total = Object.values(unreadByHub).reduce((n, v) => n + v, 0);
     invoke("set_tray_unread", { count: total }).catch(() => {});
   }, [unreadByHub]);
+
+  // Hydrate persisted unread state on launch.
+  useEffect(() => {
+    invoke<Record<string, Record<string, boolean>>>("load_unread_state")
+      .then((s) => setUnreadByChannel(s ?? {}))
+      .catch(() => {});
+  }, []);
   const [pingByHub, setPingByHub] = useState<Record<string, number | null>>({});
 
   const [publicKey, setPublicKey] = useState<string | null>(null);
@@ -2519,14 +2578,11 @@ function App() {
                 return [...prev, message];
               });
             } else {
-              // Unread bump: any hub when not focused on this channel.
-              // Mentions still bump unread on the active hub so the user
-              // sees the dot on a channel they aren't currently viewing.
+              // Unread bump per channel. Mentions still bump even on the
+              // active hub so the dot shows on a channel the user isn't
+              // currently viewing.
               if (!isActiveHub || isMention) {
-                setUnreadByHub((prev) => ({
-                  ...prev,
-                  [hub_id]: (prev[hub_id] || 0) + 1,
-                }));
+                bumpUnread(hub_id, channel_id);
               }
             }
 
@@ -2697,11 +2753,11 @@ function App() {
             if (activeHubIdRef.current === hub_id) {
               setActiveHubId(remaining[0]?.hub_id ?? null);
             }
-            setUnreadByHub((prev) => {
+            setUnreadByChannel((prev) => {
               if (!prev[hub_id]) return prev;
-              const next = { ...prev };
-              delete next[hub_id];
-              return next;
+              const { [hub_id]: _, ...rest } = prev;
+              invoke("save_unread_state", { state: rest }).catch(() => {});
+              return rest;
             });
           } catch {}
         })
@@ -3235,12 +3291,8 @@ function App() {
       setHubs((prev) =>
         prev.map((h) => ({ ...h, is_active: h.hub_id === hubId }))
       );
-      setUnreadByHub((prev) => {
-        if (!prev[hubId]) return prev;
-        const next = { ...prev };
-        delete next[hubId];
-        return next;
-      });
+      // Leave per-channel unread alone -- it'll clear when the user
+      // actually opens the relevant channel.
     } catch (e) {
       setError(String(e));
     }
@@ -3257,12 +3309,7 @@ function App() {
       if (activeHubId === hubId) {
         setActiveHubId(remaining[0]?.hub_id ?? null);
       }
-      setUnreadByHub((prev) => {
-        if (!prev[hubId]) return prev;
-        const next = { ...prev };
-        delete next[hubId];
-        return next;
-      });
+      clearHubUnread(hubId);
     } catch (e) {
       setError(String(e));
     }
@@ -3408,6 +3455,7 @@ function App() {
 
     setSelectedChannel(channel);
     setMessages([]);
+    if (activeHubId) clearUnread(activeHubId, channel.id);
     try {
       const msgs = await invoke<Message[]>("get_messages", {
         channelId: channel.id,
@@ -4365,6 +4413,10 @@ function App() {
                                 key={c.id}
                                 channel={c}
                                 selected={selectedChannel?.id === c.id}
+                                unread={
+                                  !!activeHubId &&
+                                  !!unreadByChannel[activeHubId]?.[c.id]
+                                }
                                 onClick={() => selectChannel(c)}
                                 onContextMenu={(e) => openContextMenu(e, c)}
                               />
@@ -4377,6 +4429,10 @@ function App() {
                         key={node.id}
                         channel={node}
                         selected={selectedChannel?.id === node.id}
+                        unread={
+                          !!activeHubId &&
+                          !!unreadByChannel[activeHubId]?.[node.id]
+                        }
                         onClick={() => selectChannel(node)}
                         onContextMenu={(e) => openContextMenu(e, node)}
                       />

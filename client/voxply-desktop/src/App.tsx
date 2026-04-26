@@ -2803,15 +2803,57 @@ function App() {
 
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the user is parked near the bottom of the message list.
+  // We only auto-scroll on new messages while this is true; otherwise the
+  // user is reading history and scrolling them is rude. The "↓ N new" pill
+  // counts new messages they've missed so they can jump down explicitly.
+  const [stickToBottom, setStickToBottom] = useState(true);
+  const stickToBottomRef = useRef(true);
+  useEffect(() => {
+    stickToBottomRef.current = stickToBottom;
+  }, [stickToBottom]);
+  const [newWhileScrolledUp, setNewWhileScrolledUp] = useState(0);
 
   // Ref to the currently selected channel ID (for the event listener closure).
   // Why a ref? Because event listeners capture the state at time of setup — using
   // a ref ensures we always read the latest value without re-registering the listener.
   const selectedChannelIdRef = useRef<string | null>(null);
 
+  // Auto-scroll only when the user is already near the bottom. Using a
+  // 120px threshold matches the natural "I'm reading the latest" zone --
+  // tighter than that and a slightly-up scroll would still re-anchor.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (stickToBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      setNewWhileScrolledUp(0);
+    } else {
+      setNewWhileScrolledUp((n) => n + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+
+  // Reset on channel switch -- user starts fresh at the bottom.
+  useEffect(() => {
+    setStickToBottom(true);
+    setNewWhileScrolledUp(0);
+  }, [selectedChannel?.id]);
+
+  function handleMessagesScroll() {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = distanceFromBottom < 120;
+    if (atBottom !== stickToBottom) setStickToBottom(atBottom);
+    if (atBottom && newWhileScrolledUp > 0) setNewWhileScrolledUp(0);
+  }
+
+  function jumpToBottom() {
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setStickToBottom(true);
+    setNewWhileScrolledUp(0);
+  }
 
   // Auto-dismiss toast after 5 seconds
   useEffect(() => {
@@ -5352,7 +5394,11 @@ function App() {
                     )}
                   </div>
                 )}
-                <div className="messages">
+                <div
+                  className="messages"
+                  ref={messagesContainerRef}
+                  onScroll={handleMessagesScroll}
+                >
                   {(searchResults ?? messages).map((m, i, arr) => {
                     const showSeparator =
                       i === 0 ||
@@ -5491,6 +5537,11 @@ function App() {
                   })}
                   <div ref={messagesEndRef} />
                 </div>
+                {!stickToBottom && newWhileScrolledUp > 0 && (
+                  <button className="jump-to-bottom" onClick={jumpToBottom}>
+                    ↓ {newWhileScrolledUp} new
+                  </button>
+                )}
                 <TypingIndicator typers={Object.values(typingByKey)} />
                 {replyTarget && (
                   <div className="reply-banner">

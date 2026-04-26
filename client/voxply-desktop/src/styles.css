@@ -653,6 +653,7 @@ select,
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  position: relative;
 }
 
 .content h3 {
@@ -2262,6 +2263,27 @@ select:focus {
   border-top: 1px solid var(--border);
   font-size: var(--text-xs);
   text-align: center;
+}
+
+.jump-to-bottom {
+  position: absolute;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-4);
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
+.jump-to-bottom:hover {
+  background: var(--accent-hover);
 }
 
 .typing-indicator {

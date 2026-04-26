@@ -1198,7 +1198,12 @@ function RoleEditor({
   onDelete,
 }: {
   role: RoleInfo;
-  onUpdate: (updates: { name?: string; permissions?: string[]; priority?: number }) => void;
+  onUpdate: (updates: {
+    name?: string;
+    permissions?: string[];
+    priority?: number;
+    display_separately?: boolean;
+  }) => void;
   onDelete: () => void;
 }) {
   const isBuiltin = role.id.startsWith("builtin-");
@@ -3257,6 +3262,13 @@ function App() {
             tab={settingsTab}
             onTab={setSettingsTab}
             onClose={closeSettings}
+            profiles={profiles}
+            defaultProfileId={defaultProfileId}
+            onCreateProfile={handleCreateProfile}
+            onUpdateProfile={handleUpdateProfile}
+            onDeleteProfile={handleDeleteProfile}
+            onSetDefaultProfile={handleSetDefaultProfile}
+            onApplyProfileToHub={handleApplyProfileToHub}
             theme={theme}
             onThemeChange={handleSetTheme}
             hasActiveHub={hasActiveHub}
@@ -3414,7 +3426,7 @@ function App() {
               </div>
             )}
             <div className="sidebar-scroll">
-            {view === "channels" ? (
+            {view !== "dms" ? (
               <>
             <div className="sidebar-header">
               <h3>Channels</h3>

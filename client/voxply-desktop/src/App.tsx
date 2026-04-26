@@ -742,7 +742,13 @@ function AvatarEditor({
   );
 }
 
-function UserListGrouped({ users }: { users: User[] }) {
+function UserListGrouped({
+  users,
+  onContextMenu,
+}: {
+  users: User[];
+  onContextMenu?: (e: React.MouseEvent, user: User) => void;
+}) {
   // Online first, then offline. Within each, bucket by group_role (the name of
   // the highest-priority role with display_separately=true), with null-role
   // members falling into a generic "Online" / "Offline" bucket.
@@ -777,7 +783,11 @@ function UserListGrouped({ users }: { users: User[] }) {
           </p>
           <ul className="user-list">
             {list.map((u) => (
-              <li key={u.public_key} className="user-list-item">
+              <li
+                key={u.public_key}
+                className="user-list-item"
+                onContextMenu={(e) => onContextMenu?.(e, u)}
+              >
                 <Avatar src={u.avatar} name={u.display_name || u.public_key} size={24} />
                 <span className="status-dot online" />
                 <span className="user-name">
@@ -795,7 +805,11 @@ function UserListGrouped({ users }: { users: User[] }) {
           </p>
           <ul className="user-list">
             {list.map((u) => (
-              <li key={u.public_key} className="user-list-item offline">
+              <li
+                key={u.public_key}
+                className="user-list-item offline"
+                onContextMenu={(e) => onContextMenu?.(e, u)}
+              >
                 <Avatar src={u.avatar} name={u.display_name || u.public_key} size={24} />
                 <span className="status-dot offline" />
                 <span className="user-name">
@@ -2808,6 +2822,51 @@ function App() {
   // attachments so clicking opens a zoom view instead of a new browser tab.
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const openImage = (src: string, alt: string) => setLightbox({ src, alt });
+
+  // Right-click on a user: small popover with quick actions.
+  const [userContextMenu, setUserContextMenu] = useState<{
+    x: number;
+    y: number;
+    user: User;
+  } | null>(null);
+
+  async function handleUserDm(u: User) {
+    setUserContextMenu(null);
+    if (u.public_key === publicKey) return;
+    try {
+      const conv = await invoke<Conversation>("create_conversation", {
+        members: [u.public_key],
+        memberHubs: {},
+      });
+      const list = await invoke<Conversation[]>("list_conversations");
+      setConversations(list);
+      setView("dms");
+      selectConversation(conv);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleUserAddFriend(u: User) {
+    setUserContextMenu(null);
+    if (u.public_key === publicKey) return;
+    try {
+      await invoke("send_friend_request", { targetPublicKey: u.public_key });
+      setToast(`Friend request sent to ${u.display_name || formatPubkey(u.public_key)}`);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCopyUserKey(u: User) {
+    setUserContextMenu(null);
+    try {
+      await navigator.clipboard.writeText(u.public_key);
+      setToast("Public key copied");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
 
   // Alliance sidebar state. We surface every alliance the active hub belongs
   // to plus the channels each member shares with it. Selecting a remote one
@@ -5928,7 +5987,13 @@ function App() {
 
           {view === "channels" && (
             <aside className="user-list-sidebar">
-              <UserListGrouped users={users} />
+              <UserListGrouped
+                users={users}
+                onContextMenu={(e, u) => {
+                  e.preventDefault();
+                  setUserContextMenu({ x: e.clientX, y: e.clientY, user: u });
+                }}
+              />
             </aside>
           )}
 
@@ -6271,6 +6336,50 @@ function App() {
             alt={lightbox.alt}
             onClose={() => setLightbox(null)}
           />
+        )}
+
+        {userContextMenu && (
+          <div
+            className="context-menu-overlay"
+            onClick={() => setUserContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setUserContextMenu(null);
+            }}
+          >
+            <div
+              className="context-menu"
+              style={{ top: userContextMenu.y, left: userContextMenu.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="context-menu-header">
+                {userContextMenu.user.display_name ||
+                  formatPubkey(userContextMenu.user.public_key)}
+              </div>
+              {userContextMenu.user.public_key !== publicKey && (
+                <>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => handleUserDm(userContextMenu.user)}
+                  >
+                    Direct message
+                  </button>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => handleUserAddFriend(userContextMenu.user)}
+                  >
+                    Add friend
+                  </button>
+                </>
+              )}
+              <button
+                className="context-menu-item"
+                onClick={() => handleCopyUserKey(userContextMenu.user)}
+              >
+                Copy public key
+              </button>
+            </div>
+          </div>
         )}
       </>
     </div>

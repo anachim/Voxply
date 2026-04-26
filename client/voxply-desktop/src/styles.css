@@ -1860,6 +1860,26 @@ select:focus {
   color: var(--text);
 }
 
+.mention {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  font-weight: var(--weight-bold);
+}
+
+.mention-self {
+  color: var(--accent-text);
+  background: var(--accent);
+}
+
+.message-mentioned {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-left: 3px solid var(--accent);
+  padding-left: var(--space-2);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+}
+
 /* ============================================================
    INPUT AREA
    ============================================================ */

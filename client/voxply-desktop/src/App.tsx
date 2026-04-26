@@ -1138,6 +1138,58 @@ function InvitesSection({
   );
 }
 
+/**
+ * Renders message content with @mention spans highlighted. A mention is a
+ * literal "@token" where token (case-insensitive) matches a known
+ * display_name. The current user's mentions get an extra `mention-self`
+ * class so the message stands out.
+ */
+function MessageContent({
+  content,
+  knownNames,
+  myName,
+}: {
+  content: string;
+  knownNames: Set<string>;
+  myName: string | null;
+}) {
+  const myLower = myName?.toLowerCase() ?? null;
+  // Split on @-prefixed runs of word chars, dots, dashes, and underscores.
+  // The split keeps the matched groups so we can rebuild the string with
+  // mention spans interleaved between text segments.
+  const parts = content.split(/(@[\w.\-]+)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!part.startsWith("@")) return <span key={i}>{part}</span>;
+        const name = part.slice(1).toLowerCase();
+        if (!knownNames.has(name)) return <span key={i}>{part}</span>;
+        const isSelf = myLower !== null && name === myLower;
+        return (
+          <span
+            key={i}
+            className={`mention ${isSelf ? "mention-self" : ""}`}
+          >
+            {part}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+/** Returns true if `content` contains an @mention of `name` (case-insensitive). */
+function mentionsName(content: string, name: string | null): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  const re = /@([\w.\-]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (m[1].toLowerCase() === lower) return true;
+  }
+  return false;
+}
+
 function formatRelative(unixSec: number): string {
   if (!unixSec) return "—";
   const now = Math.floor(Date.now() / 1000);
@@ -2152,6 +2204,25 @@ function App() {
   // Hub users
   const [users, setUsers] = useState<User[]>([]);
 
+  // Indexes for mention rendering. knownDisplayNames is the lower-cased set
+  // of all display names on this hub so MessageContent can decide which
+  // @tokens are real mentions vs just text.
+  const knownDisplayNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const u of users) {
+      if (u.display_name) s.add(u.display_name.toLowerCase());
+    }
+    return s;
+  }, [users]);
+  const myDisplayName = useMemo(
+    () => users.find((u) => u.public_key === publicKey)?.display_name ?? null,
+    [users, publicKey]
+  );
+  const myDisplayNameRef = useRef<string | null>(null);
+  useEffect(() => {
+    myDisplayNameRef.current = myDisplayName;
+  }, [myDisplayName]);
+
   // Voice
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
@@ -2304,18 +2375,42 @@ function App() {
             const isActiveHub = hub_id === activeHubIdRef.current;
             const isActiveChannel =
               isActiveHub && channel_id === selectedChannelIdRef.current;
+            const myName = myDisplayNameRef.current;
+            const isMention =
+              !!myName &&
+              message.sender !== publicKeyRef.current &&
+              mentionsName(message.content, myName);
 
             if (isActiveChannel) {
               setMessages((prev) => {
                 if (prev.some((m) => m.id === message.id)) return prev;
                 return [...prev, message];
               });
-            } else if (!isActiveHub) {
-              // Unread bump: only for hubs the user isn't currently viewing
-              setUnreadByHub((prev) => ({
-                ...prev,
-                [hub_id]: (prev[hub_id] || 0) + 1,
-              }));
+            } else {
+              // Unread bump: any hub when not focused on this channel.
+              // Mentions still bump unread on the active hub so the user
+              // sees the dot on a channel they aren't currently viewing.
+              if (!isActiveHub || isMention) {
+                setUnreadByHub((prev) => ({
+                  ...prev,
+                  [hub_id]: (prev[hub_id] || 0) + 1,
+                }));
+              }
+            }
+
+            if (
+              isMention &&
+              !isActiveChannel &&
+              typeof Notification !== "undefined" &&
+              Notification.permission === "granted"
+            ) {
+              const sender =
+                message.sender_name || formatPubkey(message.sender);
+              try {
+                new Notification(`${sender} mentioned you`, {
+                  body: message.content.slice(0, 140),
+                });
+              } catch {}
             }
           }
         )
@@ -3039,6 +3134,17 @@ function App() {
         setPublicKey(key);
       } catch (e) {
         console.error("Failed to load identity:", e);
+      }
+      // Ask for notification permission once on launch. The browser
+      // Notification API works inside Tauri 2 webviews; we silently fall
+      // back to no notifications if the user denies.
+      if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "default"
+      ) {
+        try {
+          await Notification.requestPermission();
+        } catch {}
       }
       try {
         const allHubs = await invoke<Hub[]>("auto_connect_saved");
@@ -4211,7 +4317,7 @@ function App() {
                             m.sender_name ||
                             formatPubkey(m.sender)}
                         </span>
-                        <span className="message-content">{m.content}</span>
+                        <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                       </div>
                     ))}
                     <div ref={messagesEndRef} />
@@ -4297,8 +4403,14 @@ function App() {
                       senderUser?.display_name ||
                       m.sender_name ||
                       formatPubkey(m.sender);
+                    const isMentioned =
+                      m.sender !== publicKey &&
+                      mentionsName(m.content, myDisplayName);
                     return (
-                      <div key={m.id} className="message">
+                      <div
+                        key={m.id}
+                        className={`message ${isMentioned ? "message-mentioned" : ""}`}
+                      >
                         <Avatar
                           src={senderUser?.avatar}
                           name={senderLabel}
@@ -4332,7 +4444,7 @@ function App() {
                           </span>
                         ) : (
                           <>
-                            <span className="message-content">{m.content}</span>
+                            <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                             {m.edited_at && (
                               <span className="message-edited-tag">
                                 (edited)
@@ -4395,7 +4507,7 @@ function App() {
                       <div key={m.id} className="message">
                         <Avatar src={null} name={senderLabel} size={28} />
                         <span className="message-sender">{senderLabel}</span>
-                        <span className="message-content">{m.content}</span>
+                        <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                         <span className="message-time">
                           {formatRelative(m.created_at)}
                         </span>

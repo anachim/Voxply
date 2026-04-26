@@ -2610,6 +2610,24 @@ function App() {
     Record<string, Record<string, boolean>>
   >({});
 
+  // Pinned channels. Local-only per (hub, channel). Pinned channels render
+  // in their own section above the regular Channels list and don't appear
+  // in the normal list (no duplication).
+  const [pinnedChannels, setPinnedChannels] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
+
+  function toggleChannelPin(hubId: string, channelId: string) {
+    setPinnedChannels((prev) => {
+      const hubMap = { ...(prev[hubId] ?? {}) };
+      if (hubMap[channelId]) delete hubMap[channelId];
+      else hubMap[channelId] = true;
+      const next = { ...prev, [hubId]: hubMap };
+      invoke("save_pinned_channels", { state: next }).catch(() => {});
+      return next;
+    });
+  }
+
   function persistMutes(hubs: typeof mutedHubs, channels: typeof mutedChannels) {
     invoke("save_notification_mutes", {
       state: { hubs, channels },
@@ -2708,6 +2726,13 @@ function App() {
         setMutedHubs(s?.hubs ?? {});
         setMutedChannels(s?.channels ?? {});
       })
+      .catch(() => {});
+  }, []);
+
+  // Hydrate pinned-channel state on launch.
+  useEffect(() => {
+    invoke<Record<string, Record<string, boolean>>>("load_pinned_channels")
+      .then((s) => setPinnedChannels(s ?? {}))
       .catch(() => {});
   }, []);
 
@@ -4810,7 +4835,12 @@ function App() {
   // Build a nested tree: categories contain their child channels.
   // Top-level = channels with no parent. Sorted by display_order.
   function buildChannelTree(): { node: Channel; children: Channel[] }[] {
-    const sorted = [...channels].sort((a, b) => a.display_order - b.display_order);
+    const pinSet = activeHubId ? pinnedChannels[activeHubId] ?? {} : {};
+    // Pinned channels render in the dedicated section at the top, so they
+    // get pulled out of the regular tree to avoid duplication.
+    const sorted = [...channels]
+      .sort((a, b) => a.display_order - b.display_order)
+      .filter((c) => !pinSet[c.id]);
     const tree: { node: Channel; children: Channel[] }[] = [];
     const topLevel = sorted.filter((c) => !c.parent_id);
     for (const ch of topLevel) {
@@ -5231,6 +5261,41 @@ function App() {
             <div className="sidebar-scroll">
             {view !== "dms" ? (
               <>
+            {(() => {
+              const pinned = activeHubId
+                ? channels.filter(
+                    (c) =>
+                      !c.is_category && pinnedChannels[activeHubId]?.[c.id]
+                  )
+                : [];
+              if (pinned.length === 0) return null;
+              return (
+                <>
+                  <div className="sidebar-header">
+                    <h3>📌 Pinned</h3>
+                  </div>
+                  <ul className="channel-list">
+                    {pinned.map((c) => (
+                      <li
+                        key={c.id}
+                        className={`channel-item ${
+                          selectedChannel?.id === c.id ? "selected" : ""
+                        } ${
+                          activeHubId &&
+                          unreadByChannel[activeHubId]?.[c.id]
+                            ? "unread"
+                            : ""
+                        }`}
+                        onClick={() => selectChannel(c)}
+                        onContextMenu={(e) => openContextMenu(e, c)}
+                      >
+                        # {c.name}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              );
+            })()}
             <div className="sidebar-header">
               <h3>Channels</h3>
               <button
@@ -6242,6 +6307,20 @@ function App() {
                       {mutedChannels[activeHubId]?.[contextMenu.channel.id]
                         ? "Unmute notifications"
                         : "Mute notifications"}
+                    </button>
+                  )}
+                  {activeHubId && (
+                    <button
+                      className="context-menu-item"
+                      onClick={() => {
+                        const ch = contextMenu.channel;
+                        setContextMenu(null);
+                        toggleChannelPin(activeHubId, ch.id);
+                      }}
+                    >
+                      {pinnedChannels[activeHubId]?.[contextMenu.channel.id]
+                        ? "Unpin channel"
+                        : "Pin channel"}
                     </button>
                   )}
                   {contextMenu.channel.parent_id && (

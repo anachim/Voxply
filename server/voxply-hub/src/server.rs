@@ -91,7 +91,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/moderation/mutes/{target_key}", axum::routing::delete(routes::moderation::unmute_user))
         .route("/moderation/timeout", post(routes::moderation::timeout_user))
         .route("/moderation/kick", post(routes::moderation::kick_user))
-        .route("/moderation/channels/{channel_id}/bans", post(routes::moderation::channel_ban))
+        .route("/moderation/channels/{channel_id}/bans", get(routes::moderation::list_channel_bans).post(routes::moderation::channel_ban))
         .route("/moderation/channels/{channel_id}/bans/{target_key}", axum::routing::delete(routes::moderation::channel_unban))
         .route("/moderation/voice-mutes", get(routes::moderation::list_voice_mutes).post(routes::moderation::voice_mute))
         .route("/moderation/voice-mutes/{target_key}", axum::routing::delete(routes::moderation::voice_unmute))

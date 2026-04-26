@@ -293,6 +293,36 @@ pub async fn channel_ban(
     ))
 }
 
+pub async fn list_channel_bans(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+    Path(channel_id): Path<String>,
+) -> Result<Json<Vec<ChannelBanResponse>>, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(MUTE_MEMBERS)?;
+
+    let rows = sqlx::query_as::<_, ChannelBanRow>(
+        "SELECT channel_id, target_public_key, banned_by, reason, created_at
+         FROM channel_bans WHERE channel_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&channel_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| ChannelBanResponse {
+                channel_id: r.channel_id,
+                target_public_key: r.target_public_key,
+                banned_by: r.banned_by,
+                reason: r.reason,
+                created_at: r.created_at,
+            })
+            .collect(),
+    ))
+}
+
 pub async fn channel_unban(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -448,6 +478,15 @@ struct MuteRow {
     muted_by: String,
     reason: Option<String>,
     expires_at: Option<i64>,
+    created_at: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct ChannelBanRow {
+    channel_id: String,
+    target_public_key: String,
+    banned_by: String,
+    reason: Option<String>,
     created_at: i64,
 }
 

@@ -1557,6 +1557,24 @@ function mentionsName(content: string, name: string | null): boolean {
   return false;
 }
 
+/**
+ * Stable color for a public key. Hashes the pubkey to a hue and pins
+ * saturation/lightness so the result is always legible against the dark
+ * theme. Empty/missing keys fall back to the accent color.
+ */
+function colorForKey(pubkey: string | null | undefined): string {
+  if (!pubkey) return "var(--accent)";
+  // Tiny FNV-1a — plenty of entropy for hue distribution and cheap to run
+  // on every render.
+  let h = 2166136261;
+  for (let i = 0; i < pubkey.length; i++) {
+    h ^= pubkey.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const hue = ((h >>> 0) % 360);
+  return `hsl(${hue}, 55%, 65%)`;
+}
+
 /** Local-day key (yyyy-mm-dd) used to detect day boundaries. */
 function dayKey(unixSec: number): string {
   const d = new Date(unixSec * 1000);
@@ -5286,7 +5304,10 @@ function App() {
                   <div className="messages">
                     {(dmMessages[selectedConversation.id] || []).map((m, i) => (
                       <div key={i} className="message">
-                        <span className="message-sender">
+                        <span
+                          className="message-sender"
+                          style={{ color: colorForKey(m.sender) }}
+                        >
                           {users.find((u) => u.public_key === m.sender)
                             ?.display_name ||
                             m.sender_name ||
@@ -5511,7 +5532,12 @@ function App() {
                           name={senderLabel}
                           size={28}
                         />
-                        <span className="message-sender">{senderLabel}</span>
+                        <span
+                          className="message-sender"
+                          style={{ color: colorForKey(m.sender) }}
+                        >
+                          {senderLabel}
+                        </span>
                         {isEditing ? (
                           <span className="message-edit">
                             <input
@@ -5698,7 +5724,12 @@ function App() {
                     return (
                       <div key={m.id} className="message">
                         <Avatar src={null} name={senderLabel} size={28} />
-                        <span className="message-sender">{senderLabel}</span>
+                        <span
+                          className="message-sender"
+                          style={{ color: colorForKey(m.sender) }}
+                        >
+                          {senderLabel}
+                        </span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                         {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} onImageClick={openImage} />}
                         <span className="message-time">

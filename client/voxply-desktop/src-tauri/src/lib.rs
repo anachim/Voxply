@@ -44,6 +44,11 @@ struct VoiceSession {
     channel_id: String,
     hub_id: String,
     stop_tx: std::sync::mpsc::Sender<()>,
+    /// Self-mute / self-deafen flags shared with the audio pipeline. Setting
+    /// either flips behavior in the running send/recv tasks without going
+    /// through a control channel.
+    muted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    deafened: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -1475,7 +1480,15 @@ async fn voice_join(
         .next()
         .ok_or_else(|| format!("No addresses for {host}"))?;
 
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<u16, String>>();
+    type VoiceReady = Result<
+        (
+            u16,
+            std::sync::Arc<std::sync::atomic::AtomicBool>,
+            std::sync::Arc<std::sync::atomic::AtomicBool>,
+        ),
+        String,
+    >;
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<VoiceReady>();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
 
     let speaking_ws = ws_tx.clone();
@@ -1511,7 +1524,9 @@ async fn voice_join(
             };
 
             let local_port = pipeline.local_udp_port;
-            let _ = ready_tx.send(Ok(local_port));
+            let muted_arc = pipeline.muted.clone();
+            let deafened_arc = pipeline.deafened.clone();
+            let _ = ready_tx.send(Ok((local_port, muted_arc, deafened_arc)));
 
             // Forward speaking state from the VAD to the hub WS and emit a
             // local Tauri event so the current user's own chip can pulse too.
@@ -1547,7 +1562,7 @@ async fn voice_join(
         });
     });
 
-    let local_port = ready_rx
+    let (local_port, muted, deafened) = ready_rx
         .recv()
         .map_err(|_| "Voice thread died".to_string())??;
 
@@ -1562,8 +1577,33 @@ async fn voice_join(
         channel_id,
         hub_id: active_id,
         stop_tx,
+        muted,
+        deafened,
     });
 
+    Ok(())
+}
+
+#[tauri::command]
+fn voice_set_muted(muted: bool, state: State<'_, AppState>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if let Some(s) = state.voice.lock().unwrap().as_ref() {
+        s.muted.store(muted, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn voice_set_deafened(deafened: bool, state: State<'_, AppState>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if let Some(s) = state.voice.lock().unwrap().as_ref() {
+        // Deafen also mutes -- you can't talk over a one-way wall. Storing
+        // both lets the user un-deafen back to whatever mute state they had.
+        s.deafened.store(deafened, Ordering::Relaxed);
+        if deafened {
+            s.muted.store(true, Ordering::Relaxed);
+        }
+    }
     Ok(())
 }
 
@@ -1660,6 +1700,8 @@ fn mic_test_start(state: State<'_, AppState>, app: AppHandle) -> Result<(), Stri
         channel_id: "__mic_test__".to_string(),
         hub_id: String::new(),
         stop_tx,
+        muted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        deafened: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     });
 
     Ok(())
@@ -3008,6 +3050,8 @@ pub fn run() {
             set_typing,
             voice_join,
             voice_leave,
+            voice_set_muted,
+            voice_set_deafened,
             list_audio_devices,
             get_voice_settings,
             save_voice_settings,

@@ -1305,15 +1305,47 @@ select,
   background: var(--danger-hover);
 }
 
-.voice-participants {
+.voice-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--bg-elevated);
   border-radius: var(--r-md);
   margin-bottom: var(--space-3);
+}
+
+.voice-toggle {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--text-md);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-toggle:hover {
+  border-color: var(--accent);
+}
+
+.voice-toggle.active {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+.voice-participants {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+  flex: 1;
 }
 
 .voice-participant {

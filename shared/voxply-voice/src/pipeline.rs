@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,6 +44,14 @@ pub struct AudioPipeline {
     /// Receives the post-denoise RMS level of each captured frame (decimated
     /// to ~20 Hz). Range is roughly 0..0.3 for normal speech.
     pub level_rx: Option<mpsc::UnboundedReceiver<f32>>,
+    /// When set, the send task drops outbound packets before they hit the
+    /// socket. Capture and VAD continue so the user still sees their level.
+    pub muted: Arc<AtomicBool>,
+    /// When set, the receive task drops decoded frames instead of pushing
+    /// them into playback. We don't stop reading the socket -- the OS UDP
+    /// buffer would fill and packets would be dropped at the kernel layer
+    /// either way; doing it explicitly keeps the rest of the pipeline calm.
+    pub deafened: Arc<AtomicBool>,
 }
 
 fn resolve_opus_rate(device_rate: u32) -> u32 {
@@ -122,6 +131,8 @@ impl AudioPipeline {
             local_udp_port: 0,
             speaking_rx: None,
             level_rx: Some(level_rx),
+            muted: Arc::new(AtomicBool::new(false)),
+            deafened: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -158,8 +169,12 @@ impl AudioPipeline {
 
         let (speaking_tx, speaking_rx) = mpsc::unbounded_channel::<bool>();
 
+        let muted = Arc::new(AtomicBool::new(false));
+        let deafened = Arc::new(AtomicBool::new(false));
+
         // Send task: capture → encode → UDP, plus RMS-based VAD + level meter
         let send_socket = socket.clone();
+        let send_muted = muted.clone();
         let send_task = tokio::spawn(async move {
             let mut encoder = VoiceEncoder::new(opus_rate).expect("Failed to create encoder");
             let mut denoiser = Denoiser::new();
@@ -217,14 +232,21 @@ impl AudioPipeline {
 
                 let packets = encoder.encode(&denoised);
 
+                // While muted: keep the encoder in sync (so unmuting doesn't
+                // pop) but drop the bytes before the socket. VAD + level
+                // already fired above so the local meter still pulses.
+                let suppress = send_muted.load(Ordering::Relaxed);
+
                 for opus_data in packets {
-                    let packet = VoicePacket {
-                        sequence,
-                        timestamp,
-                        opus_data,
-                    };
-                    if let Err(e) = send_socket.send(&packet).await {
-                        tracing::warn!("UDP send error: {e}");
+                    if !suppress {
+                        let packet = VoicePacket {
+                            sequence,
+                            timestamp,
+                            opus_data,
+                        };
+                        if let Err(e) = send_socket.send(&packet).await {
+                            tracing::warn!("UDP send error: {e}");
+                        }
                     }
                     sequence = sequence.wrapping_add(1);
                     timestamp = timestamp.wrapping_add(frame_size as u32);
@@ -234,6 +256,7 @@ impl AudioPipeline {
 
         // Receive task: UDP → decode → playback
         let recv_socket = socket.clone();
+        let recv_deafened = deafened.clone();
         let recv_task = tokio::spawn(async move {
             let mut decoder = VoiceDecoder::new(opus_rate).expect("Failed to create decoder");
 
@@ -242,7 +265,9 @@ impl AudioPipeline {
                     Ok((packet, _from)) => {
                         match decoder.decode(&packet.opus_data) {
                             Ok(samples) => {
-                                let _ = playback_prod.push_slice(samples);
+                                if !recv_deafened.load(Ordering::Relaxed) {
+                                    let _ = playback_prod.push_slice(samples);
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!("Decode error: {e}");
@@ -265,6 +290,8 @@ impl AudioPipeline {
             local_udp_port: actual_local_port,
             speaking_rx: Some(speaking_rx),
             level_rx: Some(level_rx),
+            muted,
+            deafened,
         })
     }
 

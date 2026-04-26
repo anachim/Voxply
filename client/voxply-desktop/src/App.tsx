@@ -2702,6 +2702,10 @@ function App() {
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
   const [speakingKeys, setSpeakingKeys] = useState<Set<string>>(new Set());
+  // Local self-state for the voice bar. Reset on leave so the next channel
+  // join starts unmuted/un-deafened (no surprise carryover).
+  const [selfMuted, setSelfMuted] = useState(false);
+  const [selfDeafened, setSelfDeafened] = useState(false);
 
   // Settings
   const [showSettings, setShowSettings] = useState(false);
@@ -4389,12 +4393,39 @@ function App() {
     setShowSettings(false);
   }
 
+  async function toggleSelfMute() {
+    const next = !selfMuted;
+    setSelfMuted(next);
+    try {
+      await invoke("voice_set_muted", { muted: next });
+    } catch (e) {
+      setError(String(e));
+      setSelfMuted(!next);
+    }
+  }
+
+  async function toggleSelfDeafen() {
+    const next = !selfDeafened;
+    setSelfDeafened(next);
+    // Deafen implies mute on the backend; mirror that here so the UI
+    // matches what the audio thread actually does.
+    if (next && !selfMuted) setSelfMuted(true);
+    try {
+      await invoke("voice_set_deafened", { deafened: next });
+    } catch (e) {
+      setError(String(e));
+      setSelfDeafened(!next);
+    }
+  }
+
   async function handleVoiceLeave() {
     try {
       await invoke("voice_leave");
       setVoiceChannelId(null);
       setVoiceParticipants([]);
       setSpeakingKeys(new Set());
+      setSelfMuted(false);
+      setSelfDeafened(false);
     } catch (e) {
       setError(String(e));
     }
@@ -5155,20 +5186,38 @@ function App() {
                     </button>
                   </div>
                 )}
-                {voiceChannelId === selectedChannel.id && voiceParticipants.length > 0 && (
-                  <div className="voice-participants">
-                    <span className="muted">In voice: </span>
-                    {voiceParticipants.map((p) => {
-                      const isSpeaking = speakingKeys.has(p.public_key);
-                      return (
-                        <span
-                          key={p.public_key}
-                          className={`voice-participant ${isSpeaking ? "speaking" : ""}`}
-                        >
-                          🎙️ {p.display_name || p.public_key.slice(0, 16)}
-                        </span>
-                      );
-                    })}
+                {voiceChannelId === selectedChannel.id && (
+                  <div className="voice-bar">
+                    <button
+                      onClick={toggleSelfMute}
+                      className={`voice-toggle ${selfMuted ? "active" : ""}`}
+                      title={selfMuted ? "Unmute" : "Mute mic"}
+                    >
+                      {selfMuted ? "🚫🎙️" : "🎙️"}
+                    </button>
+                    <button
+                      onClick={toggleSelfDeafen}
+                      className={`voice-toggle ${selfDeafened ? "active" : ""}`}
+                      title={selfDeafened ? "Undeafen" : "Deafen"}
+                    >
+                      {selfDeafened ? "🚫🔊" : "🔊"}
+                    </button>
+                    {voiceParticipants.length > 0 && (
+                      <div className="voice-participants">
+                        <span className="muted">In voice: </span>
+                        {voiceParticipants.map((p) => {
+                          const isSpeaking = speakingKeys.has(p.public_key);
+                          return (
+                            <span
+                              key={p.public_key}
+                              className={`voice-participant ${isSpeaking ? "speaking" : ""}`}
+                            >
+                              🎙️ {p.display_name || p.public_key.slice(0, 16)}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="messages">

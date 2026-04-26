@@ -6023,29 +6023,60 @@ function App() {
                     </h3>
                   </div>
                   <div className="messages">
-                    {(dmMessages[selectedConversation.id] || []).map((m, i) => (
-                      <div key={i} className="message">
-                        <span
-                          className="message-sender"
-                          style={{ color: colorForKey(m.sender) }}
-                        >
-                          {users.find((u) => u.public_key === m.sender)
-                            ?.display_name ||
-                            m.sender_name ||
-                            formatPubkey(m.sender)}
-                        </span>
-                        <span
-                          className="message-time"
-                          title={formatFullTimestamp(m.timestamp)}
-                        >
-                          {formatRelative(m.timestamp)}
-                        </span>
-                        <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
-                        {m.attachments && m.attachments.length > 0 && (
-                          <MessageAttachments items={m.attachments} onImageClick={openImage} />
-                        )}
-                      </div>
-                    ))}
+                    {(dmMessages[selectedConversation.id] || []).map((m, i) => {
+                      const senderLabel =
+                        users.find((u) => u.public_key === m.sender)
+                          ?.display_name ||
+                        m.sender_name ||
+                        formatPubkey(m.sender);
+                      const actionText = meAction(m.content);
+                      if (actionText !== null) {
+                        return (
+                          <div key={i} className="message message-action">
+                            <span className="action-asterisk">*</span>
+                            <span
+                              className="message-sender"
+                              style={{ color: colorForKey(m.sender) }}
+                            >
+                              {senderLabel}
+                            </span>
+                            <span className="action-text">
+                              <MessageContent
+                                content={actionText}
+                                knownNames={knownDisplayNames}
+                                myName={myDisplayName}
+                              />
+                            </span>
+                            <span
+                              className="message-time"
+                              title={formatFullTimestamp(m.timestamp)}
+                            >
+                              {formatRelative(m.timestamp)}
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={i} className="message">
+                          <span
+                            className="message-sender"
+                            style={{ color: colorForKey(m.sender) }}
+                          >
+                            {senderLabel}
+                          </span>
+                          <span
+                            className="message-time"
+                            title={formatFullTimestamp(m.timestamp)}
+                          >
+                            {formatRelative(m.timestamp)}
+                          </span>
+                          <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
+                          {m.attachments && m.attachments.length > 0 && (
+                            <MessageAttachments items={m.attachments} onImageClick={openImage} />
+                          )}
+                        </div>
+                      );
+                    })}
                     <div ref={messagesEndRef} />
                   </div>
                   {pendingAttachments.length > 0 && (

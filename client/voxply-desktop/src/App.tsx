@@ -6179,6 +6179,24 @@ function App() {
                   ref={messagesContainerRef}
                   onScroll={handleMessagesScroll}
                 >
+                  {(searchResults ?? messages).length === 0 && (
+                    <div className="channel-empty">
+                      {searchResults !== null ? (
+                        <p>No messages match your search.</p>
+                      ) : (
+                        <>
+                          <div className="channel-empty-icon">👋</div>
+                          <h2>Welcome to #{selectedChannel.name}</h2>
+                          <p>
+                            This is the start of the channel.
+                            {selectedChannel.description
+                              ? ` ${selectedChannel.description}`
+                              : " Say hello!"}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {(searchResults ?? messages).map((m, i, arr) => {
                     const showSeparator =
                       i === 0 ||

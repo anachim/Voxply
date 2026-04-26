@@ -2157,6 +2157,31 @@ select:focus {
   border-color: var(--accent);
 }
 
+.md-codeblock-wrap {
+  margin: var(--space-2) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+
+.md-codeblock-lang {
+  padding: 2px var(--space-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+
+.md-codeblock-wrap .md-codeblock {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
 .md-codeblock {
   background: var(--bg-sunken);
   border: 1px solid var(--border);

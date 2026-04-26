@@ -1736,12 +1736,26 @@ function MessageContent({
   const myLower = myName?.toLowerCase() ?? null;
   let parts: Part[] = [content];
 
-  // Fenced code blocks
-  parts = splitOnPattern(parts, /```([\s\S]+?)```/, (m, key) => (
-    <pre key={key} className="md-codeblock">
-      <code>{m[1]}</code>
-    </pre>
-  ));
+  // Fenced code blocks. Optionally accept a language hint on the same line
+  // as the opening fence: ```rust\n...\n```. The hint becomes a small label
+  // above the block; we don't actually highlight by language yet, but the
+  // tag is preserved instead of leaking into the rendered code.
+  parts = splitOnPattern(
+    parts,
+    /```([A-Za-z0-9_+-]*)\n?([\s\S]+?)```/,
+    (m, key) => {
+      const lang = m[1] || "";
+      const body = m[2].replace(/^\n/, "").replace(/\n$/, "");
+      return (
+        <div key={key} className="md-codeblock-wrap">
+          {lang && <div className="md-codeblock-lang">{lang}</div>}
+          <pre className="md-codeblock">
+            <code>{body}</code>
+          </pre>
+        </div>
+      );
+    }
+  );
 
   // Inline code
   parts = splitOnPattern(parts, /`([^`\n]+)`/, (m, key) => (

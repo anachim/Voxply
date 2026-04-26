@@ -90,6 +90,14 @@
   <div class="count" id="count">Rolls: 0</div>
 
 <script>
+// --- Theme bootstrap ---
+// The parent appends ?theme=<calm|classic|linear> to the iframe src so we can
+// match the user's chosen theme without reading the parent's CSS.
+const themeParam = new URLSearchParams(location.search).get("theme");
+if (themeParam === "classic" || themeParam === "linear") {
+  document.documentElement.dataset.theme = themeParam;
+}
+
 // --- Voxply game SDK v1 ---
 // The parent client injects an ack postMessage when ready. We ask for user
 // info; it replies with { type: 'voxply:user', data: { ... } }.

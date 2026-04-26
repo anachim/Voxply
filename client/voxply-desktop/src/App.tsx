@@ -3520,8 +3520,8 @@ function App() {
                   </button>
                 </div>
                 <iframe
-                  key={selectedGame.id}
-                  src={selectedGame.entry_url}
+                  key={`${selectedGame.id}:${theme}`}
+                  src={`${selectedGame.entry_url}${selectedGame.entry_url.includes("?") ? "&" : "?"}theme=${theme}`}
                   className="game-frame"
                   sandbox="allow-scripts"
                   title={selectedGame.name}

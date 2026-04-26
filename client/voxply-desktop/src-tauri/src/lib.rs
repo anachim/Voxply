@@ -2737,12 +2737,72 @@ fn disconnect_all(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Update the tray tooltip + title to reflect current unread count. Called
+/// from the frontend whenever the aggregated unread number changes.
+#[tauri::command]
+fn set_tray_unread(count: u32, app: AppHandle) -> Result<(), String> {
+    let tray = app.tray_by_id("main").ok_or("tray missing")?;
+    let label = if count == 0 {
+        "Voxply".to_string()
+    } else if count > 99 {
+        "Voxply — 99+ unread".to_string()
+    } else {
+        format!("Voxply — {count} unread")
+    };
+    tray.set_tooltip(Some(&label)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::TrayIconBuilder;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             app.manage(AppState::default());
+
+            // System tray: a "Show Voxply" / "Quit" menu plus left-click to
+            // focus the main window. Tooltip carries the unread count, kept
+            // in sync by the frontend via set_tray_unread.
+            let show = MenuItem::with_id(app, "show", "Show Voxply", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &quit])?;
+
+            let _tray = TrayIconBuilder::with_id("main")
+                .tooltip("Voxply")
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.unminimize();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    use tauri::tray::TrayIconEvent;
+                    if let TrayIconEvent::Click { button, button_state, .. } = event {
+                        if button == tauri::tray::MouseButton::Left
+                            && button_state == tauri::tray::MouseButtonState::Up
+                        {
+                            if let Some(w) = tray.app_handle().get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2803,6 +2863,7 @@ pub fn run() {
             channel_ban_user,
             channel_unban_user,
             list_channel_bans,
+            set_tray_unread,
             get_talk_power,
             set_talk_power_cmd,
             assign_role,

@@ -1249,6 +1249,40 @@ function MessageContent({
   );
 }
 
+/**
+ * Plays a short two-tone "ping" via WebAudio. We synthesize it on demand
+ * rather than bundle an audio file -- it's ~20 lines, has no licensing
+ * concerns, and the user can tell what they're hearing without waiting
+ * for a file fetch on first play.
+ */
+let cachedAudioCtx: AudioContext | null = null;
+function playMentionPing() {
+  try {
+    const ctx =
+      cachedAudioCtx ??
+      (cachedAudioCtx = new (window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext)());
+    const now = ctx.currentTime;
+    const tone = (freq: number, start: number, dur: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0, now + start);
+      gain.gain.linearRampToValueAtTime(0.18, now + start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur);
+    };
+    tone(880, 0, 0.12);
+    tone(1175, 0.08, 0.18);
+  } catch {
+    // Audio is best-effort; fail silently if the context can't start.
+  }
+}
+
 /** Returns true if `content` contains an @mention of `name` (case-insensitive). */
 function mentionsName(content: string, name: string | null): boolean {
   if (!name) return false;
@@ -2175,6 +2209,13 @@ function App() {
   const [showAddHub, setShowAddHub] = useState(false);
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
   const [unreadByHub, setUnreadByHub] = useState<Record<string, number>>({});
+  // Push the aggregated unread count into the system tray tooltip whenever
+  // it changes. The Tauri side updates the tray label so users see the
+  // count without opening the window.
+  useEffect(() => {
+    const total = Object.values(unreadByHub).reduce((n, v) => n + v, 0);
+    invoke("set_tray_unread", { count: total }).catch(() => {});
+  }, [unreadByHub]);
   const [pingByHub, setPingByHub] = useState<Record<string, number | null>>({});
 
   const [publicKey, setPublicKey] = useState<string | null>(null);
@@ -2483,19 +2524,20 @@ function App() {
               }
             }
 
-            if (
-              isMention &&
-              !isActiveChannel &&
-              typeof Notification !== "undefined" &&
-              Notification.permission === "granted"
-            ) {
-              const sender =
-                message.sender_name || formatPubkey(message.sender);
-              try {
-                new Notification(`${sender} mentioned you`, {
-                  body: message.content.slice(0, 140),
-                });
-              } catch {}
+            if (isMention && !isActiveChannel) {
+              playMentionPing();
+              if (
+                typeof Notification !== "undefined" &&
+                Notification.permission === "granted"
+              ) {
+                const sender =
+                  message.sender_name || formatPubkey(message.sender);
+                try {
+                  new Notification(`${sender} mentioned you`, {
+                    body: message.content.slice(0, 140),
+                  });
+                } catch {}
+              }
             }
           }
         )

@@ -35,6 +35,12 @@ interface Channel {
   created_at: number;
 }
 
+interface Attachment {
+  name: string;
+  mime: string;
+  data_b64: string;
+}
+
 interface Message {
   id: string;
   channel_id: string;
@@ -43,7 +49,10 @@ interface Message {
   content: string;
   created_at: number;
   edited_at: number | null;
+  attachments?: Attachment[];
 }
+
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // matches the hub cap
 
 interface User {
   public_key: string;
@@ -1139,6 +1148,67 @@ function InvitesSection({
   );
 }
 
+function PendingAttachments({
+  items,
+  onRemove,
+}: {
+  items: Attachment[];
+  onRemove: (i: number) => void;
+}) {
+  return (
+    <div className="pending-attachments">
+      {items.map((a, i) => (
+        <div key={i} className="pending-attachment">
+          {a.mime.startsWith("image/") ? (
+            <img
+              src={`data:${a.mime};base64,${a.data_b64}`}
+              alt={a.name}
+              className="pending-attachment-thumb"
+            />
+          ) : (
+            <span className="pending-attachment-file">📄 {a.name}</span>
+          )}
+          <button
+            className="pending-attachment-remove"
+            onClick={() => onRemove(i)}
+            title="Remove"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MessageAttachments({ items }: { items: Attachment[] }) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="message-attachments">
+      {items.map((a, i) => {
+        const url = `data:${a.mime};base64,${a.data_b64}`;
+        if (a.mime.startsWith("image/")) {
+          return (
+            <a key={i} href={url} target="_blank" rel="noreferrer">
+              <img src={url} alt={a.name} className="message-attachment-img" />
+            </a>
+          );
+        }
+        return (
+          <a
+            key={i}
+            href={url}
+            download={a.name}
+            className="message-attachment-file"
+          >
+            📄 {a.name}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Renders message content with @mention spans highlighted. A mention is a
  * literal "@token" where token (case-insensitive) matches a known
@@ -2129,6 +2199,8 @@ function App() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
+  // Attachments staged for the next outgoing message. Cleared on send/cancel.
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
 
   // Alliance sidebar state. We surface every alliance the active hub belongs
   // to plus the channels each member shares with it. Selecting a remote one
@@ -3360,13 +3432,17 @@ function App() {
   }
 
   async function handleSend() {
-    if (!inputText.trim() || !selectedChannel) return;
+    if (!selectedChannel) return;
     const content = inputText;
+    const attachments = pendingAttachments;
+    if (!content.trim() && attachments.length === 0) return;
     setInputText("");
+    setPendingAttachments([]);
     try {
       const msg = await invoke<Message>("send_message", {
         channelId: selectedChannel.id,
         content,
+        attachments,
       });
       // Dedup: the WebSocket may have already added this message
       setMessages((prev) => {
@@ -3375,7 +3451,52 @@ function App() {
       });
     } catch (e) {
       setError(String(e));
+      // Restore the user's draft on failure.
+      setInputText(content);
+      setPendingAttachments(attachments);
     }
+  }
+
+  /** Read a File into a base64 string (no data: prefix). */
+  function readFileAsB64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const s = reader.result;
+        if (typeof s !== "string") return reject(new Error("read failed"));
+        // FileReader returns a data: URL; strip the "data:<mime>;base64," prefix.
+        const idx = s.indexOf(",");
+        resolve(idx >= 0 ? s.slice(idx + 1) : s);
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function attachFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const next: Attachment[] = [...pendingAttachments];
+    let totalBytes = next.reduce((n, a) => n + a.data_b64.length, 0);
+    for (const f of Array.from(files)) {
+      try {
+        const b64 = await readFileAsB64(f);
+        if (totalBytes + b64.length > MAX_ATTACHMENT_BYTES) {
+          setError(
+            `Attachments would exceed 3MB cap (already at ${(totalBytes / 1_000_000).toFixed(1)}MB)`
+          );
+          break;
+        }
+        totalBytes += b64.length;
+        next.push({
+          name: f.name,
+          mime: f.type || "application/octet-stream",
+          data_b64: b64,
+        });
+      } catch (e) {
+        setError(String(e));
+      }
+    }
+    setPendingAttachments(next);
   }
 
   // Handle Enter key in input
@@ -4527,6 +4648,7 @@ function App() {
                         ) : (
                           <>
                             <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
+                        {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} />}
                             {m.edited_at && (
                               <span className="message-edited-tag">
                                 (edited)
@@ -4559,7 +4681,41 @@ function App() {
                   })}
                   <div ref={messagesEndRef} />
                 </div>
-                <div className="input-area">
+                {pendingAttachments.length > 0 && (
+                  <PendingAttachments
+                    items={pendingAttachments}
+                    onRemove={(i) =>
+                      setPendingAttachments(
+                        pendingAttachments.filter((_, idx) => idx !== i)
+                      )
+                    }
+                  />
+                )}
+                <div
+                  className="input-area"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "copy";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files.length > 0) {
+                      attachFiles(e.dataTransfer.files);
+                    }
+                  }}
+                >
+                  <label className="btn-attach" title="Attach file">
+                    📎
+                    <input
+                      type="file"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        attachFiles(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
                   <input
                     type="text"
                     value={inputText}
@@ -4590,6 +4746,7 @@ function App() {
                         <Avatar src={null} name={senderLabel} size={28} />
                         <span className="message-sender">{senderLabel}</span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
+                        {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} />}
                         <span className="message-time">
                           {formatRelative(m.created_at)}
                         </span>

@@ -418,7 +418,7 @@ pub async fn get_alliance_channel_messages(
     if is_local.is_some() {
         let rows = sqlx::query_as::<_, LocalMessageRow>(
             "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name,
-                    m.content, m.created_at, m.edited_at
+                    m.content, m.attachments, m.created_at, m.edited_at
              FROM messages m LEFT JOIN users u ON m.sender = u.public_key
              WHERE m.channel_id = ?
              ORDER BY m.created_at DESC, m.rowid DESC LIMIT 50",
@@ -438,6 +438,12 @@ pub async fn get_alliance_channel_messages(
                     content: r.content,
                     created_at: r.created_at,
                     edited_at: r.edited_at,
+                    attachments: r
+                        .attachments
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .and_then(|s| serde_json::from_str(s).ok())
+                        .unwrap_or_default(),
                 })
                 .collect(),
         ));
@@ -813,6 +819,7 @@ struct LocalMessageRow {
     sender: String,
     sender_name: Option<String>,
     content: String,
+    attachments: Option<String>,
     created_at: i64,
     edited_at: Option<i64>,
 }

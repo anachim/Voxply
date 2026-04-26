@@ -42,9 +42,27 @@ where
     serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
+/// One inline attachment carried with a message. We embed bytes directly
+/// (base64) rather than introducing a separate storage subsystem; the per-
+/// message size cap below keeps this from getting out of hand.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Attachment {
+    pub name: String,
+    pub mime: String,
+    /// Base64-encoded file bytes (no data: URI prefix).
+    pub data_b64: String,
+}
+
+/// Hard cap per message, summed across all attachments. 3 MB of base64
+/// is roughly 2.25 MB of binary -- enough for screenshots, small images,
+/// short clips, but bounded so the DB and WS frames don't get crushed.
+pub const MAX_ATTACHMENTS_BYTES: usize = 3 * 1024 * 1024;
+
 #[derive(Serialize, Deserialize)]
 pub struct SendMessageRequest {
     pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -57,6 +75,8 @@ pub struct MessageResponse {
     pub created_at: i64,
     #[serde(default)]
     pub edited_at: Option<i64>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -65,6 +65,13 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Attachments JSON column: a serialized Vec<Attachment>. NULL/empty for
+    // legacy rows. We store inline base64 here rather than a side table since
+    // the size cap (~3 MB) keeps this manageable.
+    let _ = sqlx::query("ALTER TABLE messages ADD COLUMN attachments TEXT")
+        .execute(pool)
+        .await;
+
     // Additive migration for older DBs
     let _ = sqlx::query("ALTER TABLE messages ADD COLUMN edited_at INTEGER")
         .execute(pool)

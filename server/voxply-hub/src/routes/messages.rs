@@ -8,7 +8,8 @@ use uuid::Uuid;
 use crate::auth::middleware::AuthUser;
 use crate::permissions;
 use crate::routes::chat_models::{
-    ChatEvent, EditMessageRequest, MessageResponse, PaginationParams, SendMessageRequest,
+    Attachment, ChatEvent, EditMessageRequest, MessageResponse, PaginationParams,
+    SendMessageRequest, MAX_ATTACHMENTS_BYTES,
 };
 use crate::state::AppState;
 
@@ -40,16 +41,39 @@ pub async fn send_message(
         return Err((StatusCode::NOT_FOUND, "Channel not found".to_string()));
     }
 
+    // Cap attachments size. The base64 payload is what counts toward the
+    // limit since that's what travels over WS and lands in the DB.
+    let attach_total: usize = req.attachments.iter().map(|a| a.data_b64.len()).sum();
+    if attach_total > MAX_ATTACHMENTS_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Attachments exceed {}MB cap",
+                MAX_ATTACHMENTS_BYTES / 1024 / 1024
+            ),
+        ));
+    }
+
     let id = Uuid::new_v4().to_string();
     let now = crate::auth::handlers::unix_timestamp();
 
+    let attachments_json = if req.attachments.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&req.attachments)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Encode: {e}")))?,
+        )
+    };
+
     sqlx::query(
-        "INSERT INTO messages (id, channel_id, sender, content, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, channel_id, sender, content, attachments, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&channel_id)
     .bind(&user.public_key)
     .bind(&req.content)
+    .bind(&attachments_json)
     .bind(&now)
     .execute(&state.db)
     .await
@@ -71,6 +95,7 @@ pub async fn send_message(
         content: req.content,
         created_at: now,
         edited_at: None,
+        attachments: req.attachments,
     };
 
     let _ = state.chat_tx.send(ChatEvent::New {
@@ -162,13 +187,20 @@ pub async fn delete_message(
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn parse_attachments(json: Option<String>) -> Vec<Attachment> {
+    json.as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
+}
+
 async fn load_message(
     state: &AppState,
     message_id: &str,
 ) -> Result<MessageResponse, (StatusCode, String)> {
     let row = sqlx::query_as::<_, MessageRow>(
         "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name,
-                m.content, m.created_at, m.edited_at
+                m.content, m.attachments, m.created_at, m.edited_at
          FROM messages m LEFT JOIN users u ON m.sender = u.public_key
          WHERE m.id = ?",
     )
@@ -185,6 +217,7 @@ async fn load_message(
         content: row.content,
         created_at: row.created_at,
         edited_at: row.edited_at,
+        attachments: parse_attachments(row.attachments),
     })
 }
 
@@ -198,7 +231,7 @@ pub async fn get_messages(
 
     let rows = if let Some(before_id) = &params.before {
         sqlx::query_as::<_, MessageRow>(
-            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.created_at, m.edited_at
+            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
              FROM messages m LEFT JOIN users u ON m.sender = u.public_key
              WHERE m.channel_id = ? AND m.rowid < (SELECT rowid FROM messages WHERE id = ?)
              ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
@@ -210,7 +243,7 @@ pub async fn get_messages(
         .await
     } else {
         sqlx::query_as::<_, MessageRow>(
-            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.created_at, m.edited_at
+            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
              FROM messages m LEFT JOIN users u ON m.sender = u.public_key
              WHERE m.channel_id = ?
              ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
@@ -232,6 +265,7 @@ pub async fn get_messages(
             content: r.content,
             created_at: r.created_at,
             edited_at: r.edited_at,
+            attachments: parse_attachments(r.attachments),
         })
         .collect();
 
@@ -245,6 +279,7 @@ struct MessageRow {
     sender: String,
     sender_name: Option<String>,
     content: String,
+    attachments: Option<String>,
     created_at: i64,
     edited_at: Option<i64>,
 }

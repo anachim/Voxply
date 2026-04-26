@@ -223,6 +223,13 @@ struct DmMessageInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct AttachmentInfo {
+    name: String,
+    mime: String,
+    data_b64: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -232,6 +239,8 @@ struct MessageInfo {
     created_at: i64,
     #[serde(default)]
     edited_at: Option<i64>,
+    #[serde(default)]
+    attachments: Vec<AttachmentInfo>,
 }
 
 #[derive(Deserialize)]
@@ -1158,20 +1167,26 @@ async fn get_messages(
 async fn send_message(
     channel_id: String,
     content: String,
+    attachments: Option<Vec<AttachmentInfo>>,
     state: State<'_, AppState>,
 ) -> Result<MessageInfo, String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
-    client
+    let body = serde_json::json!({
+        "content": content,
+        "attachments": attachments.unwrap_or_default(),
+    });
+    let resp = client
         .post(format!("{hub_url}/channels/{channel_id}/messages"))
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "content": content }))
+        .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Failed: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid: {e}"))
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
 }
 
 #[tauri::command]
@@ -1746,6 +1761,8 @@ struct ProxiedMessage {
     content: String,
     created_at: i64,
     edited_at: Option<i64>,
+    #[serde(default)]
+    attachments: Vec<AttachmentInfo>,
 }
 
 #[tauri::command]

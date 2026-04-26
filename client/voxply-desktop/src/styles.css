@@ -1879,6 +1879,112 @@ select:focus {
   color: var(--text);
 }
 
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  margin-left: 36px; /* align with sender label after avatar */
+}
+
+.message-attachment-img {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: var(--r-md);
+  display: block;
+  cursor: zoom-in;
+}
+
+.message-attachment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text);
+  text-decoration: none;
+  font-size: var(--text-sm);
+}
+
+.message-attachment-file:hover {
+  border-color: var(--accent);
+}
+
+.pending-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.pending-attachment {
+  position: relative;
+  padding: var(--space-1);
+}
+
+.pending-attachment-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+}
+
+.pending-attachment-file {
+  display: inline-block;
+  padding: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--text-sm);
+}
+
+.pending-attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-md);
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pending-attachment-remove:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.btn-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: var(--text-md);
+  color: var(--text-muted);
+}
+
+.btn-attach:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .mention {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);

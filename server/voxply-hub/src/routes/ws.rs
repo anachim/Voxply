@@ -62,6 +62,16 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                 match result {
                     Ok(event) => {
                         if subscribe_all || subscribed.contains(event.channel_id()) {
+                            // Don't echo typing events back to the originator -- they
+                            // already know they're typing.
+                            if let crate::routes::chat_models::ChatEvent::Typing {
+                                public_key: sender_key, ..
+                            } = &event
+                            {
+                                if sender_key == &public_key {
+                                    continue;
+                                }
+                            }
                             let ws_msg = match event {
                                 crate::routes::chat_models::ChatEvent::New { channel_id, message } => {
                                     WsServerMessage::ChatMessage { channel_id, message }
@@ -74,6 +84,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                                 }
                                 crate::routes::chat_models::ChatEvent::ReactionsUpdated { channel_id, message_id, reactions } => {
                                     WsServerMessage::ReactionsUpdated { channel_id, message_id, reactions }
+                                }
+                                crate::routes::chat_models::ChatEvent::Typing { channel_id, public_key, display_name, typing } => {
+                                    WsServerMessage::Typing { channel_id, public_key, display_name, typing }
                                 }
                             };
                             let json = serde_json::to_string(&ws_msg).unwrap();
@@ -221,6 +234,26 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                                         speaking,
                                     },
                                 ));
+                            }
+                            Ok(WsClientMessage::Typing { channel_id, typing }) => {
+                                // Look up display name once -- the broadcast can carry
+                                // it so receivers don't need an extra users map lookup.
+                                let display_name: Option<String> = sqlx::query_scalar(
+                                    "SELECT display_name FROM users WHERE public_key = ?",
+                                )
+                                .bind(&public_key)
+                                .fetch_optional(&state.db)
+                                .await
+                                .ok()
+                                .flatten();
+                                let _ = state.chat_tx.send(
+                                    crate::routes::chat_models::ChatEvent::Typing {
+                                        channel_id,
+                                        public_key: public_key.clone(),
+                                        display_name,
+                                        typing,
+                                    },
+                                );
                             }
                             Err(_) => {}
                         }

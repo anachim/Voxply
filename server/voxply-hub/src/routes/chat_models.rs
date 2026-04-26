@@ -131,6 +131,15 @@ pub enum ChatEvent {
         message_id: String,
         reactions: Vec<ReactionSummary>,
     },
+    /// Ephemeral typing indicator. We piggyback on the chat broadcast
+    /// channel since the WS dispatcher already has subscription filtering;
+    /// the dispatcher skips echoing this back to the sender.
+    Typing {
+        channel_id: String,
+        public_key: String,
+        display_name: Option<String>,
+        typing: bool,
+    },
 }
 
 impl ChatEvent {
@@ -139,7 +148,8 @@ impl ChatEvent {
             ChatEvent::New { channel_id, .. }
             | ChatEvent::Edited { channel_id, .. }
             | ChatEvent::Deleted { channel_id, .. }
-            | ChatEvent::ReactionsUpdated { channel_id, .. } => channel_id,
+            | ChatEvent::ReactionsUpdated { channel_id, .. }
+            | ChatEvent::Typing { channel_id, .. } => channel_id,
         }
     }
 }
@@ -173,6 +183,8 @@ pub enum WsClientMessage {
     VoiceLeave { channel_id: String },
     #[serde(rename = "voice_speaking")]
     VoiceSpeaking { channel_id: String, speaking: bool },
+    #[serde(rename = "typing")]
+    Typing { channel_id: String, typing: bool },
 }
 
 #[derive(Serialize, Clone)]
@@ -198,6 +210,13 @@ pub enum WsServerMessage {
         channel_id: String,
         message_id: String,
         reactions: Vec<ReactionSummary>,
+    },
+    #[serde(rename = "typing")]
+    Typing {
+        channel_id: String,
+        public_key: String,
+        display_name: Option<String>,
+        typing: bool,
     },
     #[serde(rename = "voice_joined")]
     VoiceJoined {

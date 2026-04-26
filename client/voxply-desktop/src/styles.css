@@ -2135,6 +2135,16 @@ select:focus {
   text-overflow: ellipsis;
 }
 
+.typing-indicator {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-style: italic;
+  min-height: 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
 .reply-banner {
   display: flex;
   align-items: center;

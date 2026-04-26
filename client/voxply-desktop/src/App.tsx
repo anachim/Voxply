@@ -1227,6 +1227,18 @@ function InvitesSection({
   );
 }
 
+function TypingIndicator({ typers }: { typers: { name: string }[] }) {
+  if (typers.length === 0) return null;
+  let label: string;
+  if (typers.length === 1) label = `${typers[0].name} is typing…`;
+  else if (typers.length === 2)
+    label = `${typers[0].name} and ${typers[1].name} are typing…`;
+  else if (typers.length === 3)
+    label = `${typers[0].name}, ${typers[1].name}, and ${typers[2].name} are typing…`;
+  else label = "Several people are typing…";
+  return <div className="typing-indicator">{label}</div>;
+}
+
 function MessageReactions({
   reactions,
   onToggle,
@@ -2473,6 +2485,51 @@ function App() {
       .then((s) => setUnreadByChannel(s ?? {}))
       .catch(() => {});
   }, []);
+
+  // Sweep typing entries older than 5s every second. Saves us from showing
+  // a stale "X is typing..." if their typing:false event got lost.
+  useEffect(() => {
+    const handle = setInterval(() => {
+      setTypingByKey((prev) => {
+        const cutoff = Date.now() - 5000;
+        let changed = false;
+        const next: typeof prev = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (v.ts >= cutoff) next[k] = v;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => clearInterval(handle);
+  }, []);
+
+  /**
+   * Notify the hub the user is typing. We rate-limit to one "typing:true"
+   * every 3s and a single trailing "typing:false" 4s after the last
+   * keystroke -- enough cadence to keep the indicator alive but cheap on
+   * the wire.
+   */
+  function pingTyping() {
+    if (!selectedChannel) return;
+    const now = Date.now();
+    if (now - lastTypingSentRef.current > 3000) {
+      lastTypingSentRef.current = now;
+      invoke("set_typing", { channelId: selectedChannel.id, typing: true }).catch(
+        () => {}
+      );
+    }
+    if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    typingDebounceRef.current = setTimeout(() => {
+      if (selectedChannel) {
+        invoke("set_typing", {
+          channelId: selectedChannel.id,
+          typing: false,
+        }).catch(() => {});
+      }
+      lastTypingSentRef.current = 0;
+    }, 4000);
+  }
   const [pingByHub, setPingByHub] = useState<Record<string, number | null>>({});
 
   const [publicKey, setPublicKey] = useState<string | null>(null);
@@ -2501,6 +2558,15 @@ function App() {
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   // Message we're currently replying to. Null means a top-level message.
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+
+  // Who's currently typing in the active channel: pubkey -> {name, timestamp}.
+  // Entries auto-expire after 5s of no updates so a stuck "typing…" can't
+  // hang around if the typer disconnects without sending typing:false.
+  const [typingByKey, setTypingByKey] = useState<
+    Record<string, { name: string; ts: number }>
+  >({});
+  const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentRef = useRef<number>(0);
 
   // Per-channel search. When a query is active, the message list is
   // replaced by search results (newest-first) until the user clears it.
@@ -2831,6 +2897,35 @@ function App() {
             );
           }
         )
+      );
+
+      unlistens.push(
+        await listen<{
+          hub_id: string;
+          channel_id: string;
+          public_key: string;
+          display_name: string | null;
+          typing: boolean;
+        }>("chat-typing", (event) => {
+          if (event.payload.hub_id !== activeHubIdRef.current) return;
+          if (event.payload.channel_id !== selectedChannelIdRef.current) return;
+          if (event.payload.public_key === publicKeyRef.current) return;
+          const name =
+            event.payload.display_name ||
+            formatPubkey(event.payload.public_key);
+          if (event.payload.typing) {
+            setTypingByKey((prev) => ({
+              ...prev,
+              [event.payload.public_key]: { name, ts: Date.now() },
+            }));
+          } else {
+            setTypingByKey((prev) => {
+              if (!prev[event.payload.public_key]) return prev;
+              const { [event.payload.public_key]: _, ...rest } = prev;
+              return rest;
+            });
+          }
+        })
       );
 
       unlistens.push(
@@ -3685,6 +3780,7 @@ function App() {
 
     setSelectedChannel(channel);
     setMessages([]);
+    setTypingByKey({});
     if (activeHubId) clearUnread(activeHubId, channel.id);
     try {
       const msgs = await invoke<Message[]>("get_messages", {
@@ -5196,6 +5292,7 @@ function App() {
                   })}
                   <div ref={messagesEndRef} />
                 </div>
+                <TypingIndicator typers={Object.values(typingByKey)} />
                 {replyTarget && (
                   <div className="reply-banner">
                     <span className="muted">Replying to </span>
@@ -5255,7 +5352,10 @@ function App() {
                   <input
                     type="text"
                     value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
+                    onChange={(e) => {
+                      setInputText(e.target.value);
+                      if (e.target.value.length > 0) pingTyping();
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === "Escape" && replyTarget) {
                         e.preventDefault();

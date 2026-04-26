@@ -37,6 +37,7 @@ enum WsCommand {
     VoiceJoin { channel_id: String, udp_port: u16 },
     VoiceLeave { channel_id: String },
     VoiceSpeaking { channel_id: String, speaking: bool },
+    Typing { channel_id: String, typing: bool },
 }
 
 struct VoiceSession {
@@ -285,6 +286,13 @@ enum WsServerMessage {
         channel_id: String,
         message_id: String,
         reactions: Vec<ReactionInfo>,
+    },
+    #[serde(rename = "typing")]
+    Typing {
+        channel_id: String,
+        public_key: String,
+        display_name: Option<String>,
+        typing: bool,
     },
     #[serde(rename = "voice_joined")]
     VoiceJoined {
@@ -845,6 +853,15 @@ async fn spawn_ws_task(
                                             "reactions": reactions,
                                         }));
                                     }
+                                    WsServerMessage::Typing { channel_id, public_key, display_name, typing } => {
+                                        let _ = app.emit("chat-typing", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "channel_id": channel_id,
+                                            "public_key": public_key,
+                                            "display_name": display_name,
+                                            "typing": typing,
+                                        }));
+                                    }
                                     WsServerMessage::VoiceJoined { channel_id, hub_udp_port, participants } => {
                                         let _ = app.emit("voice-joined", serde_json::json!({
                                             "hub_id": hub_id_for_task,
@@ -926,6 +943,13 @@ async fn spawn_ws_task(
                                 "type": "voice_speaking",
                                 "channel_id": channel_id,
                                 "speaking": speaking,
+                            })
+                        }
+                        WsCommand::Typing { channel_id, typing } => {
+                            serde_json::json!({
+                                "type": "typing",
+                                "channel_id": channel_id,
+                                "typing": typing,
                             })
                         }
                     };
@@ -1396,6 +1420,19 @@ fn unsubscribe_channel(channel_id: String, state: State<'_, AppState>) -> Result
     let tx = active_ws_tx(&state)?;
     tx.send(WsCommand::Unsubscribe(channel_id))
         .map_err(|_| "WS closed".to_string())
+}
+
+#[tauri::command]
+fn set_typing(
+    channel_id: String,
+    typing: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = active_ws_tx(&state)?;
+    // Best-effort: if the WS is closed, the user just doesn't broadcast a
+    // typing event -- not worth surfacing to the UI.
+    let _ = tx.send(WsCommand::Typing { channel_id, typing });
+    Ok(())
 }
 
 #[tauri::command]
@@ -2968,6 +3005,7 @@ pub fn run() {
             delete_message,
             subscribe_channel,
             unsubscribe_channel,
+            set_typing,
             voice_join,
             voice_leave,
             list_audio_devices,

@@ -2629,6 +2629,11 @@ function App() {
   // have zero participants.
   const [voicePops, setVoicePops] = useState<Record<string, number>>({});
 
+  // WS connection status per hub. Missing key means connected (default
+  // optimistic so the very first render doesn't flash a banner).
+  const [hubConnected, setHubConnected] = useState<Record<string, boolean>>({});
+  const [reconnectingHubs, setReconnectingHubs] = useState<Record<string, boolean>>({});
+
   function toggleChannelPin(hubId: string, channelId: string) {
     setPinnedChannels((prev) => {
       const hubMap = { ...(prev[hubId] ?? {}) };
@@ -2892,6 +2897,23 @@ function App() {
     y: number;
     user: User;
   } | null>(null);
+
+  async function handleReconnect() {
+    if (!activeHubId) return;
+    setReconnectingHubs((prev) => ({ ...prev, [activeHubId]: true }));
+    try {
+      await invoke("reconnect_hub", { hubId: activeHubId });
+      // The hub-ws-status:true event will flip hubConnected and clear
+      // the banner; if reconnect succeeded but the event hasn't arrived
+      // yet, the banner still shows briefly -- that's fine.
+    } catch (e) {
+      setError(String(e));
+      setReconnectingHubs((prev) => {
+        const { [activeHubId]: _, ...rest } = prev;
+        return rest;
+      });
+    }
+  }
 
   async function handleUserDm(u: User) {
     setUserContextMenu(null);
@@ -3342,6 +3364,36 @@ function App() {
             setMessages((prev) =>
               prev.filter((m) => m.id !== event.payload.message_id)
             );
+          }
+        )
+      );
+
+      unlistens.push(
+        await listen<{ hub_id: string; connected: boolean }>(
+          "hub-ws-status",
+          (event) => {
+            const { hub_id, connected } = event.payload;
+            setHubConnected((prev) => {
+              const was = prev[hub_id];
+              const next = { ...prev, [hub_id]: connected };
+              // Surface a transient toast when this hub flips back to
+              // connected so the user knows the banner is gone for a reason.
+              if (
+                connected &&
+                was === false &&
+                hub_id === activeHubIdRef.current
+              ) {
+                setToast("Reconnected");
+              }
+              return next;
+            });
+            if (connected) {
+              setReconnectingHubs((prev) => {
+                if (!prev[hub_id]) return prev;
+                const { [hub_id]: _, ...rest } = prev;
+                return rest;
+              });
+            }
           }
         )
       );
@@ -5580,6 +5632,22 @@ function App() {
           </div>
 
           <div className="content">
+            {activeHubId && hubConnected[activeHubId] === false && (
+              <div className="reconnect-banner">
+                <span>
+                  {reconnectingHubs[activeHubId]
+                    ? "Reconnecting…"
+                    : "Disconnected from hub."}
+                </span>
+                <button
+                  className="btn-small"
+                  onClick={handleReconnect}
+                  disabled={!!reconnectingHubs[activeHubId]}
+                >
+                  {reconnectingHubs[activeHubId] ? "Working…" : "Reconnect"}
+                </button>
+              </div>
+            )}
             {view === "game" && selectedGame ? (
               <>
                 <div className="channel-header">

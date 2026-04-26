@@ -883,6 +883,14 @@ async fn spawn_ws_task(
     // for hubs the user isn't currently viewing.
     let _ = cmd_tx.send(WsCommand::SubscribeAll);
 
+    // Tell the frontend this hub's WS is live now.
+    let _ = app.emit(
+        "hub-ws-status",
+        serde_json::json!({ "hub_id": hub_id_for_task, "connected": true }),
+    );
+
+    let status_app = app.clone();
+    let status_hub_id = hub_id_for_task.clone();
     let task = tokio::spawn(async move {
         loop {
             tokio::select! {
@@ -1026,6 +1034,13 @@ async fn spawn_ws_task(
                 }
             }
         }
+        // Loop exited -- WS is closed. Tell the frontend so it can show
+        // a "Reconnecting…" banner. The user can trigger reconnect_hub
+        // to try again.
+        let _ = status_app.emit(
+            "hub-ws-status",
+            serde_json::json!({ "hub_id": status_hub_id, "connected": false }),
+        );
     });
 
     Ok((cmd_tx, task))
@@ -1505,6 +1520,18 @@ fn unsubscribe_channel(channel_id: String, state: State<'_, AppState>) -> Result
     let tx = active_ws_tx(&state)?;
     tx.send(WsCommand::Unsubscribe(channel_id))
         .map_err(|_| "WS closed".to_string())
+}
+
+/// User-triggered re-auth + WS restart for a specific hub. Useful when the
+/// connection silently dropped and the "Reconnecting…" banner is showing.
+#[tauri::command]
+async fn reconnect_hub(
+    hub_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    reauth_session(&state, &app, &hub_id).await?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3137,6 +3164,7 @@ pub fn run() {
             subscribe_channel,
             unsubscribe_channel,
             set_typing,
+            reconnect_hub,
             voice_join,
             voice_leave,
             voice_set_muted,

@@ -1573,41 +1573,6 @@ select:focus {
   background: var(--accent-hover);
 }
 
-/* ============================================================
-   VIEW TABS
-   ============================================================ */
-.view-tabs {
-  display: flex;
-  margin-bottom: var(--space-3);
-  background: var(--bg-sunken);
-  border-radius: var(--r-md);
-  padding: 2px;
-}
-
-.view-tab {
-  flex: 1;
-  padding: var(--space-2) var(--space-3);
-  border: none;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.view-tab.active {
-  background: var(--accent);
-  color: var(--accent-text);
-}
-
-.view-tab:hover:not(.active) {
-  color: var(--text);
-}
-
 .badge {
   background: var(--danger);
   color: white;

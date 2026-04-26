@@ -303,13 +303,6 @@ pub async fn get_user_roles(
     fetch_user_roles_response(&state.db, &public_key).await.map(Json)
 }
 
-pub async fn my_roles(
-    State(state): State<Arc<AppState>>,
-    user: AuthUser,
-) -> Result<Json<Vec<RoleResponse>>, (StatusCode, String)> {
-    fetch_user_roles_response(&state.db, &user.public_key).await.map(Json)
-}
-
 pub async fn list_role_members(
     State(state): State<Arc<AppState>>,
     user: AuthUser,

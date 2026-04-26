@@ -2724,19 +2724,6 @@ async fn send_dm(conversation_id: String, content: String, state: State<'_, AppS
     Ok(())
 }
 
-#[tauri::command]
-fn disconnect_all(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(voice) = state.voice.lock().unwrap().take() {
-        let _ = voice.stop_tx.send(());
-    }
-    let mut hubs = state.hubs.lock().unwrap();
-    for (_, session) in hubs.drain() {
-        session.ws_task.abort();
-    }
-    *state.active_hub.lock().unwrap() = None;
-    Ok(())
-}
-
 /// Update the tray tooltip + title to reflect current unread count. Called
 /// from the frontend whenever the aggregated unread number changes.
 #[tauri::command]
@@ -2893,7 +2880,6 @@ pub fn run() {
             create_conversation,
             get_dm_messages,
             send_dm,
-            disconnect_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

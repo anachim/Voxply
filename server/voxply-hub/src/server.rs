@@ -51,7 +51,6 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .merge(auth_routes)
         .merge(write_routes)
         .route("/me", get(routes::me::me).patch(routes::me::update_me))
-        .route("/me/roles", get(routes::roles::my_roles))
         .route("/channels", get(routes::channels::list_channels))
         .route(
             "/channels/{channel_id}",

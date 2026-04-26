@@ -79,7 +79,7 @@ pub async fn list_friends(
     let rows = sqlx::query_as::<_, FriendRow>(
         "SELECT
             CASE WHEN user_a = ? THEN user_b ELSE user_a END as friend_key,
-            status, created_at
+            created_at
          FROM friends
          WHERE (user_a = ? OR user_b = ?) AND status = 'accepted'",
     )
@@ -117,7 +117,7 @@ pub async fn list_pending_requests(
 ) -> Result<Json<Vec<FriendInfo>>, (StatusCode, String)> {
     // Requests sent TO this user (they can accept)
     let rows = sqlx::query_as::<_, FriendRow>(
-        "SELECT user_a as friend_key, status, created_at
+        "SELECT user_a as friend_key, created_at
          FROM friends
          WHERE user_b = ? AND status = 'pending'",
     )
@@ -162,6 +162,5 @@ pub struct FriendInfo {
 #[derive(sqlx::FromRow)]
 struct FriendRow {
     friend_key: String,
-    status: String,
     created_at: i64,
 }

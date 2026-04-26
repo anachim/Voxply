@@ -293,6 +293,7 @@ interface SettingsPageProps {
   onToggleMicTest: () => void;
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
+  onRecoverIdentity: (phrase: string) => Promise<void>;
 }
 
 /**
@@ -720,6 +721,65 @@ function MicLevelMeter({
   );
 }
 
+function RestoreIdentitySection({
+  onRestore,
+}: {
+  onRestore: (phrase: string) => Promise<void>;
+}) {
+  const [phrase, setPhrase] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const wordCount = phrase.trim().split(/\s+/).filter(Boolean).length;
+  const looksValid = wordCount === 24;
+
+  async function handleRestore() {
+    if (!looksValid) return;
+    const ok = confirm(
+      "Restore identity from this phrase?\n\nYour current keypair will be replaced and every saved hub will be removed. You'll re-add hubs under the restored identity."
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await onRestore(phrase.trim());
+      setPhrase("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="settings-section">
+      <label className="settings-label">Restore from recovery phrase</label>
+      <p className="muted">
+        Paste a 24-word phrase to replace this device's identity. Existing
+        hubs and sessions will be cleared.
+      </p>
+      <textarea
+        className="recovery-input"
+        value={phrase}
+        onChange={(e) => setPhrase(e.target.value)}
+        placeholder="word1 word2 word3 …"
+        rows={3}
+        spellCheck={false}
+        autoCapitalize="none"
+        autoCorrect="off"
+      />
+      <div className="recovery-input-footer">
+        <span className="muted">
+          {wordCount}/24 words
+        </span>
+        <button
+          className="btn-secondary"
+          disabled={!looksValid || busy}
+          onClick={handleRestore}
+        >
+          {busy ? "Restoring…" : "Restore identity"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SettingsPage(props: SettingsPageProps) {
   const tabs: { id: SettingsTab; label: string }[] = [
     { id: "profile", label: "Profile" },
@@ -874,6 +934,7 @@ function SettingsPage(props: SettingsPageProps) {
                 </button>
               )}
             </div>
+            <RestoreIdentitySection onRestore={props.onRecoverIdentity} />
           </section>
         )}
         {props.tab === "about" && (
@@ -2859,6 +2920,25 @@ function App() {
     }
   }
 
+  async function handleRecoverIdentity(phrase: string) {
+    try {
+      const newPubkey = await invoke<string>("recover_identity_from_phrase", {
+        phrase,
+      });
+      // The backend already cleared hub sessions and the saved-hubs file.
+      // Reloading is the cleanest way to reset every piece of in-memory
+      // state (active hub, channels, messages, voice, friends, etc.) without
+      // hand-resetting twenty pieces of React state.
+      setRecoveryPhrase(null);
+      setPublicKey(newPubkey);
+      setToast("Identity restored — reloading…");
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      setError(String(e));
+      throw e;
+    }
+  }
+
   async function loadConversations() {
     try {
       const c = await invoke<Conversation[]>("list_conversations");
@@ -3297,6 +3377,7 @@ function App() {
             onToggleMicTest={toggleMicTest}
             recoveryPhrase={recoveryPhrase}
             onShowRecovery={handleShowRecovery}
+            onRecoverIdentity={handleRecoverIdentity}
           />
         ) : (
         <div className="main-layout">

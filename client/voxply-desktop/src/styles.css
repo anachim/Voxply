@@ -1340,6 +1340,32 @@ select:focus {
   border: 1px solid var(--border);
 }
 
+.recovery-input {
+  width: 100%;
+  background: var(--bg-sunken);
+  color: var(--text);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  resize: vertical;
+}
+
+.recovery-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.recovery-input-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  gap: var(--space-3);
+}
+
 .public-key {
   background: var(--bg-sunken);
   padding: var(--space-2) var(--space-3);

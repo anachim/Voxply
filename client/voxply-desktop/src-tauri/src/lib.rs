@@ -1510,6 +1510,46 @@ fn get_recovery_phrase() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn recover_identity_from_phrase(
+    phrase: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    // Validate + reconstruct first so we can fail without touching anything.
+    let restored = Identity::from_recovery_phrase(phrase.trim())
+        .map_err(|e| format!("Invalid recovery phrase: {e}"))?;
+    let new_pubkey = restored.public_key_hex();
+
+    let identity_path = Identity::default_path().map_err(|e| e.to_string())?;
+
+    // Tear down every live hub session — their tokens belong to the old
+    // identity and won't authenticate anymore. We drain the map first, then
+    // abort outside the lock so a slow shutdown doesn't hold it.
+    let drained: Vec<_> = state
+        .hubs
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, s)| s.ws_task)
+        .collect();
+    for task in drained {
+        task.abort();
+    }
+    *state.active_hub.lock().unwrap() = None;
+    save_active_hub_id(None);
+
+    // Wipe the persisted hubs list — the user will re-add hubs under the
+    // restored identity. Any hub that knew the old key as a member will
+    // see the new key as a stranger.
+    let _ = save_hubs_list(&[]);
+
+    restored
+        .save(&identity_path)
+        .map_err(|e| format!("Failed to save identity: {e}"))?;
+
+    Ok(new_pubkey)
+}
+
+#[tauri::command]
 fn get_my_public_key() -> Result<String, String> {
     let path = Identity::default_path().map_err(|e| e.to_string())?;
     let (identity, _) = Identity::load_or_create(&path).map_err(|e| e.to_string())?;
@@ -2349,6 +2389,7 @@ pub fn run() {
             get_profile,
             save_profile,
             get_recovery_phrase,
+            recover_identity_from_phrase,
             get_my_public_key,
             get_me,
             get_hub_branding,

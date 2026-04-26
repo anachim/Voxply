@@ -447,6 +447,8 @@ pub async fn get_alliance_channel_messages(
                     // Reactions intentionally empty in the alliance read path
                     // for now -- federated reaction sync is a follow-up.
                     reactions: Vec::new(),
+                    // Reply context not federated yet either.
+                    reply_to: None,
                 })
                 .collect(),
         ));

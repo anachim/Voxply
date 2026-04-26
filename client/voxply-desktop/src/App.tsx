@@ -47,6 +47,13 @@ interface Reaction {
   me: boolean;
 }
 
+interface ReplyContext {
+  message_id: string;
+  sender: string;
+  sender_name: string | null;
+  content_preview: string;
+}
+
 interface Message {
   id: string;
   channel_id: string;
@@ -57,6 +64,7 @@ interface Message {
   edited_at: number | null;
   attachments?: Attachment[];
   reactions?: Reaction[];
+  reply_to?: ReplyContext | null;
 }
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "🔥", "👀", "😢", "🙏"];
@@ -2491,6 +2499,8 @@ function App() {
   const [inputText, setInputText] = useState("");
   // Attachments staged for the next outgoing message. Cleared on send/cancel.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  // Message we're currently replying to. Null means a top-level message.
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
 
   // Per-channel search. When a query is active, the message list is
   // replaced by search results (newest-first) until the user clears it.
@@ -3841,14 +3851,17 @@ function App() {
     if (!selectedChannel) return;
     const content = inputText;
     const attachments = pendingAttachments;
+    const reply = replyTarget;
     if (!content.trim() && attachments.length === 0) return;
     setInputText("");
     setPendingAttachments([]);
+    setReplyTarget(null);
     try {
       const msg = await invoke<Message>("send_message", {
         channelId: selectedChannel.id,
         content,
         attachments,
+        replyTo: reply?.id ?? null,
       });
       // Dedup: the WebSocket may have already added this message
       setMessages((prev) => {
@@ -3860,7 +3873,17 @@ function App() {
       // Restore the user's draft on failure.
       setInputText(content);
       setPendingAttachments(attachments);
+      setReplyTarget(reply);
     }
+  }
+
+  /** Scroll the message with the given id into view and briefly flash it. */
+  function scrollToMessage(id: string) {
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1200);
   }
 
   /** Read a File into a base64 string (no data: prefix). */
@@ -5068,8 +5091,27 @@ function App() {
                           </div>
                         )}
                       <div
+                        id={`msg-${m.id}`}
                         className={`message ${isMentioned ? "message-mentioned" : ""}`}
                       >
+                        {m.reply_to && (
+                          <div
+                            className="message-reply-preview"
+                            onClick={() =>
+                              m.reply_to && scrollToMessage(m.reply_to.message_id)
+                            }
+                            title="Jump to original"
+                          >
+                            <span className="reply-arrow">↪</span>
+                            <span className="reply-author">
+                              {m.reply_to.sender_name ||
+                                formatPubkey(m.reply_to.sender)}
+                            </span>
+                            <span className="reply-snippet">
+                              {m.reply_to.content_preview}
+                            </span>
+                          </div>
+                        )}
                         <Avatar
                           src={senderUser?.avatar}
                           name={senderLabel}
@@ -5114,6 +5156,13 @@ function App() {
                               <ReactionPicker
                                 onPick={(emoji) => toggleReaction(m.id, emoji)}
                               />
+                              <button
+                                className="message-action"
+                                onClick={() => setReplyTarget(m)}
+                                title="Reply"
+                              >
+                                ↩
+                              </button>
                               {isMine && (
                                 <button
                                   className="message-action"
@@ -5147,6 +5196,27 @@ function App() {
                   })}
                   <div ref={messagesEndRef} />
                 </div>
+                {replyTarget && (
+                  <div className="reply-banner">
+                    <span className="muted">Replying to </span>
+                    <strong>
+                      {users.find((u) => u.public_key === replyTarget.sender)
+                        ?.display_name ||
+                        replyTarget.sender_name ||
+                        formatPubkey(replyTarget.sender)}
+                    </strong>
+                    <span className="reply-snippet">
+                      {replyTarget.content.slice(0, 80)}
+                    </span>
+                    <button
+                      className="reply-banner-close"
+                      onClick={() => setReplyTarget(null)}
+                      title="Cancel reply"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 {pendingAttachments.length > 0 && (
                   <PendingAttachments
                     items={pendingAttachments}
@@ -5186,8 +5256,23 @@ function App() {
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={`Message #${selectedChannel.name}`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape" && replyTarget) {
+                        e.preventDefault();
+                        setReplyTarget(null);
+                        return;
+                      }
+                      handleKeyDown(e);
+                    }}
+                    placeholder={
+                      replyTarget
+                        ? `Reply to ${
+                            users.find(
+                              (u) => u.public_key === replyTarget.sender
+                            )?.display_name ?? "user"
+                          }`
+                        : `Message #${selectedChannel.name}`
+                    }
                   />
                   <button onClick={handleSend}>Send</button>
                 </div>

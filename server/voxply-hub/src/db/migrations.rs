@@ -72,6 +72,13 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await;
 
+    // Optional parent message id for threaded replies. We don't FK to
+    // messages.id because the parent might get deleted later -- the reply
+    // simply renders without a preview when the parent is gone.
+    let _ = sqlx::query("ALTER TABLE messages ADD COLUMN reply_to TEXT")
+        .execute(pool)
+        .await;
+
     // One row per (message, emoji, user). PRIMARY KEY collapses re-reacts
     // into idempotent inserts.
     sqlx::query(

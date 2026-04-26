@@ -237,6 +237,14 @@ struct ReactionInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct ReplyContextInfo {
+    message_id: String,
+    sender: String,
+    sender_name: Option<String>,
+    content_preview: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct MessageInfo {
     id: String,
     channel_id: String,
@@ -250,6 +258,8 @@ struct MessageInfo {
     attachments: Vec<AttachmentInfo>,
     #[serde(default)]
     reactions: Vec<ReactionInfo>,
+    #[serde(default)]
+    reply_to: Option<ReplyContextInfo>,
 }
 
 #[derive(Deserialize)]
@@ -1309,6 +1319,7 @@ async fn send_message(
     channel_id: String,
     content: String,
     attachments: Option<Vec<AttachmentInfo>>,
+    reply_to: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<MessageInfo, String> {
     let (hub_url, token) = active_session(&state)?;
@@ -1316,6 +1327,7 @@ async fn send_message(
     let body = serde_json::json!({
         "content": content,
         "attachments": attachments.unwrap_or_default(),
+        "reply_to": reply_to,
     });
     let resp = client
         .post(format!("{hub_url}/channels/{channel_id}/messages"))

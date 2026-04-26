@@ -9,7 +9,8 @@ use crate::auth::middleware::AuthUser;
 use crate::permissions;
 use crate::routes::chat_models::{
     Attachment, ChatEvent, EditMessageRequest, MessageResponse, PaginationParams,
-    ReactionRequest, ReactionSummary, SendMessageRequest, MAX_ATTACHMENTS_BYTES,
+    ReactionRequest, ReactionSummary, ReplyContext, SendMessageRequest,
+    MAX_ATTACHMENTS_BYTES,
 };
 use crate::state::AppState;
 
@@ -66,18 +67,51 @@ pub async fn send_message(
         )
     };
 
+    // If a reply_to is provided, sanity-check the parent exists in this
+    // same channel. Cross-channel replies would surprise everyone.
+    if let Some(parent_id) = &req.reply_to {
+        let parent_channel: Option<String> =
+            sqlx::query_scalar("SELECT channel_id FROM messages WHERE id = ?")
+                .bind(parent_id)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+        match parent_channel {
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    "Parent message not found".to_string(),
+                ))
+            }
+            Some(c) if c != channel_id => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    "Parent message is in a different channel".to_string(),
+                ))
+            }
+            _ => {}
+        }
+    }
+
     sqlx::query(
-        "INSERT INTO messages (id, channel_id, sender, content, attachments, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, channel_id, sender, content, attachments, reply_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&channel_id)
     .bind(&user.public_key)
     .bind(&req.content)
     .bind(&attachments_json)
+    .bind(&req.reply_to)
     .bind(&now)
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    let reply_ctx = if let Some(parent_id) = &req.reply_to {
+        load_reply_context(&state.db, parent_id).await?
+    } else {
+        None
+    };
 
     let sender_name: Option<String> =
         sqlx::query_scalar("SELECT display_name FROM users WHERE public_key = ?")
@@ -97,6 +131,7 @@ pub async fn send_message(
         edited_at: None,
         attachments: req.attachments,
         reactions: Vec::new(),
+        reply_to: reply_ctx,
     };
 
     let _ = state.chat_tx.send(ChatEvent::New {
@@ -201,7 +236,7 @@ async fn load_message(
 ) -> Result<MessageResponse, (StatusCode, String)> {
     let row = sqlx::query_as::<_, MessageRow>(
         "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name,
-                m.content, m.attachments, m.created_at, m.edited_at
+                m.content, m.attachments, m.reply_to, m.created_at, m.edited_at
          FROM messages m LEFT JOIN users u ON m.sender = u.public_key
          WHERE m.id = ?",
     )
@@ -211,6 +246,11 @@ async fn load_message(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
     let reactions = load_reactions_anon(&state.db, &row.id).await?;
+    let reply_to = if let Some(parent_id) = &row.reply_to {
+        load_reply_context(&state.db, parent_id).await?
+    } else {
+        None
+    };
     Ok(MessageResponse {
         id: row.id,
         channel_id: row.channel_id,
@@ -221,6 +261,7 @@ async fn load_message(
         edited_at: row.edited_at,
         attachments: parse_attachments(row.attachments),
         reactions,
+        reply_to,
     })
 }
 
@@ -243,7 +284,7 @@ pub async fn get_messages(
         (Some(q), _) => {
             let pattern = format!("%{q}%");
             sqlx::query_as::<_, MessageRow>(
-                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
+                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.reply_to, m.created_at, m.edited_at
                  FROM messages m LEFT JOIN users u ON m.sender = u.public_key
                  WHERE m.channel_id = ? AND m.content LIKE ? COLLATE NOCASE
                  ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
@@ -256,7 +297,7 @@ pub async fn get_messages(
         }
         (None, Some(before_id)) => {
             sqlx::query_as::<_, MessageRow>(
-                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
+                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.reply_to, m.created_at, m.edited_at
                  FROM messages m LEFT JOIN users u ON m.sender = u.public_key
                  WHERE m.channel_id = ? AND m.rowid < (SELECT rowid FROM messages WHERE id = ?)
                  ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
@@ -269,7 +310,7 @@ pub async fn get_messages(
         }
         (None, None) => {
             sqlx::query_as::<_, MessageRow>(
-                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
+                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.reply_to, m.created_at, m.edited_at
                  FROM messages m LEFT JOIN users u ON m.sender = u.public_key
                  WHERE m.channel_id = ?
                  ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
@@ -285,6 +326,11 @@ pub async fn get_messages(
     let mut messages: Vec<MessageResponse> = Vec::with_capacity(rows.len());
     for r in rows {
         let reactions = load_reactions(&state.db, &r.id, &user.public_key).await?;
+        let reply_to = if let Some(parent_id) = &r.reply_to {
+            load_reply_context(&state.db, parent_id).await?
+        } else {
+            None
+        };
         messages.push(MessageResponse {
             id: r.id,
             channel_id: r.channel_id,
@@ -295,6 +341,7 @@ pub async fn get_messages(
             edited_at: r.edited_at,
             attachments: parse_attachments(r.attachments),
             reactions,
+            reply_to,
         });
     }
 
@@ -309,8 +356,37 @@ struct MessageRow {
     sender_name: Option<String>,
     content: String,
     attachments: Option<String>,
+    reply_to: Option<String>,
     created_at: i64,
     edited_at: Option<i64>,
+}
+
+/// Load a small preview of a parent message for the reply chip. Returns
+/// None if the parent has been deleted.
+async fn load_reply_context(
+    db: &sqlx::SqlitePool,
+    parent_id: &str,
+) -> Result<Option<ReplyContext>, (StatusCode, String)> {
+    let row: Option<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT m.sender, u.display_name as sender_name, m.content
+         FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+         WHERE m.id = ?",
+    )
+    .bind(parent_id)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(row.map(|(sender, sender_name, content)| {
+        // Cap the preview so a paragraph doesn't blow up the WS frame.
+        let preview: String = content.chars().take(140).collect();
+        ReplyContext {
+            message_id: parent_id.to_string(),
+            sender,
+            sender_name,
+            content_preview: preview,
+        }
+    }))
 }
 
 /// Load aggregated reaction counts for one message, with `me` flagged for

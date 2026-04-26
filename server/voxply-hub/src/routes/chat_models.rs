@@ -63,6 +63,20 @@ pub struct SendMessageRequest {
     pub content: String,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Optional parent message id to thread under.
+    #[serde(default)]
+    pub reply_to: Option<String>,
+}
+
+/// Minimal preview of a parent message. We embed it in replies so the
+/// client can render "replying to X" without a second fetch. If the
+/// parent is gone, this is None and the reply renders alone.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ReplyContext {
+    pub message_id: String,
+    pub sender: String,
+    pub sender_name: Option<String>,
+    pub content_preview: String,
 }
 
 /// Aggregated reaction count for one emoji on one message. `me` flags
@@ -89,6 +103,8 @@ pub struct MessageResponse {
     pub attachments: Vec<Attachment>,
     #[serde(default)]
     pub reactions: Vec<ReactionSummary>,
+    #[serde(default)]
+    pub reply_to: Option<ReplyContext>,
 }
 
 #[derive(Deserialize)]

@@ -204,6 +204,7 @@ function SortableChannelItem({
   selected,
   unread,
   muted,
+  voiceCount,
   onClick,
   onContextMenu,
 }: {
@@ -211,6 +212,7 @@ function SortableChannelItem({
   selected: boolean;
   unread: boolean;
   muted: boolean;
+  voiceCount: number;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
@@ -235,6 +237,11 @@ function SortableChannelItem({
       {unread && <span className="channel-unread-dot" />}
       # {channel.name}
       {muted && <span className="channel-muted-icon" title="Muted">🔕</span>}
+      {voiceCount > 0 && (
+        <span className="channel-voice-badge" title={`${voiceCount} in voice`}>
+          🎙️ {voiceCount}
+        </span>
+      )}
     </li>
   );
 }
@@ -2617,6 +2624,11 @@ function App() {
     Record<string, Record<string, boolean>>
   >({});
 
+  // Voice channel populations: channel_id -> count. Polled while a hub is
+  // active so the sidebar can show "🎙️ N" hints. Channels not in the map
+  // have zero participants.
+  const [voicePops, setVoicePops] = useState<Record<string, number>>({});
+
   function toggleChannelPin(hubId: string, channelId: string) {
     setPinnedChannels((prev) => {
       const hubMap = { ...(prev[hubId] ?? {}) };
@@ -2735,6 +2747,32 @@ function App() {
       .then((s) => setPinnedChannels(s ?? {}))
       .catch(() => {});
   }, []);
+
+  // Poll voice channel populations while a hub is active. 5s feels live
+  // enough without spamming the endpoint; the moment someone joins or
+  // leaves voice you'd see the count flip within that window.
+  useEffect(() => {
+    if (!activeHubId) {
+      setVoicePops({});
+      return;
+    }
+    let cancelled = false;
+    async function tick() {
+      try {
+        const pops = await invoke<Record<string, number>>("voice_populations");
+        if (!cancelled) setVoicePops(pops);
+      } catch {
+        // Network blip while typing in chat is fine -- we'll catch up
+        // on the next tick.
+      }
+    }
+    tick();
+    const handle = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  }, [activeHubId]);
 
   // Global Ctrl+K (Cmd+K on macOS) opens the channel palette. We listen at
   // the window level so it works regardless of focus -- the palette itself
@@ -5338,6 +5376,7 @@ function App() {
                                   !!activeHubId &&
                                   !!mutedChannels[activeHubId]?.[c.id]
                                 }
+                                voiceCount={voicePops[c.id] ?? 0}
                                 onClick={() => selectChannel(c)}
                                 onContextMenu={(e) => openContextMenu(e, c)}
                               />
@@ -5358,6 +5397,7 @@ function App() {
                           !!activeHubId &&
                           !!mutedChannels[activeHubId]?.[node.id]
                         }
+                        voiceCount={voicePops[node.id] ?? 0}
                         onClick={() => selectChannel(node)}
                         onContextMenu={(e) => openContextMenu(e, node)}
                       />

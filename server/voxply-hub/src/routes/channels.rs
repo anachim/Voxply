@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -9,6 +10,22 @@ use crate::auth::middleware::AuthUser;
 use crate::permissions;
 use crate::routes::chat_models::{ChannelResponse, CreateChannelRequest, UpdateChannelRequest};
 use crate::state::AppState;
+
+/// Returns a per-channel voice population snapshot. Channels with zero
+/// participants are omitted -- callers can treat "missing key" as zero.
+pub async fn voice_populations(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> Json<HashMap<String, usize>> {
+    let voice = state.voice_channels.read().await;
+    let mut out: HashMap<String, usize> = HashMap::with_capacity(voice.len());
+    for (channel_id, members) in voice.iter() {
+        if !members.is_empty() {
+            out.insert(channel_id.clone(), members.len());
+        }
+    }
+    Json(out)
+}
 
 pub async fn create_channel(
     State(state): State<Arc<AppState>>,

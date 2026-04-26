@@ -113,8 +113,8 @@ async fn load_envelope(
     state: &AppState,
     message_id: &str,
 ) -> Result<Option<FederatedDmRequest>, sqlx::Error> {
-    let Some(msg): Option<(String, String, String, String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT id, conversation_id, sender, content, signature, created_at
+    let Some(msg): Option<(String, String, String, String, Option<String>, Option<String>, i64)> = sqlx::query_as(
+        "SELECT id, conversation_id, sender, content, attachments, signature, created_at
          FROM dm_messages WHERE id = ?",
     )
     .bind(message_id)
@@ -136,6 +136,13 @@ async fn load_envelope(
             .fetch_all(&state.db)
             .await?;
 
+    let attachments = msg
+        .4
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
     Ok(Some(FederatedDmRequest {
         message_id: msg.0,
         conversation_id: msg.1,
@@ -143,8 +150,9 @@ async fn load_envelope(
         sender: msg.2,
         members,
         content: msg.3,
-        signature: msg.4,
-        created_at: msg.5,
+        attachments,
+        signature: msg.5,
+        created_at: msg.6,
     }))
 }
 

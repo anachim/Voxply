@@ -186,6 +186,7 @@ interface DmMessage {
   sender_name: string | null;
   content: string;
   timestamp: number;
+  attachments?: Attachment[];
 }
 
 interface DmMessageFull {
@@ -195,6 +196,7 @@ interface DmMessageFull {
   sender_name: string | null;
   content: string;
   created_at: number;
+  attachments?: Attachment[];
 }
 
 function SortableChannelItem({
@@ -4210,6 +4212,7 @@ function App() {
           sender_name: m.sender_name,
           content: m.content,
           timestamp: m.created_at,
+          attachments: m.attachments,
         })),
       }));
     } catch (e) {
@@ -4236,13 +4239,17 @@ function App() {
   }
 
   async function handleSendDm() {
-    if (!inputText.trim() || !selectedConversation) return;
+    if (!selectedConversation) return;
     const content = inputText;
+    const attachments = pendingAttachments;
+    if (!content.trim() && attachments.length === 0) return;
     setInputText("");
+    setPendingAttachments([]);
     try {
       await invoke("send_dm", {
         conversationId: selectedConversation.id,
         content,
+        attachments,
       });
       // Optimistic local append
       setDmMessages((prev) => {
@@ -4256,6 +4263,7 @@ function App() {
               sender_name: null,
               content,
               timestamp: Math.floor(Date.now() / 1000),
+              attachments,
             },
           ],
         };
@@ -5103,11 +5111,48 @@ function App() {
                             formatPubkey(m.sender)}
                         </span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
+                        {m.attachments && m.attachments.length > 0 && (
+                          <MessageAttachments items={m.attachments} />
+                        )}
                       </div>
                     ))}
                     <div ref={messagesEndRef} />
                   </div>
-                  <div className="input-area">
+                  {pendingAttachments.length > 0 && (
+                    <PendingAttachments
+                      items={pendingAttachments}
+                      onRemove={(i) =>
+                        setPendingAttachments(
+                          pendingAttachments.filter((_, idx) => idx !== i)
+                        )
+                      }
+                    />
+                  )}
+                  <div
+                    className="input-area"
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (e.dataTransfer.files.length > 0) {
+                        attachFiles(e.dataTransfer.files);
+                      }
+                    }}
+                  >
+                    <label className="btn-attach" title="Attach file">
+                      📎
+                      <input
+                        type="file"
+                        multiple
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          attachFiles(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
                     <input
                       type="text"
                       value={inputText}

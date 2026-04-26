@@ -226,6 +226,8 @@ struct DmMessageInfo {
     sender_name: Option<String>,
     content: String,
     created_at: i64,
+    #[serde(default)]
+    attachments: Vec<AttachmentInfo>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2940,13 +2942,21 @@ async fn get_dm_messages(
 }
 
 #[tauri::command]
-async fn send_dm(conversation_id: String, content: String, state: State<'_, AppState>) -> Result<(), String> {
+async fn send_dm(
+    conversation_id: String,
+    content: String,
+    attachments: Option<Vec<AttachmentInfo>>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{hub_url}/conversations/{conversation_id}/messages"))
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "content": content }))
+        .json(&serde_json::json!({
+            "content": content,
+            "attachments": attachments.unwrap_or_default(),
+        }))
         .send()
         .await
         .map_err(|e| format!("Failed: {e}"))?;

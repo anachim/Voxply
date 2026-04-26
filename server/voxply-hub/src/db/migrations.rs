@@ -415,6 +415,11 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Attachments JSON for DMs, mirroring the channel-message pattern.
+    let _ = sqlx::query("ALTER TABLE dm_messages ADD COLUMN attachments TEXT")
+        .execute(pool)
+        .await;
+
     // Per-member delivery hub for cross-hub DM routing.
     // Nullable: NULL means the member lives on this hub.
     let _ = sqlx::query("ALTER TABLE conversation_members ADD COLUMN hub_url TEXT")

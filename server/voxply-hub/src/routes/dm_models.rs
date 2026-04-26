@@ -1,3 +1,4 @@
+use crate::routes::chat_models::Attachment;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -20,6 +21,8 @@ pub struct ConversationResponse {
 #[derive(Deserialize)]
 pub struct SendDmRequest {
     pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -30,6 +33,8 @@ pub struct DmMessageResponse {
     pub sender_name: Option<String>,
     pub content: String,
     pub created_at: i64,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 /// Hub-to-hub DM delivery envelope (POST /federation/dm).
@@ -41,6 +46,8 @@ pub struct FederatedDmRequest {
     pub sender: String,
     pub members: Vec<String>,
     pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
     #[serde(default)]
     pub signature: Option<String>,
     pub created_at: i64,

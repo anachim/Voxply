@@ -6,6 +6,7 @@ use axum::Json;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::routes::chat_models::{Attachment, MAX_ATTACHMENTS_BYTES};
 use crate::routes::dm_models::*;
 use crate::state::{AppState, DmEvent};
 
@@ -133,18 +134,40 @@ pub async fn send_dm(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
         .ok_or((StatusCode::NOT_FOUND, "Conversation not found".to_string()))?;
 
+    // Same per-message attachment cap as channel messages.
+    let attach_total: usize = req.attachments.iter().map(|a| a.data_b64.len()).sum();
+    if attach_total > MAX_ATTACHMENTS_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Attachments exceed {}MB cap",
+                MAX_ATTACHMENTS_BYTES / 1024 / 1024
+            ),
+        ));
+    }
+
+    let attachments_json = if req.attachments.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&req.attachments)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Encode: {e}")))?,
+        )
+    };
+
     let message_id = Uuid::new_v4().to_string();
     let now = crate::auth::handlers::unix_timestamp();
 
     // Persist locally on the sender's hub so both sides eventually have the message.
     sqlx::query(
-        "INSERT INTO dm_messages (id, conversation_id, sender, content, signature, created_at)
-         VALUES (?, ?, ?, ?, NULL, ?)",
+        "INSERT INTO dm_messages (id, conversation_id, sender, content, attachments, signature, created_at)
+         VALUES (?, ?, ?, ?, ?, NULL, ?)",
     )
     .bind(&message_id)
     .bind(&conversation_id)
     .bind(&user.public_key)
     .bind(&req.content)
+    .bind(&attachments_json)
     .bind(now)
     .execute(&state.db)
     .await
@@ -197,6 +220,7 @@ pub async fn send_dm(
             sender: user.public_key.clone(),
             members: member_keys.clone(),
             content: req.content.clone(),
+            attachments: req.attachments.clone(),
             signature: None,
             created_at: now,
         };
@@ -242,6 +266,7 @@ pub async fn send_dm(
             sender_name,
             content: req.content,
             created_at: now,
+            attachments: req.attachments,
         }),
     ))
 }
@@ -266,7 +291,7 @@ pub async fn list_dm_messages(
 
     let rows = sqlx::query_as::<_, DmMessageRow>(
         "SELECT m.id, m.conversation_id, m.sender, u.display_name as sender_name,
-                m.content, m.created_at
+                m.content, m.attachments, m.created_at
          FROM dm_messages m
          LEFT JOIN users u ON u.public_key = m.sender
          WHERE m.conversation_id = ?
@@ -286,9 +311,17 @@ pub async fn list_dm_messages(
                 sender_name: r.sender_name,
                 content: r.content,
                 created_at: r.created_at,
+                attachments: parse_dm_attachments(r.attachments),
             })
             .collect(),
     ))
+}
+
+fn parse_dm_attachments(json: Option<String>) -> Vec<Attachment> {
+    json.as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
 }
 
 /// Hub-to-hub DM delivery endpoint. The caller is an authenticated peer hub.
@@ -343,15 +376,22 @@ pub async fn receive_federated_dm(
     // Make sure the sender has a user row too, since the message FK references it.
     ensure_user_stub(&state.db, &req.sender, req.created_at).await?;
 
+    let attachments_json = if req.attachments.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&req.attachments).ok()
+    };
+
     // Store the message.
     sqlx::query(
-        "INSERT INTO dm_messages (id, conversation_id, sender, content, signature, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO dm_messages (id, conversation_id, sender, content, attachments, signature, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&req.message_id)
     .bind(&req.conversation_id)
     .bind(&req.sender)
     .bind(&req.content)
+    .bind(&attachments_json)
     .bind(&req.signature)
     .bind(req.created_at)
     .execute(&state.db)
@@ -569,5 +609,6 @@ struct DmMessageRow {
     sender: String,
     sender_name: Option<String>,
     content: String,
+    attachments: Option<String>,
     created_at: i64,
 }

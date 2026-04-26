@@ -2218,6 +2218,26 @@ select:focus {
   border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 
+.message-action {
+  font-style: italic;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.message-action .message-sender {
+  font-style: italic;
+}
+
+.action-asterisk {
+  color: var(--text-faint);
+}
+
+.action-text {
+  color: var(--text);
+}
+
 .message.flash {
   animation: msg-flash 1.2s ease-out;
 }

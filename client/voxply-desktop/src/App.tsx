@@ -1816,6 +1816,19 @@ function playMentionPing() {
   }
 }
 
+/**
+ * "/me does the thing" → render in third person. Only triggers when /me is
+ * the very first 4 chars of the message and there's at least one trailing
+ * char of action text. Keeps the expected IRC-style behavior without
+ * accidentally swallowing messages that happen to mention "/me " mid-line.
+ */
+function meAction(content: string): string | null {
+  if (content.startsWith("/me ") && content.length > 4) {
+    return content.slice(4);
+  }
+  return null;
+}
+
 /** Returns true if `content` contains an @mention of `name` (case-insensitive). */
 function mentionsName(content: string, name: string | null): boolean {
   if (!name) return false;
@@ -6051,6 +6064,41 @@ function App() {
                     const isMentioned =
                       m.sender !== publicKey &&
                       mentionsName(m.content, myDisplayName);
+                    const actionText = meAction(m.content);
+                    if (actionText !== null) {
+                      return (
+                        <React.Fragment key={m.id}>
+                          {showSeparator && (
+                            <div className="day-separator">
+                              <span className="day-separator-label">
+                                {formatDayLabel(m.created_at)}
+                              </span>
+                            </div>
+                          )}
+                          <div
+                            id={`msg-${m.id}`}
+                            className={`message message-action ${
+                              isMentioned ? "message-mentioned" : ""
+                            }`}
+                          >
+                            <span className="action-asterisk">*</span>
+                            <span
+                              className="message-sender"
+                              style={{ color: colorForKey(m.sender) }}
+                            >
+                              {senderLabel}
+                            </span>
+                            <span className="action-text">
+                              <MessageContent
+                                content={actionText}
+                                knownNames={knownDisplayNames}
+                                myName={myDisplayName}
+                              />
+                            </span>
+                          </div>
+                        </React.Fragment>
+                      );
+                    }
                     return (
                       <React.Fragment key={m.id}>
                         {showSeparator && (

@@ -105,6 +105,9 @@ impl ChatEvent {
 pub struct PaginationParams {
     pub before: Option<String>,
     pub limit: Option<i64>,
+    /// Optional search query: if present, filter messages by content LIKE
+    /// %q% (case-insensitive on SQLite). Pagination via before still works.
+    pub q: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -1164,6 +1164,29 @@ async fn get_messages(
 }
 
 #[tauri::command]
+async fn search_messages(
+    channel_id: String,
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<MessageInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    // Server returns newest-first; we keep that order for the results panel
+    // since users scanning search hits expect recent matches at the top.
+    let messages: Vec<MessageInfo> = client
+        .get(format!("{hub_url}/channels/{channel_id}/messages"))
+        .query(&[("q", query.as_str())])
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Invalid: {e}"))?;
+    Ok(messages)
+}
+
+#[tauri::command]
 async fn send_message(
     channel_id: String,
     content: String,
@@ -2807,6 +2830,7 @@ pub fn run() {
             reorder_channels,
             list_users,
             get_messages,
+            search_messages,
             send_message,
             edit_message,
             delete_message,

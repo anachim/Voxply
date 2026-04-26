@@ -228,30 +228,54 @@ pub async fn get_messages(
     Query(params): Query<PaginationParams>,
 ) -> Result<Json<Vec<MessageResponse>>, (StatusCode, String)> {
     let limit = params.limit.unwrap_or(50).min(100);
+    let search = params
+        .q
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
 
-    let rows = if let Some(before_id) = &params.before {
-        sqlx::query_as::<_, MessageRow>(
-            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
-             FROM messages m LEFT JOIN users u ON m.sender = u.public_key
-             WHERE m.channel_id = ? AND m.rowid < (SELECT rowid FROM messages WHERE id = ?)
-             ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
-        )
-        .bind(&channel_id)
-        .bind(before_id)
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await
-    } else {
-        sqlx::query_as::<_, MessageRow>(
-            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
-             FROM messages m LEFT JOIN users u ON m.sender = u.public_key
-             WHERE m.channel_id = ?
-             ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
-        )
-        .bind(&channel_id)
-        .bind(limit)
-        .fetch_all(&state.db)
-        .await
+    let rows = match (search, &params.before) {
+        // Search mode: ignores `before` for now — search returns the most
+        // recent N matches across the whole channel. Good enough for v1.
+        (Some(q), _) => {
+            let pattern = format!("%{q}%");
+            sqlx::query_as::<_, MessageRow>(
+                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
+                 FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+                 WHERE m.channel_id = ? AND m.content LIKE ? COLLATE NOCASE
+                 ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
+            )
+            .bind(&channel_id)
+            .bind(pattern)
+            .bind(limit)
+            .fetch_all(&state.db)
+            .await
+        }
+        (None, Some(before_id)) => {
+            sqlx::query_as::<_, MessageRow>(
+                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
+                 FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+                 WHERE m.channel_id = ? AND m.rowid < (SELECT rowid FROM messages WHERE id = ?)
+                 ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
+            )
+            .bind(&channel_id)
+            .bind(before_id)
+            .bind(limit)
+            .fetch_all(&state.db)
+            .await
+        }
+        (None, None) => {
+            sqlx::query_as::<_, MessageRow>(
+                "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name, m.content, m.attachments, m.created_at, m.edited_at
+                 FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+                 WHERE m.channel_id = ?
+                 ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?",
+            )
+            .bind(&channel_id)
+            .bind(limit)
+            .fetch_all(&state.db)
+            .await
+        }
     }
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 

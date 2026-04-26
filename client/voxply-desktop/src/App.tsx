@@ -2243,6 +2243,12 @@ function App() {
   // Attachments staged for the next outgoing message. Cleared on send/cancel.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
 
+  // Per-channel search. When a query is active, the message list is
+  // replaced by search results (newest-first) until the user clears it.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Message[] | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+
   // Alliance sidebar state. We surface every alliance the active hub belongs
   // to plus the channels each member shares with it. Selecting a remote one
   // routes message reads through /alliances/.../messages on our hub.
@@ -3352,6 +3358,42 @@ function App() {
     };
   }, [hubs]);
 
+  // Run search whenever the query or selected channel changes. Empty query
+  // clears the results panel so the regular message list comes back.
+  useEffect(() => {
+    if (!selectedChannel) {
+      setSearchResults(null);
+      return;
+    }
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const r = await invoke<Message[]>("search_messages", {
+          channelId: selectedChannel.id,
+          query: q,
+        });
+        if (!cancelled) setSearchResults(r);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [searchQuery, selectedChannel]);
+
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults(null);
+  }
+
   async function selectChannel(channel: Channel) {
     // Unsubscribe from previous channel's WS updates
     if (selectedChannel && selectedChannel.id !== channel.id) {
@@ -3361,6 +3403,8 @@ function App() {
     // Leaving alliance-channel mode
     setSelectedAllianceChannel(null);
     setAllianceMessages([]);
+    // Reset any in-flight search when switching channels.
+    closeSearch();
 
     setSelectedChannel(channel);
     setMessages([]);
@@ -4605,6 +4649,15 @@ function App() {
                       </p>
                     )}
                   </div>
+                  <button
+                    onClick={() =>
+                      searchOpen ? closeSearch() : setSearchOpen(true)
+                    }
+                    className="btn-icon-header"
+                    title="Search messages"
+                  >
+                    🔍
+                  </button>
                   {voiceChannelId === selectedChannel.id ? (
                     <button onClick={handleVoiceLeave} className="btn-voice leave">
                       🔇 Leave Voice
@@ -4620,6 +4673,29 @@ function App() {
                     </button>
                   )}
                 </div>
+                {searchOpen && (
+                  <div className="search-bar">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") closeSearch();
+                      }}
+                      placeholder={`Search in #${selectedChannel.name}…`}
+                    />
+                    {searchResults !== null && (
+                      <span className="muted search-count">
+                        {searchResults.length} match
+                        {searchResults.length === 1 ? "" : "es"}
+                      </span>
+                    )}
+                    <button onClick={closeSearch} className="btn-small">
+                      Close
+                    </button>
+                  </div>
+                )}
                 {voiceChannelId === selectedChannel.id && voiceParticipants.length > 0 && (
                   <div className="voice-participants">
                     <span className="muted">In voice: </span>
@@ -4637,7 +4713,7 @@ function App() {
                   </div>
                 )}
                 <div className="messages">
-                  {messages.map((m) => {
+                  {(searchResults ?? messages).map((m) => {
                     const isMine = m.sender === publicKey;
                     const canDelete =
                       isMine ||

@@ -85,6 +85,7 @@ interface MeInfo {
   public_key: string;
   display_name: string | null;
   avatar: string | null;
+  approval_status: "approved" | "pending";
   roles: RoleInfo[];
 }
 
@@ -2159,6 +2160,12 @@ function App() {
   const [showHubAdmin, setShowHubAdmin] = useState(false);
   const [hubAdminTab, setHubAdminTab] = useState<HubAdminTab>("overview");
   const [myRoles, setMyRoles] = useState<RoleInfo[]>([]);
+  // "pending" means the active hub requires admin approval and our user
+  // record hasn't been approved yet. We render a landing page in that case
+  // instead of the empty channel list, so the user knows what's going on.
+  const [myApprovalStatus, setMyApprovalStatus] = useState<
+    "approved" | "pending" | "unknown"
+  >("unknown");
   const [adminHubName, setAdminHubName] = useState("");
   const [adminHubDescription, setAdminHubDescription] = useState("");
   const [adminHubIcon, setAdminHubIcon] = useState("");
@@ -2582,6 +2589,33 @@ function App() {
 
   async function loadHubData() {
     try {
+      // Pull /me FIRST. If we're pending approval, the rest of the calls
+      // would just 403 and bury the user under a wall of error toasts.
+      let me: MeInfo | null = null;
+      try {
+        me = await invoke<MeInfo>("get_me");
+        setMyRoles(me.roles);
+        setMyApprovalStatus(me.approval_status);
+      } catch {
+        setMyRoles([]);
+        setMyApprovalStatus("unknown");
+      }
+
+      if (me?.approval_status === "pending") {
+        // Reset everything else; show the landing screen.
+        setChannels([]);
+        setUsers([]);
+        setConversations([]);
+        setSelectedChannel(null);
+        setSelectedConversation(null);
+        setSelectedAllianceChannel(null);
+        setMessages([]);
+        setUserAlliances([]);
+        setAllianceChannels({});
+        setInstalledGames([]);
+        return;
+      }
+
       const ch = await invoke<Channel[]>("list_channels");
       setChannels(ch);
       const u = await invoke<User[]>("list_users");
@@ -2615,13 +2649,6 @@ function App() {
       } catch {
         setUserAlliances([]);
         setAllianceChannels({});
-      }
-      // Refresh our own roles on this hub so admin-gated UI can show/hide
-      try {
-        const me = await invoke<MeInfo>("get_me");
-        setMyRoles(me.roles);
-      } catch {
-        setMyRoles([]);
       }
       try {
         const games = await invoke<InstalledGame[]>("list_installed_games");
@@ -3163,6 +3190,9 @@ function App() {
   useEffect(() => {
     if (activeHubId) {
       loadHubData();
+    } else {
+      // No active hub — clear approval state so the next switch starts fresh.
+      setMyApprovalStatus("unknown");
     }
   }, [activeHubId]);
 
@@ -3982,6 +4012,33 @@ function App() {
               <button className="primary" onClick={() => setShowAddHub(true)}>
                 Add a hub to get started
               </button>
+            </div>
+          ) : myApprovalStatus === "pending" ? (
+            <div className="empty-state pending-approval">
+              <div className="pending-approval-icon">⏳</div>
+              <h1>Waiting for approval</h1>
+              <p>
+                <strong>
+                  {hubs.find((h) => h.hub_id === activeHubId)?.hub_name ?? "This hub"}
+                </strong>{" "}
+                requires admin approval before new members can join in.
+              </p>
+              <p className="muted">
+                You'll get access automatically once an admin approves your
+                request — feel free to leave the app open or come back later.
+              </p>
+              <button
+                onClick={loadHubData}
+                className="primary"
+              >
+                Check again
+              </button>
+              {hubs.length > 1 && (
+                <p className="muted" style={{ marginTop: "var(--space-4)" }}>
+                  Switch to another hub from the sidebar if you'd like to keep
+                  chatting elsewhere in the meantime.
+                </p>
+              )}
             </div>
           ) : (
             <>

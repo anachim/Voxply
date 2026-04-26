@@ -113,7 +113,16 @@ struct MeInfo {
     display_name: Option<String>,
     #[serde(default)]
     avatar: Option<String>,
+    /// Either "approved" or "pending". The hub server defaults missing
+    /// rows to "approved", so for unmoderated hubs this is just always
+    /// "approved".
+    #[serde(default = "default_approval_status")]
+    approval_status: String,
     roles: Vec<RoleInfo>,
+}
+
+fn default_approval_status() -> String {
+    "approved".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone)]

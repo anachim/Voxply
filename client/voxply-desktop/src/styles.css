@@ -264,6 +264,25 @@ select,
   background: var(--accent-hover);
 }
 
+.pending-approval {
+  text-align: center;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.pending-approval-icon {
+  font-size: 48px;
+  line-height: 1;
+}
+
+.pending-approval h1 {
+  color: var(--text);
+}
+
+.pending-approval p {
+  line-height: var(--leading-relaxed);
+}
+
 /* ============================================================
    FULL-PAGE SETTINGS
    ============================================================ */

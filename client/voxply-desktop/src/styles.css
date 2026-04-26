@@ -1997,6 +1997,32 @@ select:focus {
   color: var(--text-muted);
 }
 
+.image-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.image-picker.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.image-picker-button {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  /* The label-as-button pattern hides the actual <input> via display:none. */
+}
+
+.image-picker-hint {
+  font-size: var(--text-sm);
+}
+
 .btn-attach:hover {
   color: var(--accent);
   border-color: var(--accent);

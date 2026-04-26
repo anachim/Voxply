@@ -2486,6 +2486,21 @@ function App() {
       .catch(() => {});
   }, []);
 
+  // Global Ctrl+K (Cmd+K on macOS) opens the channel palette. We listen at
+  // the window level so it works regardless of focus -- the palette itself
+  // handles arrow nav + enter + escape internally.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const meta = e.ctrlKey || e.metaKey;
+      if (meta && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Sweep typing entries older than 5s every second. Saves us from showing
   // a stale "X is typing..." if their typing:false event got lost.
   useEffect(() => {
@@ -2573,6 +2588,9 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Message[] | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Ctrl+K quick-switcher palette.
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Alliance sidebar state. We surface every alliance the active hub belongs
   // to plus the channels each member shares with it. Selecting a remote one
@@ -5746,7 +5764,97 @@ function App() {
             onError={setError}
           />
         )}
+
+        {paletteOpen && (
+          <ChannelPalette
+            channels={channels.filter((c) => !c.is_category)}
+            onClose={() => setPaletteOpen(false)}
+            onSelect={(c) => {
+              setPaletteOpen(false);
+              selectChannel(c);
+            }}
+          />
+        )}
       </>
+    </div>
+  );
+}
+
+function ChannelPalette({
+  channels,
+  onClose,
+  onSelect,
+}: {
+  channels: Channel[];
+  onClose: () => void;
+  onSelect: (c: Channel) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [highlighted, setHighlighted] = useState(0);
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? channels.filter((c) => c.name.toLowerCase().includes(q))
+    : channels.slice(0, 20);
+
+  // Clamp the highlighted index when results shrink so Enter never picks
+  // a stale row.
+  useEffect(() => {
+    if (highlighted >= filtered.length) setHighlighted(0);
+  }, [filtered.length, highlighted]);
+
+  function handleKey(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const c = filtered[highlighted];
+      if (c) onSelect(c);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="palette"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          autoFocus
+          className="palette-input"
+          placeholder="Jump to channel…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKey}
+        />
+        <ul className="palette-list">
+          {filtered.length === 0 ? (
+            <li className="palette-empty">No channels match.</li>
+          ) : (
+            filtered.map((c, i) => (
+              <li
+                key={c.id}
+                className={`palette-item ${i === highlighted ? "active" : ""}`}
+                onMouseEnter={() => setHighlighted(i)}
+                onClick={() => onSelect(c)}
+              >
+                <span className="palette-hash">#</span>
+                <span className="palette-name">{c.name}</span>
+              </li>
+            ))
+          )}
+        </ul>
+        <div className="palette-hint muted">
+          ↑↓ navigate · Enter select · Esc close
+        </div>
+      </div>
     </div>
   );
 }

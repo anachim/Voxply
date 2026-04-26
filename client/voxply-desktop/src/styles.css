@@ -2135,6 +2135,73 @@ select:focus {
   text-overflow: ellipsis;
 }
 
+.palette {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  width: min(480px, 90vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  margin-top: 10vh;
+}
+
+.palette-input {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: var(--space-3) var(--space-4);
+  color: var(--text);
+  font-size: var(--text-md);
+  outline: none;
+}
+
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.palette-item.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.palette-item.active .palette-hash {
+  color: var(--accent-text);
+}
+
+.palette-hash {
+  color: var(--text-muted);
+}
+
+.palette-empty {
+  padding: var(--space-3);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.palette-hint {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
 .typing-indicator {
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-xs);

@@ -1943,6 +1943,13 @@ select:focus {
   color: var(--text);
 }
 
+.message-time {
+  margin-left: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  cursor: help;
+}
+
 .search-bar {
   display: flex;
   align-items: center;

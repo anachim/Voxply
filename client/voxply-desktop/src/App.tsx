@@ -1943,6 +1943,21 @@ function formatDayLabel(unixSec: number): string {
   });
 }
 
+/** Localized full timestamp suitable for a hover tooltip. */
+function formatFullTimestamp(unixSec: number): string {
+  if (!unixSec) return "";
+  const d = new Date(unixSec * 1000);
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year:
+      d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function formatRelative(unixSec: number): string {
   if (!unixSec) return "—";
   const now = Math.floor(Date.now() / 1000);
@@ -5998,6 +6013,12 @@ function App() {
                             m.sender_name ||
                             formatPubkey(m.sender)}
                         </span>
+                        <span
+                          className="message-time"
+                          title={formatFullTimestamp(m.timestamp)}
+                        >
+                          {formatRelative(m.timestamp)}
+                        </span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                         {m.attachments && m.attachments.length > 0 && (
                           <MessageAttachments items={m.attachments} onImageClick={openImage} />
@@ -6285,10 +6306,19 @@ function App() {
                           </span>
                         ) : (
                           <>
+                            <span
+                              className="message-time"
+                              title={formatFullTimestamp(m.created_at)}
+                            >
+                              {formatRelative(m.created_at)}
+                            </span>
                             <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                         {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} onImageClick={openImage} />}
                             {m.edited_at && (
-                              <span className="message-edited-tag">
+                              <span
+                                className="message-edited-tag"
+                                title={`Edited ${formatFullTimestamp(m.edited_at)}`}
+                              >
                                 (edited)
                               </span>
                             )}
@@ -6452,7 +6482,10 @@ function App() {
                         </span>
                         <span className="message-content"><MessageContent content={m.content} knownNames={knownDisplayNames} myName={myDisplayName} /></span>
                         {m.attachments && m.attachments.length > 0 && <MessageAttachments items={m.attachments} onImageClick={openImage} />}
-                        <span className="message-time">
+                        <span
+                          className="message-time"
+                          title={formatFullTimestamp(m.created_at)}
+                        >
                           {formatRelative(m.created_at)}
                         </span>
                       </div>

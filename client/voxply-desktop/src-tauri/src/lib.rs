@@ -1560,6 +1560,33 @@ async fn reconnect_hub(
     Ok(())
 }
 
+/// Persist a new hub ordering. The provided list should be the desired
+/// order of hub_ids; any saved hub not in the list keeps its relative
+/// position at the end (defensive against partial drags).
+#[tauri::command]
+fn reorder_hubs(hub_ids: Vec<String>) -> Result<(), String> {
+    let saved = load_saved_hubs();
+    let by_id: std::collections::HashMap<String, SavedHub> =
+        saved.iter().map(|h| (h.hub_id.clone(), h.clone())).collect();
+
+    let mut next: Vec<SavedHub> = Vec::with_capacity(saved.len());
+    let mut seen = std::collections::HashSet::new();
+    for id in &hub_ids {
+        if let Some(h) = by_id.get(id) {
+            next.push(h.clone());
+            seen.insert(id.clone());
+        }
+    }
+    // Append anything the caller didn't mention so we never silently lose
+    // a hub from the saved list.
+    for h in &saved {
+        if !seen.contains(&h.hub_id) {
+            next.push(h.clone());
+        }
+    }
+    save_hubs_list(&next)
+}
+
 #[tauri::command]
 fn set_typing(
     channel_id: String,
@@ -3191,6 +3218,7 @@ pub fn run() {
             unsubscribe_channel,
             set_typing,
             reconnect_hub,
+            reorder_hubs,
             voice_join,
             voice_leave,
             voice_set_muted,

@@ -326,6 +326,32 @@ interface DmMessageFull {
   attachments?: Attachment[];
 }
 
+/** Hub icon wrapped in dnd-kit's useSortable so the user can drag-reorder
+ * the hub sidebar. The drag handle is the whole icon -- there's no second
+ * action you'd want to bind to the icon itself except click, and that
+ * still works because dnd-kit only kicks in after a small drag distance. */
+function SortableHubIcon({
+  hubId,
+  children,
+}: {
+  hubId: string;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: hubId });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`hub-icon-wrap ${isDragging ? "dragging" : ""}`}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+}
+
 function SortableChannelItem({
   channel,
   selected,
@@ -3133,6 +3159,23 @@ function App() {
     user: User;
   } | null>(null);
 
+  async function handleHubReorder(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = hubs.findIndex((h) => h.hub_id === active.id);
+    const newIndex = hubs.findIndex((h) => h.hub_id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const reordered = arrayMove(hubs, oldIndex, newIndex);
+    setHubs(reordered);
+    try {
+      await invoke("reorder_hubs", {
+        hubIds: reordered.map((h) => h.hub_id),
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function handleReconnect() {
     if (!activeHubId) return;
     setReconnectingHubs((prev) => ({ ...prev, [activeHubId]: true }));
@@ -5424,59 +5467,66 @@ function App() {
               @
             </button>
             <div className="hub-sidebar-divider" />
-            {hubs.map((h) => {
-              const unread = unreadByHub[h.hub_id] || 0;
-              const ping = pingByHub[h.hub_id];
-              const offline = ping === null;
-              const titleSuffix = offline
-                ? " — offline"
-                : ping === undefined
-                ? ""
-                : ` — ${ping}ms`;
-              return (
-                <div key={h.hub_id} className="hub-icon-wrap">
-                  <div className="hub-icon-box">
-                    <button
-                      className={`hub-icon ${
-                        h.hub_id === activeHubId && view === "channels" ? "active" : ""
-                      } ${offline ? "offline" : ""} ${
-                        mutedHubs[h.hub_id] ? "muted" : ""
-                      }`}
-                      onClick={() => {
-                        handleSwitchHub(h.hub_id);
-                        setView("channels");
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        handleRemoveHub(h.hub_id);
-                      }}
-                      title={`${h.hub_name} (${h.hub_url})${titleSuffix}${
-                        mutedHubs[h.hub_id] ? " — muted" : ""
-                      }`}
-                    >
-                      {h.hub_icon ? (
-                        <img
-                          src={h.hub_icon}
-                          alt={h.hub_name}
-                          className="hub-icon-image"
-                        />
-                      ) : (
-                        h.hub_name.slice(0, 2).toUpperCase()
-                      )}
-                    </button>
-                    {unread > 0 && !mutedHubs[h.hub_id] && (
-                      <span className="hub-unread-badge">
-                        {unread > 99 ? "99+" : unread}
-                      </span>
-                    )}
-                    {mutedHubs[h.hub_id] && (
-                      <span className="hub-muted-badge" title="Muted">🔕</span>
-                    )}
-                  </div>
-                  {offline && <span className="hub-offline-label">offline</span>}
-                </div>
-              );
-            })}
+            <DndContext sensors={dndSensors} onDragEnd={handleHubReorder}>
+              <SortableContext
+                items={hubs.map((h) => h.hub_id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {hubs.map((h) => {
+                  const unread = unreadByHub[h.hub_id] || 0;
+                  const ping = pingByHub[h.hub_id];
+                  const offline = ping === null;
+                  const titleSuffix = offline
+                    ? " — offline"
+                    : ping === undefined
+                    ? ""
+                    : ` — ${ping}ms`;
+                  return (
+                    <SortableHubIcon key={h.hub_id} hubId={h.hub_id}>
+                      <div className="hub-icon-box">
+                        <button
+                          className={`hub-icon ${
+                            h.hub_id === activeHubId && view === "channels" ? "active" : ""
+                          } ${offline ? "offline" : ""} ${
+                            mutedHubs[h.hub_id] ? "muted" : ""
+                          }`}
+                          onClick={() => {
+                            handleSwitchHub(h.hub_id);
+                            setView("channels");
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            handleRemoveHub(h.hub_id);
+                          }}
+                          title={`${h.hub_name} (${h.hub_url})${titleSuffix}${
+                            mutedHubs[h.hub_id] ? " — muted" : ""
+                          }`}
+                        >
+                          {h.hub_icon ? (
+                            <img
+                              src={h.hub_icon}
+                              alt={h.hub_name}
+                              className="hub-icon-image"
+                            />
+                          ) : (
+                            h.hub_name.slice(0, 2).toUpperCase()
+                          )}
+                        </button>
+                        {unread > 0 && !mutedHubs[h.hub_id] && (
+                          <span className="hub-unread-badge">
+                            {unread > 99 ? "99+" : unread}
+                          </span>
+                        )}
+                        {mutedHubs[h.hub_id] && (
+                          <span className="hub-muted-badge" title="Muted">🔕</span>
+                        )}
+                      </div>
+                      {offline && <span className="hub-offline-label">offline</span>}
+                    </SortableHubIcon>
+                  );
+                })}
+              </SortableContext>
+            </DndContext>
             <button
               className="hub-icon add"
               onClick={() => setShowAddHub(true)}

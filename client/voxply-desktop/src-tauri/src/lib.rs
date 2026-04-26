@@ -57,6 +57,14 @@ struct StoredVoiceSettings {
     output_device: Option<String>,
     /// Range [0.001, 0.2]. Higher = less sensitive.
     vad_threshold: Option<f32>,
+    /// "vad" (default) or "ptt". In PTT mode the mic is muted at rest and
+    /// only opens while the configured key is held down.
+    #[serde(default)]
+    voice_mode: Option<String>,
+    /// KeyboardEvent.code of the PTT hotkey (e.g. "Space", "ControlLeft").
+    /// Stored as a layout-independent code so it survives keyboard switches.
+    #[serde(default)]
+    ptt_key: Option<String>,
 }
 
 #[derive(Serialize)]

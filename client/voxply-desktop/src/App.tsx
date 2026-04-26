@@ -325,6 +325,10 @@ interface SettingsPageProps {
   onOutputDeviceChange: (v: string) => void;
   vadThreshold: number;
   onVadChange: (v: number) => void;
+  voiceMode: "vad" | "ptt";
+  onVoiceModeChange: (m: "vad" | "ptt") => void;
+  pttKey: string;
+  onPttKeyChange: (k: string) => void;
   micLevel: number;
   micTesting: boolean;
   onToggleMicTest: () => void;
@@ -598,6 +602,55 @@ function Avatar({
  * and hands it back as a data URL. Shared between the avatar and hub-icon
  * editors so they look and behave the same. Hard 256 KB cap.
  */
+/** Single-shot key capture for push-to-talk. Click → next key press wins. */
+function PttKeyBinder({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (k: string) => void;
+}) {
+  const [listening, setListening] = useState(false);
+
+  useEffect(() => {
+    if (!listening) return;
+    function onKey(e: KeyboardEvent) {
+      // Modifiers alone are useless as a PTT trigger -- you can't hold
+      // Shift down without trapping every shifted key. Filter them out.
+      if (
+        e.code === "ShiftLeft" ||
+        e.code === "ShiftRight" ||
+        e.code === "ControlLeft" ||
+        e.code === "ControlRight" ||
+        e.code === "AltLeft" ||
+        e.code === "AltRight" ||
+        e.code === "MetaLeft" ||
+        e.code === "MetaRight"
+      ) {
+        return;
+      }
+      e.preventDefault();
+      onChange(e.code);
+      setListening(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [listening, onChange]);
+
+  return (
+    <div className="settings-row" style={{ alignItems: "center" }}>
+      <span className="muted">Bound key:</span>
+      <code className="public-key">{value}</code>
+      <button
+        className="btn-secondary"
+        onClick={() => setListening((v) => !v)}
+      >
+        {listening ? "Press a key…" : "Rebind"}
+      </button>
+    </div>
+  );
+}
+
 function ImagePicker({
   onPick,
   onClear,
@@ -998,6 +1051,39 @@ function SettingsPage(props: SettingsPageProps) {
                 threshold={props.vadThreshold}
                 onChange={props.onVadChange}
               />
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Activation mode</label>
+              <p className="muted">
+                Voice activity (VAD) opens the mic when it detects speech.
+                Push-to-talk keeps it muted until you hold the bound key.
+              </p>
+              <div className="settings-row">
+                <label className="checkbox-label">
+                  <input
+                    type="radio"
+                    name="voice-mode"
+                    checked={props.voiceMode === "vad"}
+                    onChange={() => props.onVoiceModeChange("vad")}
+                  />
+                  Voice activity (VAD)
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="radio"
+                    name="voice-mode"
+                    checked={props.voiceMode === "ptt"}
+                    onChange={() => props.onVoiceModeChange("ptt")}
+                  />
+                  Push-to-talk
+                </label>
+              </div>
+              {props.voiceMode === "ptt" && (
+                <PttKeyBinder
+                  value={props.pttKey}
+                  onChange={props.onPttKeyChange}
+                />
+              )}
             </div>
             <div className="settings-section">
               <label className="settings-label">Microphone test</label>
@@ -2626,6 +2712,7 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+
   // Sweep typing entries older than 5s every second. Saves us from showing
   // a stale "X is typing..." if their typing:false event got lost.
   useEffect(() => {
@@ -2852,6 +2939,48 @@ function App() {
   const [voiceInputDevice, setVoiceInputDevice] = useState<string>("");
   const [voiceOutputDevice, setVoiceOutputDevice] = useState<string>("");
   const [vadThreshold, setVadThreshold] = useState<number>(0.02);
+  const [voiceMode, setVoiceMode] = useState<"vad" | "ptt">("vad");
+  // KeyboardEvent.code (layout-independent). Default Space; user can rebind.
+  const [pttKey, setPttKey] = useState<string>("Space");
+
+  // Push-to-talk: when in PTT mode and connected to voice, the configured
+  // key gates the mic. Pressing flips muted=false; releasing flips it back.
+  // We ignore key events fired in form inputs so typing in chat doesn't
+  // toggle the mic. Key.repeat is also skipped -- holding generates many
+  // keydown events but we only care about the first.
+  useEffect(() => {
+    if (voiceMode !== "ptt" || voiceChannelId === null) return;
+
+    function isInputTarget(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false;
+      const tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable;
+    }
+
+    function down(e: KeyboardEvent) {
+      if (e.code !== pttKey || e.repeat || isInputTarget(e.target)) return;
+      e.preventDefault();
+      invoke("voice_set_muted", { muted: false }).catch(() => {});
+      setSelfMuted(false);
+    }
+    function up(e: KeyboardEvent) {
+      if (e.code !== pttKey || isInputTarget(e.target)) return;
+      e.preventDefault();
+      invoke("voice_set_muted", { muted: true }).catch(() => {});
+      setSelfMuted(true);
+    }
+
+    // Start muted in PTT mode; the key press opens the gate.
+    invoke("voice_set_muted", { muted: true }).catch(() => {});
+    setSelfMuted(true);
+
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, [voiceMode, voiceChannelId, pttKey]);
   const [micTesting, setMicTesting] = useState(false);
   const [micLevel, setMicLevel] = useState<number>(0);
 
@@ -4522,10 +4651,14 @@ function App() {
         input_device?: string;
         output_device?: string;
         vad_threshold?: number;
+        voice_mode?: string;
+        ptt_key?: string;
       }>("get_voice_settings");
       setVoiceInputDevice(saved.input_device || "");
       setVoiceOutputDevice(saved.output_device || "");
       setVadThreshold(saved.vad_threshold ?? 0.02);
+      setVoiceMode(saved.voice_mode === "ptt" ? "ptt" : "vad");
+      setPttKey(saved.ptt_key || "Space");
     } catch (e) {
       console.error("Failed to load voice settings:", e);
     }
@@ -4534,7 +4667,9 @@ function App() {
   async function persistVoiceSettings(
     input: string,
     output: string,
-    threshold: number
+    threshold: number,
+    mode: "vad" | "ptt" = voiceMode,
+    key: string = pttKey,
   ) {
     try {
       await invoke("save_voice_settings", {
@@ -4542,6 +4677,8 @@ function App() {
           input_device: input || null,
           output_device: output || null,
           vad_threshold: threshold,
+          voice_mode: mode,
+          ptt_key: key,
         },
       });
     } catch (e) {
@@ -4828,6 +4965,28 @@ function App() {
             onVadChange={(v) => {
               setVadThreshold(v);
               persistVoiceSettings(voiceInputDevice, voiceOutputDevice, v);
+            }}
+            voiceMode={voiceMode}
+            onVoiceModeChange={(m) => {
+              setVoiceMode(m);
+              persistVoiceSettings(
+                voiceInputDevice,
+                voiceOutputDevice,
+                vadThreshold,
+                m,
+                pttKey,
+              );
+            }}
+            pttKey={pttKey}
+            onPttKeyChange={(k) => {
+              setPttKey(k);
+              persistVoiceSettings(
+                voiceInputDevice,
+                voiceOutputDevice,
+                vadThreshold,
+                voiceMode,
+                k,
+              );
             }}
             micLevel={micLevel}
             micTesting={micTesting}

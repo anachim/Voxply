@@ -2089,6 +2089,30 @@ select:focus {
   border-radius: 0 var(--r-md) var(--r-md) 0;
 }
 
+.day-separator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.day-separator::before,
+.day-separator::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.day-separator-label {
+  white-space: nowrap;
+}
+
 .message-reactions {
   display: flex;
   flex-wrap: wrap;

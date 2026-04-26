@@ -6,7 +6,7 @@
 // - useRef(initial) persists a value across renders — like a field that doesn't trigger re-render
 // - Event handlers use camelCase: onClick, onChange, onSubmit
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -1482,6 +1482,31 @@ function mentionsName(content: string, name: string | null): boolean {
     if (m[1].toLowerCase() === lower) return true;
   }
   return false;
+}
+
+/** Local-day key (yyyy-mm-dd) used to detect day boundaries. */
+function dayKey(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Friendly label for a day separator: Today / Yesterday / Mar 4 / Mar 4, 2024. */
+function formatDayLabel(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const today = new Date();
+  const yest = new Date();
+  yest.setDate(today.getDate() - 1);
+  if (dayKey(unixSec) === dayKey(today.getTime() / 1000)) return "Today";
+  if (dayKey(unixSec) === dayKey(yest.getTime() / 1000)) return "Yesterday";
+  const sameYear = d.getFullYear() === today.getFullYear();
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  });
 }
 
 function formatRelative(unixSec: number): string {
@@ -5010,7 +5035,10 @@ function App() {
                   </div>
                 )}
                 <div className="messages">
-                  {(searchResults ?? messages).map((m) => {
+                  {(searchResults ?? messages).map((m, i, arr) => {
+                    const showSeparator =
+                      i === 0 ||
+                      dayKey(m.created_at) !== dayKey(arr[i - 1].created_at);
                     const isMine = m.sender === publicKey;
                     const canDelete =
                       isMine ||
@@ -5031,8 +5059,15 @@ function App() {
                       m.sender !== publicKey &&
                       mentionsName(m.content, myDisplayName);
                     return (
+                      <React.Fragment key={m.id}>
+                        {showSeparator && (
+                          <div className="day-separator">
+                            <span className="day-separator-label">
+                              {formatDayLabel(m.created_at)}
+                            </span>
+                          </div>
+                        )}
                       <div
-                        key={m.id}
                         className={`message ${isMentioned ? "message-mentioned" : ""}`}
                       >
                         <Avatar
@@ -5107,6 +5142,7 @@ function App() {
                           </>
                         )}
                       </div>
+                      </React.Fragment>
                     );
                   })}
                   <div ref={messagesEndRef} />

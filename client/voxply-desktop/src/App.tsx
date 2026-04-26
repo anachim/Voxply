@@ -2077,6 +2077,20 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
 
+  // Alliance sidebar state. We surface every alliance the active hub belongs
+  // to plus the channels each member shares with it. Selecting a remote one
+  // routes message reads through /alliances/.../messages on our hub.
+  const [userAlliances, setUserAlliances] = useState<AllianceInfo[]>([]);
+  const [allianceChannels, setAllianceChannels] = useState<
+    Record<string, AllianceSharedChannel[]>
+  >({});
+  const [selectedAllianceChannel, setSelectedAllianceChannel] = useState<{
+    alliance_id: string;
+    alliance_name: string;
+    channel: AllianceSharedChannel;
+  } | null>(null);
+  const [allianceMessages, setAllianceMessages] = useState<Message[]>([]);
+
   // Create channel dialog
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
@@ -2482,7 +2496,31 @@ function App() {
       // Reset selection when switching hub
       setSelectedChannel(null);
       setSelectedConversation(null);
+      setSelectedAllianceChannel(null);
+      setAllianceMessages([]);
       setMessages([]);
+      // Pull alliances + their shared channels for the sidebar
+      try {
+        const al = await invoke<AllianceInfo[]>("list_alliances");
+        setUserAlliances(al);
+        const byId: Record<string, AllianceSharedChannel[]> = {};
+        await Promise.all(
+          al.map(async (a) => {
+            try {
+              byId[a.id] = await invoke<AllianceSharedChannel[]>(
+                "list_alliance_shared_channels",
+                { allianceId: a.id }
+              );
+            } catch {
+              byId[a.id] = [];
+            }
+          })
+        );
+        setAllianceChannels(byId);
+      } catch {
+        setUserAlliances([]);
+        setAllianceChannels({});
+      }
       // Refresh our own roles on this hub so admin-gated UI can show/hide
       try {
         const me = await invoke<MeInfo>("get_me");
@@ -3064,6 +3102,10 @@ function App() {
       await invoke("unsubscribe_channel", { channelId: selectedChannel.id });
     }
 
+    // Leaving alliance-channel mode
+    setSelectedAllianceChannel(null);
+    setAllianceMessages([]);
+
     setSelectedChannel(channel);
     setMessages([]);
     try {
@@ -3074,6 +3116,40 @@ function App() {
 
       // Subscribe to real-time updates for this channel
       await invoke("subscribe_channel", { channelId: channel.id });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function selectAllianceChannel(
+    alliance: AllianceInfo,
+    ch: AllianceSharedChannel
+  ) {
+    // If the alliance channel is one of OUR local channels, route through the
+    // normal selectChannel flow so subscriptions and posting just work.
+    const localMatch = channels.find((c) => c.id === ch.channel_id);
+    if (localMatch) {
+      await selectChannel(localMatch);
+      return;
+    }
+
+    if (selectedChannel) {
+      await invoke("unsubscribe_channel", { channelId: selectedChannel.id });
+      setSelectedChannel(null);
+    }
+
+    setSelectedAllianceChannel({
+      alliance_id: alliance.id,
+      alliance_name: alliance.name,
+      channel: ch,
+    });
+    setAllianceMessages([]);
+    try {
+      const msgs = await invoke<Message[]>("get_alliance_channel_messages", {
+        allianceId: alliance.id,
+        channelId: ch.channel_id,
+      });
+      setAllianceMessages(msgs);
     } catch (e) {
       setError(String(e));
     }
@@ -3912,6 +3988,49 @@ function App() {
               <p className="muted">No channels yet</p>
             )}
 
+            {userAlliances.length > 0 && (
+              <div className="sidebar-alliances">
+                {userAlliances.map((a) => {
+                  const allChans = allianceChannels[a.id] ?? [];
+                  // Hide local channels of this hub -- they already appear in
+                  // the main Channels list above; surfacing them again would
+                  // just duplicate.
+                  const remoteOnly = allChans.filter(
+                    (c) => !channels.find((local) => local.id === c.channel_id)
+                  );
+                  if (remoteOnly.length === 0) return null;
+                  return (
+                    <div key={a.id} className="sidebar-alliance-group">
+                      <div className="sidebar-header sidebar-header-alliance">
+                        <h3>🤝 {a.name}</h3>
+                      </div>
+                      <ul className="channel-list">
+                        {remoteOnly.map((c) => {
+                          const isSelected =
+                            selectedAllianceChannel?.alliance_id === a.id &&
+                            selectedAllianceChannel.channel.channel_id ===
+                              c.channel_id;
+                          return (
+                            <li
+                              key={c.channel_id}
+                              className={`channel-item ${isSelected ? "selected" : ""}`}
+                              onClick={() => selectAllianceChannel(a, c)}
+                              title={`Hosted on ${c.hub_name}`}
+                            >
+                              # {c.channel_name}
+                              <span className="alliance-channel-host">
+                                {c.hub_name}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="sidebar-header sidebar-header-games">
               <h3>Games</h3>
               {isAdmin && (
@@ -4255,6 +4374,47 @@ function App() {
                     placeholder={`Message #${selectedChannel.name}`}
                   />
                   <button onClick={handleSend}>Send</button>
+                </div>
+              </>
+            ) : selectedAllianceChannel ? (
+              <>
+                <div className="channel-header">
+                  <div className="channel-header-info">
+                    <h3># {selectedAllianceChannel.channel.channel_name}</h3>
+                    <p className="channel-description">
+                      🤝 {selectedAllianceChannel.alliance_name} · hosted on{" "}
+                      {selectedAllianceChannel.channel.hub_name}
+                    </p>
+                  </div>
+                </div>
+                <div className="messages">
+                  {allianceMessages.map((m) => {
+                    const senderLabel =
+                      m.sender_name || formatPubkey(m.sender);
+                    return (
+                      <div key={m.id} className="message">
+                        <Avatar src={null} name={senderLabel} size={28} />
+                        <span className="message-sender">{senderLabel}</span>
+                        <span className="message-content">{m.content}</span>
+                        <span className="message-time">
+                          {formatRelative(m.created_at)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {allianceMessages.length === 0 && (
+                    <p className="muted" style={{ padding: "1rem" }}>
+                      No messages yet in this alliance channel.
+                    </p>
+                  )}
+                </div>
+                <div className="message-input alliance-readonly">
+                  <p className="muted">
+                    Sending across alliances isn't wired yet — read-only for
+                    now. Open a member account on{" "}
+                    <strong>{selectedAllianceChannel.channel.hub_name}</strong>{" "}
+                    to post.
+                  </p>
                 </div>
               </>
             ) : (

@@ -8,7 +8,7 @@ use voxply_hub::auth::models::{ChallengeResponse, VerifyResponse};
 use voxply_hub::db;
 use voxply_hub::federation::client::FederationClient;
 use voxply_hub::routes::alliance_models::*;
-use voxply_hub::routes::chat_models::ChannelResponse;
+use voxply_hub::routes::chat_models::{ChannelResponse, MessageResponse};
 use voxply_hub::server;
 use voxply_hub::state::AppState;
 use voxply_identity::Identity;
@@ -227,4 +227,43 @@ async fn two_hubs_form_alliance() {
         "expected guild-chat (from Hub B via federation) in {names:?}"
     );
     assert_eq!(shared.len(), 2);
+
+    // Hub B: post a message to its own #guild-chat
+    let _: MessageResponse = client
+        .post(format!("{hub_b_url}/channels/{}/messages", b_channel.id))
+        .bearer_auth(&token_b)
+        .json(&json!({ "content": "wipe at 3" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Hub A: read alliance-channel messages via the proxy. The channel belongs
+    // to Hub B; Hub A federates the read and returns Hub B's messages.
+    let resp = client
+        .get(format!(
+            "{hub_a_url}/alliances/{}/channels/{}/messages",
+            alliance.id, b_channel.id
+        ))
+        .bearer_auth(&token_a)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "{}", resp.text().await.unwrap());
+    let messages: Vec<MessageResponse> = client
+        .get(format!(
+            "{hub_a_url}/alliances/{}/channels/{}/messages",
+            alliance.id, b_channel.id
+        ))
+        .bearer_auth(&token_a)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].content, "wipe at 3");
 }

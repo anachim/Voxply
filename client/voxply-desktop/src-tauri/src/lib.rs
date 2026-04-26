@@ -1728,6 +1728,39 @@ async fn leave_alliance(
     Ok(())
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct ProxiedMessage {
+    id: String,
+    channel_id: String,
+    sender: String,
+    sender_name: Option<String>,
+    content: String,
+    created_at: i64,
+    edited_at: Option<i64>,
+}
+
+#[tauri::command]
+async fn get_alliance_channel_messages(
+    alliance_id: String,
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ProxiedMessage>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!(
+            "{hub_url}/alliances/{alliance_id}/channels/{channel_id}/messages"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
 #[tauri::command]
 async fn list_alliance_shared_channels(
     alliance_id: String,
@@ -2654,6 +2687,7 @@ pub fn run() {
             join_alliance,
             leave_alliance,
             list_alliance_shared_channels,
+            get_alliance_channel_messages,
             share_channel_with_alliance,
             unshare_channel_from_alliance,
             list_friends,

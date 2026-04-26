@@ -821,6 +821,42 @@ select,
 }
 
 /* ============================================================
+   ALLIANCES (sidebar)
+   ============================================================ */
+.sidebar-alliances {
+  margin-top: var(--space-4);
+}
+
+.sidebar-alliance-group {
+  margin-bottom: var(--space-3);
+}
+
+.sidebar-header-alliance h3 {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.alliance-channel-host {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+.alliance-readonly {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.alliance-readonly p {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+/* ============================================================
    ALLIANCES (admin)
    ============================================================ */
 .alliance-list {

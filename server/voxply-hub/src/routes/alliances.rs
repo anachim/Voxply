@@ -279,6 +279,119 @@ pub async fn list_shared_channels(
     Ok(Json(out))
 }
 
+pub async fn get_alliance_channel_messages(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Path((alliance_id, channel_id)): Path<(String, String)>,
+) -> Result<Json<Vec<crate::routes::chat_models::MessageResponse>>, (StatusCode, String)> {
+    let hub_key = state.hub_identity.public_key_hex();
+
+    // Locally-owned alliance channel? Just read directly.
+    let is_local: Option<String> = sqlx::query_scalar(
+        "SELECT channel_id FROM alliance_shared_channels WHERE alliance_id = ? AND channel_id = ?",
+    )
+    .bind(&alliance_id)
+    .bind(&channel_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    if is_local.is_some() {
+        let rows = sqlx::query_as::<_, LocalMessageRow>(
+            "SELECT m.id, m.channel_id, m.sender, u.display_name as sender_name,
+                    m.content, m.created_at, m.edited_at
+             FROM messages m LEFT JOIN users u ON m.sender = u.public_key
+             WHERE m.channel_id = ?
+             ORDER BY m.created_at DESC, m.rowid DESC LIMIT 50",
+        )
+        .bind(&channel_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+        return Ok(Json(
+            rows.into_iter()
+                .map(|r| crate::routes::chat_models::MessageResponse {
+                    id: r.id,
+                    channel_id: r.channel_id,
+                    sender: r.sender,
+                    sender_name: r.sender_name,
+                    content: r.content,
+                    created_at: r.created_at,
+                    edited_at: r.edited_at,
+                })
+                .collect(),
+        ));
+    }
+
+    // Otherwise the channel must belong to a peer member of this alliance.
+    // Walk members and ask each one if they own this channel.
+    let members = sqlx::query_as::<_, MemberRow>(
+        "SELECT hub_public_key, hub_name, hub_url, joined_at FROM alliance_members WHERE alliance_id = ? AND hub_public_key != ?",
+    )
+    .bind(&alliance_id)
+    .bind(&hub_key)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    for member in members {
+        let token = {
+            let map = state.peer_tokens.read().await;
+            map.get(&member.hub_public_key).cloned()
+        };
+        let token = match token {
+            Some(t) => t,
+            None => match state
+                .federation_client
+                .authenticate(&member.hub_url, &state.hub_identity)
+                .await
+            {
+                Ok(t) => {
+                    state
+                        .peer_tokens
+                        .write()
+                        .await
+                        .insert(member.hub_public_key.clone(), t.clone());
+                    t
+                }
+                Err(_) => continue,
+            },
+        };
+
+        // Check if this peer owns the channel by listing their shared channels.
+        let shared = match state
+            .federation_client
+            .get_alliance_shared_channels(&member.hub_url, &token, &alliance_id)
+            .await
+        {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if !shared.iter().any(|s| s.channel_id == channel_id) {
+            continue;
+        }
+
+        // The peer owns it -- federate the message read.
+        return state
+            .federation_client
+            .get_messages(&member.hub_url, &token, &channel_id)
+            .await
+            .map(Json)
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Failed to fetch messages from peer: {e}"),
+                )
+            });
+    }
+
+    Err((
+        StatusCode::NOT_FOUND,
+        "Alliance channel not found on any member hub".to_string(),
+    ))
+}
+
 pub async fn leave_alliance(
     State(state): State<Arc<AppState>>,
     user: AuthUser,
@@ -572,4 +685,15 @@ struct MemberRow {
 struct SharedChannelRow {
     channel_id: String,
     channel_name: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct LocalMessageRow {
+    id: String,
+    channel_id: String,
+    sender: String,
+    sender_name: Option<String>,
+    content: String,
+    created_at: i64,
+    edited_at: Option<i64>,
 }

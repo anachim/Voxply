@@ -376,11 +376,17 @@ function SortableChannelItem({
 function SortableCategoryItem({
   channel,
   children,
+  collapsed,
+  childCount,
+  onToggleCollapsed,
   onContextMenu,
   onAddChannel,
 }: {
   channel: Channel;
   children: React.ReactNode;
+  collapsed: boolean;
+  childCount: number;
+  onToggleCollapsed: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onAddChannel: () => void;
 }) {
@@ -402,7 +408,20 @@ function SortableCategoryItem({
         {...attributes}
         {...listeners}
       >
+        <button
+          className="category-chevron"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCollapsed();
+          }}
+          title={collapsed ? "Expand" : "Collapse"}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
         <span className="category-name">{channel.name.toUpperCase()}</span>
+        {collapsed && childCount > 0 && (
+          <span className="category-count">{childCount}</span>
+        )}
         <button
           className="btn-icon-small"
           onClick={(e) => { e.stopPropagation(); onAddChannel(); }}
@@ -411,7 +430,7 @@ function SortableCategoryItem({
           +
         </button>
       </div>
-      {children}
+      {!collapsed && children}
     </li>
   );
 }
@@ -2820,6 +2839,24 @@ function App() {
   // have zero participants.
   const [voicePops, setVoicePops] = useState<Record<string, number>>({});
 
+  // Collapsed categories: hub_id -> { category_id: true }. Persisted so a
+  // folded category stays folded across restarts. Categories not in the
+  // map render expanded by default.
+  const [collapsedCategories, setCollapsedCategories] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
+
+  function toggleCategoryCollapsed(hubId: string, categoryId: string) {
+    setCollapsedCategories((prev) => {
+      const hubMap = { ...(prev[hubId] ?? {}) };
+      if (hubMap[categoryId]) delete hubMap[categoryId];
+      else hubMap[categoryId] = true;
+      const next = { ...prev, [hubId]: hubMap };
+      invoke("save_collapsed_categories", { state: next }).catch(() => {});
+      return next;
+    });
+  }
+
   // WS connection status per hub. Missing key means connected (default
   // optimistic so the very first render doesn't flash a banner).
   const [hubConnected, setHubConnected] = useState<Record<string, boolean>>({});
@@ -2941,6 +2978,13 @@ function App() {
   useEffect(() => {
     invoke<Record<string, Record<string, boolean>>>("load_pinned_channels")
       .then((s) => setPinnedChannels(s ?? {}))
+      .catch(() => {});
+  }, []);
+
+  // Hydrate collapsed-category state on launch.
+  useEffect(() => {
+    invoke<Record<string, Record<string, boolean>>>("load_collapsed_categories")
+      .then((s) => setCollapsedCategories(s ?? {}))
       .catch(() => {});
   }, []);
 
@@ -5598,6 +5642,15 @@ function App() {
                       <SortableCategoryItem
                         key={node.id}
                         channel={node}
+                        collapsed={
+                          !!activeHubId &&
+                          !!collapsedCategories[activeHubId]?.[node.id]
+                        }
+                        childCount={children.length}
+                        onToggleCollapsed={() => {
+                          if (activeHubId)
+                            toggleCategoryCollapsed(activeHubId, node.id);
+                        }}
                         onContextMenu={(e) => openContextMenu(e, node)}
                         onAddChannel={() => openCreateChannelUnder(node.id, false)}
                       >

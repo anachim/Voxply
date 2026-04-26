@@ -2704,7 +2704,7 @@ select:focus {
 .category-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
   color: var(--text-muted);
   font-size: var(--text-xs);
@@ -2715,6 +2715,38 @@ select:focus {
 
 .category-header:hover {
   color: var(--text);
+}
+
+.category-name {
+  flex: 1;
+}
+
+.category-chevron {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.category-chevron:hover {
+  color: var(--text);
+}
+
+.category-count {
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  letter-spacing: normal;
 }
 
 .btn-icon-small {

@@ -74,3 +74,9 @@ pub struct VoiceMuteResponse {
 pub struct SetTalkPowerRequest {
     pub min_talk_power: i64,
 }
+
+#[derive(Serialize)]
+pub struct TalkPowerResponse {
+    pub channel_id: String,
+    pub min_talk_power: i64,
+}

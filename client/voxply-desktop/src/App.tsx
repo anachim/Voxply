@@ -6,7 +6,7 @@
 // - useRef(initial) persists a value across renders — like a field that doesn't trigger re-render
 // - Event handlers use camelCase: onClick, onChange, onSubmit
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -100,6 +100,13 @@ interface MemberAdminInfo {
 interface BanInfo {
   target_public_key: string;
   banned_by: string;
+  reason: string | null;
+  created_at: number;
+}
+
+interface VoiceMuteInfo {
+  target_public_key: string;
+  muted_by: string;
   reason: string | null;
   created_at: number;
 }
@@ -919,6 +926,9 @@ interface HubAdminPageProps {
   onBanMember: (publicKey: string) => void;
   onMuteMember: (publicKey: string) => void;
   onTimeoutMember: (publicKey: string) => void;
+  onVoiceMuteMember: (publicKey: string) => void;
+  onVoiceUnmuteMember: (publicKey: string) => void;
+  voiceMutedKeys: Set<string>;
   onToggleRoleAssignment: (
     publicKey: string,
     roleId: string,
@@ -1079,18 +1089,24 @@ function formatRelative(unixSec: number): string {
 function MemberRow({
   member,
   allRoles,
+  voiceMuted,
   onKick,
   onBan,
   onMute,
   onTimeout,
+  onVoiceMute,
+  onVoiceUnmute,
   onToggleRole,
 }: {
   member: MemberAdminInfo;
   allRoles: RoleInfo[];
+  voiceMuted: boolean;
   onKick: () => void;
   onBan: () => void;
   onMute: () => void;
   onTimeout: () => void;
+  onVoiceMute: () => void;
+  onVoiceUnmute: () => void;
   onToggleRole: (roleId: string, hasRole: boolean) => void;
 }) {
   const [showRoleMenu, setShowRoleMenu] = useState(false);
@@ -1136,6 +1152,15 @@ function MemberRow({
           <button className="btn-small" onClick={onMute}>
             Mute
           </button>
+          {voiceMuted ? (
+            <button className="btn-small" onClick={onVoiceUnmute}>
+              Unmute voice
+            </button>
+          ) : (
+            <button className="btn-small" onClick={onVoiceMute}>
+              Mute voice
+            </button>
+          )}
           <button className="btn-small" onClick={onKick}>
             Kick
           </button>
@@ -1530,10 +1555,13 @@ function HubAdminPage(props: HubAdminPageProps) {
                     key={m.public_key}
                     member={m}
                     allRoles={props.roles}
+                    voiceMuted={props.voiceMutedKeys.has(m.public_key)}
                     onKick={() => props.onKickMember(m.public_key)}
                     onBan={() => props.onBanMember(m.public_key)}
                     onMute={() => props.onMuteMember(m.public_key)}
                     onTimeout={() => props.onTimeoutMember(m.public_key)}
+                    onVoiceMute={() => props.onVoiceMuteMember(m.public_key)}
+                    onVoiceUnmute={() => props.onVoiceUnmuteMember(m.public_key)}
                     onToggleRole={(roleId, has) =>
                       props.onToggleRoleAssignment(m.public_key, roleId, has)
                     }
@@ -1668,6 +1696,13 @@ function App() {
   // Ban admin
   const [adminBans, setAdminBans] = useState<BanInfo[]>([]);
 
+  // Voice mute admin
+  const [adminVoiceMutes, setAdminVoiceMutes] = useState<VoiceMuteInfo[]>([]);
+  const voiceMutedKeys = useMemo(
+    () => new Set(adminVoiceMutes.map((v) => v.target_public_key)),
+    [adminVoiceMutes]
+  );
+
   // Invite admin
   const [adminInvites, setAdminInvites] = useState<InviteInfo[]>([]);
 
@@ -1801,6 +1836,7 @@ function App() {
       refreshRoles(); // roles list used for the assign-role dropdown
       refreshMembers();
       refreshPending();
+      refreshVoiceMutes();
     } else if (hubAdminTab === "bans") {
       refreshBans();
     } else if (hubAdminTab === "invites") {
@@ -2331,6 +2367,70 @@ function App() {
     try {
       const b = await invoke<BanInfo[]>("list_bans");
       setAdminBans(b);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshVoiceMutes() {
+    try {
+      const v = await invoke<VoiceMuteInfo[]>("list_voice_mutes");
+      setAdminVoiceMutes(v);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleVoiceMuteMember(publicKey: string) {
+    const reason = prompt("Reason for voice mute (optional)") ?? "";
+    try {
+      await invoke("voice_mute_user_cmd", {
+        targetPublicKey: publicKey,
+        reason: reason.trim() || null,
+      });
+      setToast("Voice muted");
+      await refreshVoiceMutes();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleVoiceUnmuteMember(publicKey: string) {
+    try {
+      await invoke("voice_unmute_user_cmd", { targetPublicKey: publicKey });
+      setToast("Voice unmuted");
+      await refreshVoiceMutes();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleSetTalkPower(channelId: string) {
+    let current = 0;
+    try {
+      const tp = await invoke<{ min_talk_power: number }>("get_talk_power", {
+        channelId,
+      });
+      current = tp.min_talk_power;
+    } catch {
+      // Falling back to 0 is fine — user just sees the default.
+    }
+    const value = prompt(
+      "Minimum talk power (priority) to speak in this channel.\nUse 0 to allow anyone.",
+      String(current)
+    );
+    if (value === null) return;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      setError("Invalid talk power");
+      return;
+    }
+    try {
+      await invoke("set_talk_power_cmd", {
+        channelId,
+        minTalkPower: Math.floor(n),
+      });
+      setToast(n === 0 ? "Talk power cleared" : `Talk power set to ${Math.floor(n)}`);
     } catch (e) {
       setError(String(e));
     }
@@ -3141,6 +3241,9 @@ function App() {
             onBanMember={handleBanMember}
             onMuteMember={handleMuteMember}
             onTimeoutMember={handleTimeoutMember}
+            onVoiceMuteMember={handleVoiceMuteMember}
+            onVoiceUnmuteMember={handleVoiceUnmuteMember}
+            voiceMutedKeys={voiceMutedKeys}
             onToggleRoleAssignment={handleToggleRoleAssignment}
             bans={adminBans}
             onUnban={handleUnban}
@@ -3941,6 +4044,16 @@ function App() {
                     onClick={() => openEditDescription(contextMenu.channel)}
                   >
                     Edit description
+                  </button>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => {
+                      const ch = contextMenu.channel;
+                      setContextMenu(null);
+                      handleSetTalkPower(ch.id);
+                    }}
+                  >
+                    Set talk power…
                   </button>
                   {contextMenu.channel.parent_id && (
                     <button

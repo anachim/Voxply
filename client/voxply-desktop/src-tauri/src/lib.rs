@@ -1818,6 +1818,108 @@ async fn timeout_user_cmd(
     .await
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct VoiceMuteInfo {
+    target_public_key: String,
+    muted_by: String,
+    reason: Option<String>,
+    created_at: i64,
+}
+
+#[tauri::command]
+async fn voice_mute_user_cmd(
+    target_public_key: String,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    post_moderation(&state, "moderation/voice-mutes", serde_json::json!({
+        "target_public_key": target_public_key,
+        "reason": reason,
+    }))
+    .await
+}
+
+#[tauri::command]
+async fn voice_unmute_user_cmd(
+    target_public_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(format!("{hub_url}/moderation/voice-mutes/{target_public_key}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_voice_mutes(state: State<'_, AppState>) -> Result<Vec<VoiceMuteInfo>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/moderation/voice-mutes"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct TalkPowerInfo {
+    channel_id: String,
+    min_talk_power: i64,
+}
+
+#[tauri::command]
+async fn get_talk_power(
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<TalkPowerInfo, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/channels/{channel_id}/talk-power"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
+async fn set_talk_power_cmd(
+    channel_id: String,
+    min_talk_power: i64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{hub_url}/channels/{channel_id}/talk-power"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "min_talk_power": min_talk_power }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
 async fn post_moderation(
     state: &State<'_, AppState>,
     path: &str,
@@ -2266,6 +2368,11 @@ pub fn run() {
             ban_user_cmd,
             mute_user_cmd,
             timeout_user_cmd,
+            voice_mute_user_cmd,
+            voice_unmute_user_cmd,
+            list_voice_mutes,
+            get_talk_power,
+            set_talk_power_cmd,
             assign_role,
             unassign_role,
             list_bans,

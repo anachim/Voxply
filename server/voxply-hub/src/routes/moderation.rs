@@ -361,6 +361,32 @@ pub async fn voice_unmute(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn list_voice_mutes(
+    State(state): State<Arc<AppState>>,
+    user: AuthUser,
+) -> Result<Json<Vec<VoiceMuteResponse>>, (StatusCode, String)> {
+    let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
+    perms.require(MUTE_MEMBERS)?;
+
+    let rows = sqlx::query_as::<_, VoiceMuteRow>(
+        "SELECT target_public_key, muted_by, reason, created_at FROM voice_mutes ORDER BY created_at DESC",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| VoiceMuteResponse {
+                target_public_key: r.target_public_key,
+                muted_by: r.muted_by,
+                reason: r.reason,
+                created_at: r.created_at,
+            })
+            .collect(),
+    ))
+}
+
 // --- Talk Power ---
 
 pub async fn set_talk_power(
@@ -386,6 +412,26 @@ pub async fn set_talk_power(
     Ok(StatusCode::OK)
 }
 
+pub async fn get_talk_power(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+    Path(channel_id): Path<String>,
+) -> Result<Json<TalkPowerResponse>, (StatusCode, String)> {
+    let min_talk_power: i64 = sqlx::query_scalar(
+        "SELECT min_talk_power FROM channel_settings WHERE channel_id = ?",
+    )
+    .bind(&channel_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    .unwrap_or(0);
+
+    Ok(Json(TalkPowerResponse {
+        channel_id,
+        min_talk_power,
+    }))
+}
+
 // DB row types
 
 #[derive(sqlx::FromRow)]
@@ -402,6 +448,14 @@ struct MuteRow {
     muted_by: String,
     reason: Option<String>,
     expires_at: Option<i64>,
+    created_at: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct VoiceMuteRow {
+    target_public_key: String,
+    muted_by: String,
+    reason: Option<String>,
     created_at: i64,
 }
 

@@ -304,3 +304,191 @@ async fn channel_ban_blocks_messages() {
         .await
         .assert_status(axum::http::StatusCode::CREATED);
 }
+
+// --- WebSocket-level voice moderation enforcement ---
+
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+/// Spin up a real listener so we can connect a WebSocket client to it.
+async fn spawn_real_hub() -> (String, Arc<AppState>) {
+    let db = SqlitePoolOptions::new()
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    db::migrations::run(&db).await.unwrap();
+    let state = Arc::new(AppState {
+        hub_name: "test-hub".to_string(),
+        hub_identity: Identity::generate(),
+        db,
+        pending_challenges: RwLock::new(HashMap::new()),
+        chat_tx: broadcast::channel(256).0,
+        federation_client: FederationClient::new(),
+        peer_tokens: RwLock::new(HashMap::new()),
+        voice_channels: RwLock::new(HashMap::new()),
+        voice_udp_port: 0,
+        voice_event_tx: broadcast::channel(16).0,
+        dm_tx: broadcast::channel(16).0,
+        online_users: RwLock::new(std::collections::HashSet::new()),
+    });
+    let app = server::create_router(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    (format!("http://127.0.0.1:{port}"), state)
+}
+
+async fn http_authenticate(hub_url: &str, identity: &Identity) -> String {
+    let client = reqwest::Client::new();
+    let pub_key = identity.public_key_hex();
+    let challenge: ChallengeResponse = client
+        .post(format!("{hub_url}/auth/challenge"))
+        .json(&json!({ "public_key": pub_key }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let signature = identity.sign(&hex::decode(&challenge.challenge).unwrap());
+    let verify: VerifyResponse = client
+        .post(format!("{hub_url}/auth/verify"))
+        .json(&json!({
+            "public_key": pub_key,
+            "challenge": challenge.challenge,
+            "signature": hex::encode(signature.to_bytes()),
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    verify.token
+}
+
+/// Send a voice_join over WS, return the first server frame as JSON.
+async fn ws_voice_join_and_recv(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+) -> serde_json::Value {
+    let ws_url = hub_url
+        .replace("http://", "ws://")
+        .replace("https://", "wss://");
+    let url = format!("{ws_url}/ws?token={token}");
+    let (ws_stream, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let (mut tx, mut rx) = ws_stream.split();
+    tx.send(WsMessage::Text(
+        json!({ "type": "voice_join", "channel_id": channel_id, "udp_port": 12345 })
+            .to_string()
+            .into(),
+    ))
+    .await
+    .unwrap();
+    let frame = rx.next().await.unwrap().unwrap();
+    let WsMessage::Text(text) = frame else { panic!("expected text frame, got {frame:?}") };
+    serde_json::from_str(&text).unwrap()
+}
+
+#[tokio::test]
+async fn voice_mute_blocks_voice_join() {
+    let (hub_url, _state) = spawn_real_hub().await;
+    let client = reqwest::Client::new();
+
+    // Owner first to get the Owner role + permissions
+    let owner = Identity::generate();
+    let owner_token = http_authenticate(&hub_url, &owner).await;
+
+    // Victim joins second (gets only @everyone)
+    let victim = Identity::generate();
+    let victim_token = http_authenticate(&hub_url, &victim).await;
+
+    // Create a channel
+    let channel: ChannelResponse = client
+        .post(format!("{hub_url}/channels"))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "name": "general" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Owner voice-mutes the victim
+    client
+        .post(format!("{hub_url}/moderation/voice-mutes"))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "target_public_key": victim.public_key_hex() }))
+        .send()
+        .await
+        .unwrap();
+
+    // Victim attempts to join voice — should get an error frame, not voice_joined
+    let frame = ws_voice_join_and_recv(&hub_url, &victim_token, &channel.id).await;
+    assert_eq!(frame["type"], "error");
+    assert_eq!(frame["context"], "voice_join");
+    assert!(frame["message"].as_str().unwrap().contains("muted"));
+}
+
+#[tokio::test]
+async fn talk_power_blocks_low_priority_user() {
+    let (hub_url, state) = spawn_real_hub().await;
+    let client = reqwest::Client::new();
+
+    // Owner sets up the channel + talk power
+    let owner = Identity::generate();
+    let owner_token = http_authenticate(&hub_url, &owner).await;
+
+    // Random user with only @everyone (priority 0)
+    let randuser = Identity::generate();
+    let rand_token = http_authenticate(&hub_url, &randuser).await;
+
+    let channel: ChannelResponse = client
+        .post(format!("{hub_url}/channels"))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "name": "vip-only" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // Require talk power 100 — only the Owner role qualifies
+    client
+        .post(format!("{hub_url}/channels/{}/talk-power", channel.id))
+        .bearer_auth(&owner_token)
+        .json(&json!({ "min_talk_power": 100 }))
+        .send()
+        .await
+        .unwrap();
+
+    // Sanity: confirm the row landed
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT min_talk_power FROM channel_settings WHERE channel_id = ?",
+    )
+    .bind(&channel.id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap();
+    assert_eq!(stored, 100);
+
+    // Random user tries to join — should be refused
+    let frame = ws_voice_join_and_recv(&hub_url, &rand_token, &channel.id).await;
+    assert_eq!(frame["type"], "error");
+    assert_eq!(frame["context"], "voice_join");
+    assert!(frame["message"].as_str().unwrap().contains("priority"));
+
+    // Owner can still join (priority is 999999)
+    let frame = ws_voice_join_and_recv(&hub_url, &owner_token, &channel.id).await;
+    assert_eq!(frame["type"], "voice_joined");
+}

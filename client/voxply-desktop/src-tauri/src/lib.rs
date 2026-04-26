@@ -265,6 +265,11 @@ enum WsServerMessage {
         public_key: String,
         speaking: bool,
     },
+    #[serde(rename = "error")]
+    Error {
+        context: String,
+        message: String,
+    },
     #[serde(rename = "dm")]
     DirectMessage {
         conversation_id: String,
@@ -791,6 +796,13 @@ async fn spawn_ws_task(
                                             "channel_id": channel_id,
                                             "public_key": public_key,
                                             "speaking": speaking,
+                                        }));
+                                    }
+                                    WsServerMessage::Error { context, message } => {
+                                        let _ = app.emit("hub-error", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "context": context,
+                                            "message": message,
                                         }));
                                     }
                                     WsServerMessage::DirectMessage { conversation_id, sender, sender_name, content, timestamp } => {

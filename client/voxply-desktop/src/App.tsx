@@ -1955,6 +1955,26 @@ function App() {
       );
 
       unlistens.push(
+        await listen<{ hub_id: string; context: string; message: string }>(
+          "hub-error",
+          async (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
+            setToast(event.payload.message);
+            // If a voice join was rejected by the hub, the local pipeline is
+            // still running — tear it down so the UI matches reality.
+            if (event.payload.context === "voice_join") {
+              try {
+                await invoke("voice_leave");
+              } catch {}
+              setVoiceChannelId(null);
+              setVoiceParticipants([]);
+              setSpeakingKeys(new Set());
+            }
+          }
+        )
+      );
+
+      unlistens.push(
         await listen<{ speaking: boolean }>("voice-self-speaking", (event) => {
           const myKey = publicKeyRef.current;
           if (!myKey) return;

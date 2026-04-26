@@ -100,6 +100,62 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                                 subscribe_all = true;
                             }
                             Ok(WsClientMessage::VoiceJoin { channel_id, udp_port }) => {
+                                // Moderation gates before adding the user to
+                                // the voice channel:
+                                //   1. Voice mute applies hub-wide.
+                                //   2. min_talk_power on the channel requires
+                                //      the user's highest role priority to be
+                                //      at least that level.
+                                let is_muted = crate::routes::moderation::is_voice_muted(
+                                    &state.db, &public_key,
+                                )
+                                .await
+                                .unwrap_or(false);
+                                if is_muted {
+                                    let err = WsServerMessage::Error {
+                                        context: "voice_join".to_string(),
+                                        message: "You are voice-muted on this hub.".to_string(),
+                                    };
+                                    let _ = ws_tx
+                                        .send(Message::Text(serde_json::to_string(&err).unwrap().into()))
+                                        .await;
+                                    continue;
+                                }
+
+                                let min_talk_power: i64 = sqlx::query_scalar(
+                                    "SELECT min_talk_power FROM channel_settings WHERE channel_id = ?",
+                                )
+                                .bind(&channel_id)
+                                .fetch_optional(&state.db)
+                                .await
+                                .ok()
+                                .flatten()
+                                .unwrap_or(0);
+
+                                if min_talk_power > 0 {
+                                    let perms = crate::permissions::user_permissions(
+                                        &state.db, &public_key,
+                                    )
+                                    .await;
+                                    let user_priority = perms
+                                        .as_ref()
+                                        .map(|p| p.max_priority)
+                                        .unwrap_or(0);
+                                    if user_priority < min_talk_power {
+                                        let err = WsServerMessage::Error {
+                                            context: "voice_join".to_string(),
+                                            message: format!(
+                                                "This channel requires role priority {} to talk; you have {}.",
+                                                min_talk_power, user_priority
+                                            ),
+                                        };
+                                        let _ = ws_tx
+                                            .send(Message::Text(serde_json::to_string(&err).unwrap().into()))
+                                            .await;
+                                        continue;
+                                    }
+                                }
+
                                 let client_addr: SocketAddr =
                                     format!("127.0.0.1:{udp_port}").parse().unwrap();
 

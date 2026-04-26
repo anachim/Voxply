@@ -5,11 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Voxply Dice</title>
 <style>
+  /* The game iframe is sandboxed; it can't read the parent's CSS variables
+   * directly. We do our own theming based on a `?theme=...` query param the
+   * Voxply client appends to the entry_url. Defaults to "calm". */
+  :root {
+    --bg: #1c1a1f;
+    --surface: #2c2a31;
+    --text: #ebe6dc;
+    --text-muted: #a39c91;
+    --accent: #88b8a8;
+    --accent-text: #1c1a1f;
+    --accent-hover: #74a594;
+  }
+  :root[data-theme="classic"] {
+    --bg: #1a1a2e;
+    --surface: #1e2a47;
+    --text: #e0e2ed;
+    --text-muted: #9ba1b8;
+    --accent: #7c3aed;
+    --accent-text: #ffffff;
+    --accent-hover: #6d28d9;
+  }
+  :root[data-theme="linear"] {
+    --bg: #0c0d11;
+    --surface: #1c1d24;
+    --text: #f7f7fa;
+    --text-muted: #8a8c98;
+    --accent: #6571f0;
+    --accent-text: #ffffff;
+    --accent-hover: #4f5bc4;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg);
+    color: var(--text);
     height: 100vh;
     display: flex;
     flex-direction: column;
@@ -19,13 +50,13 @@
     overflow: hidden;
     user-select: none;
   }
-  h1 { color: #7c3aed; font-size: 24px; }
-  .greeting { color: #9ca3af; font-size: 14px; min-height: 20px; }
+  h1 { color: var(--accent); font-size: 24px; }
+  .greeting { color: var(--text-muted); font-size: 14px; min-height: 20px; }
   .die {
     width: 160px; height: 160px;
     border-radius: 24px;
-    background: #0f1729;
-    color: #10b981;
+    background: var(--surface);
+    color: var(--accent);
     display: flex; align-items: center; justify-content: center;
     font-size: 96px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -41,14 +72,14 @@
     padding: 12px 32px;
     border: none;
     border-radius: 8px;
-    background: #7c3aed;
-    color: white;
+    background: var(--accent);
+    color: var(--accent-text);
     font-size: 16px;
     font-weight: 600;
     cursor: pointer;
   }
-  button:hover { background: #6d28d9; }
-  .count { color: #6b7280; font-size: 12px; }
+  button:hover { background: var(--accent-hover); }
+  .count { color: var(--text-muted); font-size: 12px; }
 </style>
 </head>
 <body>

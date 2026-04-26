@@ -149,6 +149,14 @@ pub enum WsServerMessage {
         public_key: String,
         speaking: bool,
     },
+    /// Generic error message, shown to the user as a toast. `context` is a
+    /// short machine-readable hint (e.g. "voice_join") so the client can
+    /// route the message contextually if it wants.
+    #[serde(rename = "error")]
+    Error {
+        context: String,
+        message: String,
+    },
     #[serde(rename = "dm")]
     DirectMessage {
         conversation_id: String,

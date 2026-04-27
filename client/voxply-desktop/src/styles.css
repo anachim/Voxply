@@ -1317,6 +1317,18 @@ select,
   white-space: nowrap;
 }
 
+.channel-description.editable {
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  padding: 0 4px;
+  margin-left: -4px;
+}
+
+.channel-description.editable:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
 /* ============================================================
    VOICE
    ============================================================ */

@@ -6285,11 +6285,27 @@ function App() {
                 <div className="channel-header">
                   <div className="channel-header-info">
                     <h3># {selectedChannel.name}</h3>
-                    {selectedChannel.description && (
-                      <p className="channel-description">
+                    {selectedChannel.description ? (
+                      <p
+                        className={`channel-description ${
+                          isAdmin ? "editable" : ""
+                        }`}
+                        onClick={() => {
+                          if (isAdmin) openEditDescription(selectedChannel);
+                        }}
+                        title={isAdmin ? "Click to edit" : undefined}
+                      >
                         {selectedChannel.description}
                       </p>
-                    )}
+                    ) : isAdmin ? (
+                      <p
+                        className="channel-description editable muted"
+                        onClick={() => openEditDescription(selectedChannel)}
+                        title="Click to add a description"
+                      >
+                        Add a description…
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     onClick={() =>

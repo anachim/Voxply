@@ -196,6 +196,8 @@ const EMOJI_CATALOG: [string, string][] = [
 ];
 const QUICK_REACTIONS = EMOJI_CATALOG.slice(0, 8).map(([e]) => e);
 
+type NotifyMode = "all" | "mentions" | "silent";
+
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // matches the hub cap
 
 interface User {
@@ -2943,13 +2945,18 @@ function App() {
     Record<string, Record<string, boolean>>
   >({});
 
-  // Notification mutes. Hub-level applies to every channel in the hub;
-  // channel-level applies to a single channel. Both block tray bump, OS
-  // notification, mention sound, and unread dots; messages still appear
-  // when the user actually opens the channel.
-  const [mutedHubs, setMutedHubs] = useState<Record<string, boolean>>({});
-  const [mutedChannels, setMutedChannels] = useState<
-    Record<string, Record<string, boolean>>
+  // Notification mode per scope.
+  // - "all": notify on every message (default; entries omitted from state)
+  // - "mentions": only notify when the current user is @-mentioned
+  // - "silent": no notifications at all
+  // Channel-level overrides hub-level; hub-level overrides the "all" default.
+  // Persisted shape keeps the old map keys (hubs, channels) for back-compat:
+  // the old binary `true` is interpreted as "silent" on load.
+  const [hubNotifyMode, setHubNotifyMode] = useState<Record<string, NotifyMode>>(
+    {},
+  );
+  const [channelNotifyMode, setChannelNotifyMode] = useState<
+    Record<string, Record<string, NotifyMode>>
   >({});
 
   // Pinned channels. Local-only per (hub, channel). Pinned channels render
@@ -2998,34 +3005,40 @@ function App() {
     });
   }
 
-  function persistMutes(hubs: typeof mutedHubs, channels: typeof mutedChannels) {
+  function persistNotifyModes(
+    hubs: typeof hubNotifyMode,
+    channels: typeof channelNotifyMode,
+  ) {
     invoke("save_notification_mutes", {
       state: { hubs, channels },
     }).catch(() => {});
   }
 
-  function isMuted(hubId: string, channelId: string): boolean {
-    if (mutedHubs[hubId]) return true;
-    return !!mutedChannels[hubId]?.[channelId];
+  function effectiveNotifyMode(hubId: string, channelId: string): NotifyMode {
+    return (
+      channelNotifyMode[hubId]?.[channelId] ??
+      hubNotifyMode[hubId] ??
+      "all"
+    );
   }
 
-  function toggleHubMute(hubId: string) {
-    setMutedHubs((prev) => {
+  function setHubMode(hubId: string, mode: NotifyMode) {
+    setHubNotifyMode((prev) => {
       const next = { ...prev };
-      if (next[hubId]) delete next[hubId];
-      else next[hubId] = true;
-      persistMutes(next, mutedChannels);
+      if (mode === "all") delete next[hubId];
+      else next[hubId] = mode;
+      persistNotifyModes(next, channelNotifyMode);
       return next;
     });
   }
 
-  function toggleChannelMute(hubId: string, channelId: string) {
-    setMutedChannels((prev) => {
+  function setChannelMode(hubId: string, channelId: string, mode: NotifyMode) {
+    setChannelNotifyMode((prev) => {
       const hubMap = { ...(prev[hubId] ?? {}) };
-      if (hubMap[channelId]) delete hubMap[channelId];
-      else hubMap[channelId] = true;
+      if (mode === "all") delete hubMap[channelId];
+      else hubMap[channelId] = mode;
       const next = { ...prev, [hubId]: hubMap };
-      persistMutes(mutedHubs, next);
+      persistNotifyModes(hubNotifyMode, next);
       return next;
     });
   }
@@ -3088,15 +3101,36 @@ function App() {
       .catch(() => {});
   }, []);
 
-  // Hydrate persisted notification mutes on launch.
+  // Hydrate persisted notification modes on launch. Old persisted shape
+  // used `true` for muted; we normalize that to "silent" so older configs
+  // still work.
   useEffect(() => {
+    function normalizeMode(v: unknown): NotifyMode | undefined {
+      if (v === true) return "silent";
+      if (v === "silent" || v === "mentions" || v === "all") return v;
+      return undefined;
+    }
     invoke<{
-      hubs?: Record<string, boolean>;
-      channels?: Record<string, Record<string, boolean>>;
+      hubs?: Record<string, unknown>;
+      channels?: Record<string, Record<string, unknown>>;
     }>("load_notification_mutes")
       .then((s) => {
-        setMutedHubs(s?.hubs ?? {});
-        setMutedChannels(s?.channels ?? {});
+        const hubMap: Record<string, NotifyMode> = {};
+        for (const [k, v] of Object.entries(s?.hubs ?? {})) {
+          const m = normalizeMode(v);
+          if (m && m !== "all") hubMap[k] = m;
+        }
+        const chanMap: Record<string, Record<string, NotifyMode>> = {};
+        for (const [hubId, inner] of Object.entries(s?.channels ?? {})) {
+          const sub: Record<string, NotifyMode> = {};
+          for (const [chId, v] of Object.entries(inner ?? {})) {
+            const m = normalizeMode(v);
+            if (m && m !== "all") sub[chId] = m;
+          }
+          if (Object.keys(sub).length > 0) chanMap[hubId] = sub;
+        }
+        setHubNotifyMode(hubMap);
+        setChannelNotifyMode(chanMap);
       })
       .catch(() => {});
   }, []);
@@ -3684,23 +3718,27 @@ function App() {
               message.sender !== publicKeyRef.current &&
               mentionsName(message.content, myName);
 
-            const muted = isMuted(hub_id, channel_id);
+            const mode = effectiveNotifyMode(hub_id, channel_id);
+            // Both "silent" and (non-mention messages in) "mentions" mode
+            // suppress the bump + ping + OS notif.
+            const allowBump =
+              mode === "all" || (mode === "mentions" && isMention);
 
             if (isActiveChannel) {
               setMessages((prev) => {
                 if (prev.some((m) => m.id === message.id)) return prev;
                 return [...prev, message];
               });
-            } else if (!muted) {
+            } else if (allowBump) {
               // Unread bump per channel. Mentions still bump even on the
               // active hub so the dot shows on a channel the user isn't
-              // currently viewing. Muted scopes skip this entirely.
+              // currently viewing.
               if (!isActiveHub || isMention) {
                 bumpUnread(hub_id, channel_id);
               }
             }
 
-            if (isMention && !isActiveChannel && !muted) {
+            if (isMention && !isActiveChannel && allowBump) {
               playMentionPing();
               if (
                 typeof Notification !== "undefined" &&
@@ -5589,7 +5627,7 @@ function App() {
                           className={`hub-icon ${
                             h.hub_id === activeHubId && view === "channels" ? "active" : ""
                           } ${offline ? "offline" : ""} ${
-                            mutedHubs[h.hub_id] ? "muted" : ""
+                            hubNotifyMode[h.hub_id] === "silent" ? "muted" : ""
                           }`}
                           onClick={() => {
                             handleSwitchHub(h.hub_id);
@@ -5600,7 +5638,11 @@ function App() {
                             handleRemoveHub(h.hub_id);
                           }}
                           title={`${h.hub_name} (${h.hub_url})${titleSuffix}${
-                            mutedHubs[h.hub_id] ? " — muted" : ""
+                            hubNotifyMode[h.hub_id] === "silent"
+                              ? " — silenced"
+                              : hubNotifyMode[h.hub_id] === "mentions"
+                              ? " — mentions only"
+                              : ""
                           }`}
                         >
                           {h.hub_icon ? (
@@ -5613,13 +5655,23 @@ function App() {
                             h.hub_name.slice(0, 2).toUpperCase()
                           )}
                         </button>
-                        {unread > 0 && !mutedHubs[h.hub_id] && (
+                        {unread > 0 && hubNotifyMode[h.hub_id] !== "silent" && (
                           <span className="hub-unread-badge">
                             {unread > 99 ? "99+" : unread}
                           </span>
                         )}
-                        {mutedHubs[h.hub_id] && (
-                          <span className="hub-muted-badge" title="Muted">🔕</span>
+                        {hubNotifyMode[h.hub_id] === "silent" && (
+                          <span className="hub-muted-badge" title="Silenced">
+                            🔕
+                          </span>
+                        )}
+                        {hubNotifyMode[h.hub_id] === "mentions" && (
+                          <span
+                            className="hub-muted-badge"
+                            title="Mentions only"
+                          >
+                            @
+                          </span>
                         )}
                       </div>
                       {offline && <span className="hub-offline-label">offline</span>}
@@ -5708,19 +5760,28 @@ function App() {
                         Hub settings
                       </button>
                     )}
-                    {activeHubId && (
-                      <button
-                        className="hub-dropdown-item"
-                        onClick={() => {
-                          setHubDropdownOpen(false);
-                          toggleHubMute(activeHubId);
-                        }}
-                      >
-                        {mutedHubs[activeHubId]
-                          ? "Unmute hub notifications"
-                          : "Mute hub notifications"}
-                      </button>
-                    )}
+                    {activeHubId &&
+                      (() => {
+                        const cur = hubNotifyMode[activeHubId] ?? "all";
+                        const items: { mode: NotifyMode; label: string }[] = [
+                          { mode: "all", label: "Notify on all messages" },
+                          { mode: "mentions", label: "Notify on @mentions only" },
+                          { mode: "silent", label: "Silence this hub" },
+                        ];
+                        return items.map(({ mode, label }) => (
+                          <button
+                            key={mode}
+                            className="hub-dropdown-item"
+                            onClick={() => {
+                              setHubDropdownOpen(false);
+                              setHubMode(activeHubId, mode);
+                            }}
+                          >
+                            {cur === mode ? "✓ " : ""}
+                            {label}
+                          </button>
+                        ));
+                      })()}
                     <button
                       className="hub-dropdown-item danger"
                       onClick={() => {
@@ -5821,7 +5882,8 @@ function App() {
                                 }
                                 muted={
                                   !!activeHubId &&
-                                  !!mutedChannels[activeHubId]?.[c.id]
+                                  effectiveNotifyMode(activeHubId, c.id) ===
+                                    "silent"
                                 }
                                 voiceCount={voicePops[c.id] ?? 0}
                                 onClick={() => selectChannel(c)}
@@ -5842,7 +5904,8 @@ function App() {
                         }
                         muted={
                           !!activeHubId &&
-                          !!mutedChannels[activeHubId]?.[node.id]
+                          effectiveNotifyMode(activeHubId, node.id) ===
+                            "silent"
                         }
                         voiceCount={voicePops[node.id] ?? 0}
                         onClick={() => selectChannel(node)}
@@ -6900,20 +6963,32 @@ function App() {
                   >
                     Manage channel bans…
                   </button>
-                  {activeHubId && (
-                    <button
-                      className="context-menu-item"
-                      onClick={() => {
-                        const ch = contextMenu.channel;
-                        setContextMenu(null);
-                        toggleChannelMute(activeHubId, ch.id);
-                      }}
-                    >
-                      {mutedChannels[activeHubId]?.[contextMenu.channel.id]
-                        ? "Unmute notifications"
-                        : "Mute notifications"}
-                    </button>
-                  )}
+                  {activeHubId &&
+                    (() => {
+                      const cur = effectiveNotifyMode(
+                        activeHubId,
+                        contextMenu.channel.id,
+                      );
+                      const items: { mode: NotifyMode; label: string }[] = [
+                        { mode: "all", label: "All messages" },
+                        { mode: "mentions", label: "Only @mentions" },
+                        { mode: "silent", label: "Silent" },
+                      ];
+                      return items.map(({ mode, label }) => (
+                        <button
+                          key={mode}
+                          className="context-menu-item"
+                          onClick={() => {
+                            const ch = contextMenu.channel;
+                            setContextMenu(null);
+                            setChannelMode(activeHubId, ch.id, mode);
+                          }}
+                        >
+                          {cur === mode ? "✓ " : ""}
+                          {label}
+                        </button>
+                      ));
+                    })()}
                   {activeHubId && (
                     <button
                       className="context-menu-item"

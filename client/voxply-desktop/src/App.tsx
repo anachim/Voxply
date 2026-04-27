@@ -3018,12 +3018,14 @@ function App() {
     return out;
   }, [unreadByChannel]);
 
-  // Push the aggregated unread count into the system tray tooltip whenever
-  // it changes. The Tauri side updates the tray label so users see the
-  // count without opening the window.
+  // Push the aggregated unread count into the system tray tooltip AND the
+  // window title whenever it changes. The title is what taskbars/docks show,
+  // so the "(N) Voxply" prefix flags attention even when the window isn't
+  // foregrounded.
   useEffect(() => {
     const total = Object.values(unreadByHub).reduce((n, v) => n + v, 0);
     invoke("set_tray_unread", { count: total }).catch(() => {});
+    document.title = total > 0 ? `(${total > 99 ? "99+" : total}) Voxply` : "Voxply";
   }, [unreadByHub]);
 
   // Hydrate persisted unread state on launch.

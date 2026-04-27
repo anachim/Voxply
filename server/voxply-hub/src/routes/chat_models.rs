@@ -26,6 +26,8 @@ pub struct ChannelResponse {
 #[derive(Serialize, Deserialize, Default)]
 pub struct UpdateChannelRequest {
     #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
     pub description: Option<String>,
     /// Tri-state: absent = don't touch, `Some(Some(id))` = set parent,
     /// `Some(None)` = move to top level.

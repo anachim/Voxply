@@ -162,6 +162,39 @@ pub async fn update_channel(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
     }
 
+    if let Some(name) = &req.name {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Channel name cannot be empty".to_string(),
+            ));
+        }
+        // The channels.name column has a UNIQUE constraint, so collisions
+        // surface as a constraint error -- map to 409 for a clearer
+        // client-side message than "DB error: ...".
+        match sqlx::query("UPDATE channels SET name = ? WHERE id = ?")
+            .bind(trimmed)
+            .bind(&channel_id)
+            .execute(&state.db)
+            .await
+        {
+            Ok(_) => {}
+            Err(sqlx::Error::Database(e)) if e.message().contains("UNIQUE") => {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "A channel with that name already exists".to_string(),
+                ))
+            }
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("DB error: {e}"),
+                ))
+            }
+        }
+    }
+
     Ok(StatusCode::OK)
 }
 

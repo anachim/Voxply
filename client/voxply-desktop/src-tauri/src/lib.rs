@@ -1138,6 +1138,27 @@ async fn update_channel_description(
 }
 
 #[tauri::command]
+async fn rename_channel(
+    channel_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .patch(format!("{hub_url}/channels/{channel_id}"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "name": name }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn move_channel(
     channel_id: String,
     parent_id: Option<String>,
@@ -3202,6 +3223,7 @@ pub fn run() {
             list_channels,
             create_channel,
             update_channel_description,
+            rename_channel,
             move_channel,
             delete_channel,
             reorder_channels,

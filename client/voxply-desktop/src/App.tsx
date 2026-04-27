@@ -6939,6 +6939,35 @@ function App() {
                 <>
                   <button
                     className="context-menu-item"
+                    onClick={async () => {
+                      const ch = contextMenu.channel;
+                      setContextMenu(null);
+                      const next = prompt("Rename channel", ch.name);
+                      if (!next) return;
+                      const trimmed = next.trim();
+                      if (!trimmed || trimmed === ch.name) return;
+                      try {
+                        await invoke("rename_channel", {
+                          channelId: ch.id,
+                          name: trimmed,
+                        });
+                        setChannels((prev) =>
+                          prev.map((c) =>
+                            c.id === ch.id ? { ...c, name: trimmed } : c,
+                          ),
+                        );
+                        if (selectedChannel?.id === ch.id) {
+                          setSelectedChannel({ ...selectedChannel, name: trimmed });
+                        }
+                      } catch (e) {
+                        setError(String(e));
+                      }
+                    }}
+                  >
+                    Rename channel…
+                  </button>
+                  <button
+                    className="context-menu-item"
                     onClick={() => openEditDescription(contextMenu.channel)}
                   >
                     Edit description

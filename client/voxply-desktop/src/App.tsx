@@ -928,9 +928,11 @@ function AvatarEditor({
 
 function UserListGrouped({
   users,
+  inVoice,
   onContextMenu,
 }: {
   users: User[];
+  inVoice?: Set<string>;
   onContextMenu?: (e: React.MouseEvent, user: User) => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -1008,6 +1010,11 @@ function UserListGrouped({
                 <span className="user-name">
                   {u.display_name || u.public_key.slice(0, 16)}
                 </span>
+                {inVoice?.has(u.public_key) && (
+                  <span className="user-in-voice" title="In voice">
+                    🎙️
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -1030,6 +1037,11 @@ function UserListGrouped({
                 <span className="user-name">
                   {u.display_name || u.public_key.slice(0, 16)}
                 </span>
+                {inVoice?.has(u.public_key) && (
+                  <span className="user-in-voice" title="In voice">
+                    🎙️
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -2988,6 +3000,11 @@ function App() {
   // active so the sidebar can show "🎙️ N" hints. Channels not in the map
   // have zero participants.
   const [voicePops, setVoicePops] = useState<Record<string, number>>({});
+  // Public keys of users currently in any voice channel on the active hub.
+  // Polled alongside voicePops; lets the member list show a 🎙️ chip.
+  const [voiceActiveUsers, setVoiceActiveUsers] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Collapsed categories: hub_id -> { category_id: true }. Persisted so a
   // folded category stays folded across restarts. Categories not in the
@@ -3167,19 +3184,26 @@ function App() {
       .catch(() => {});
   }, []);
 
-  // Poll voice channel populations while a hub is active. 5s feels live
-  // enough without spamming the endpoint; the moment someone joins or
-  // leaves voice you'd see the count flip within that window.
+  // Poll voice channel populations + active-user set while a hub is active.
+  // 5s feels live enough without spamming the endpoint; the moment someone
+  // joins or leaves voice you'd see the count flip within that window.
   useEffect(() => {
     if (!activeHubId) {
       setVoicePops({});
+      setVoiceActiveUsers(new Set());
       return;
     }
     let cancelled = false;
     async function tick() {
       try {
-        const pops = await invoke<Record<string, number>>("voice_populations");
-        if (!cancelled) setVoicePops(pops);
+        const [pops, active] = await Promise.all([
+          invoke<Record<string, number>>("voice_populations"),
+          invoke<string[]>("voice_active_users"),
+        ]);
+        if (!cancelled) {
+          setVoicePops(pops);
+          setVoiceActiveUsers(new Set(active));
+        }
       } catch {
         // Network blip while typing in chat is fine -- we'll catch up
         // on the next tick.
@@ -6856,6 +6880,7 @@ function App() {
             <aside className="user-list-sidebar">
               <UserListGrouped
                 users={users}
+                inVoice={voiceActiveUsers}
                 onContextMenu={(e, u) => {
                   e.preventDefault();
                   setUserContextMenu({ x: e.clientX, y: e.clientY, user: u });

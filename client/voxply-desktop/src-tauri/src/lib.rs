@@ -1463,6 +1463,22 @@ async fn voice_populations(
 }
 
 #[tauri::command]
+async fn voice_active_users(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/voice/active-users"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
+#[tauri::command]
 async fn search_messages(
     channel_id: String,
     query: String,
@@ -3231,6 +3247,7 @@ pub fn run() {
             get_messages,
             search_messages,
             voice_populations,
+            voice_active_users,
             add_reaction,
             remove_reaction,
             send_message,

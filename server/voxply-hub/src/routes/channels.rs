@@ -27,6 +27,23 @@ pub async fn voice_populations(
     Json(out)
 }
 
+/// Returns the set of public keys currently in any voice channel on this
+/// hub. Used by the client to show a 🎙️ next to in-voice users in the
+/// member list.
+pub async fn voice_active_users(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> Json<Vec<String>> {
+    let voice = state.voice_channels.read().await;
+    let mut out: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for members in voice.values() {
+        for pk in members.keys() {
+            out.insert(pk.clone());
+        }
+    }
+    Json(out.into_iter().collect())
+}
+
 pub async fn create_channel(
     State(state): State<Arc<AppState>>,
     user: AuthUser,

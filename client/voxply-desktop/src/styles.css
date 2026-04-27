@@ -2023,6 +2023,12 @@ select:focus {
   font-weight: var(--weight-medium);
 }
 
+.user-in-voice {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  opacity: 0.85;
+}
+
 .user-list-filter {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);

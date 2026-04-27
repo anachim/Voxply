@@ -270,6 +270,46 @@ select,
   margin: 0 auto;
 }
 
+.welcome {
+  max-width: 540px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.welcome-tagline {
+  color: var(--text);
+  font-size: var(--text-md);
+  margin-bottom: var(--space-2);
+}
+
+.welcome-points {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 var(--space-4);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.welcome-points li {
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-muted);
+  line-height: var(--leading-relaxed);
+}
+
+.welcome-points li strong {
+  color: var(--text);
+}
+
+.welcome-hint {
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+}
+
 .pending-approval-icon {
   font-size: 48px;
   line-height: 1;

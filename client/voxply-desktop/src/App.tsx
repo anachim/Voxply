@@ -5757,12 +5757,32 @@ function App() {
             </button>
           </div>
           {!hasActiveHub ? (
-            <div className="empty-state">
+            <div className="empty-state welcome">
               <h1>Voxply</h1>
-              <p>Decentralized voice chat + community platform</p>
+              <p className="welcome-tagline">
+                Decentralized voice chat + community platform
+              </p>
+              <ul className="welcome-points">
+                <li>
+                  <strong>Hubs</strong> are independently-run servers — like
+                  Discord servers but federated. Add one with its URL to join.
+                </li>
+                <li>
+                  <strong>Your identity</strong> is a keypair on this device,
+                  not an account. The same identity works on every hub. Back
+                  up your recovery phrase from Settings → Security.
+                </li>
+                <li>
+                  <strong>Alliances</strong> let hubs share channels and voice
+                  across topics — your messages travel with you.
+                </li>
+              </ul>
               <button className="primary" onClick={() => setShowAddHub(true)}>
-                Add a hub to get started
+                Add your first hub
               </button>
+              <p className="welcome-hint muted">
+                Don't have one? Ask a friend for a hub URL or invite link.
+              </p>
             </div>
           ) : myApprovalStatus === "pending" ? (
             <div className="empty-state pending-approval">

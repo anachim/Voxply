@@ -510,6 +510,8 @@ interface SettingsPageProps {
   onVoiceModeChange: (m: "vad" | "ptt") => void;
   pttKey: string;
   onPttKeyChange: (k: string) => void;
+  mentionPingEnabled: boolean;
+  onMentionPingChange: (v: boolean) => void;
   micLevel: number;
   micTesting: boolean;
   onToggleMicTest: () => void;
@@ -1320,6 +1322,21 @@ function SettingsPage(props: SettingsPageProps) {
               <button onClick={props.onToggleMicTest} className="btn-secondary">
                 {props.micTesting ? "Stop test" : "Start mic test"}
               </button>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Mention ping</label>
+              <p className="muted">
+                Plays a short two-tone sound when someone @-mentions you in
+                a non-focused channel. OS notifications are independent.
+              </p>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={props.mentionPingEnabled}
+                  onChange={(e) => props.onMentionPingChange(e.target.checked)}
+                />
+                Play mention ping
+              </label>
             </div>
           </section>
         )}
@@ -3517,6 +3534,27 @@ function App() {
   const [voiceMode, setVoiceMode] = useState<"vad" | "ptt">("vad");
   // KeyboardEvent.code (layout-independent). Default Space; user can rebind.
   const [pttKey, setPttKey] = useState<string>("Space");
+  // Whether to play the mention ping. Local-only preference; OS notifications
+  // and unread badges are unaffected by this toggle.
+  const [mentionPingEnabled, setMentionPingEnabledState] = useState<boolean>(
+    () => {
+      try {
+        return localStorage.getItem("voxply.mentionPing") !== "0";
+      } catch {
+        return true;
+      }
+    },
+  );
+  function setMentionPingEnabled(v: boolean) {
+    setMentionPingEnabledState(v);
+    try {
+      localStorage.setItem("voxply.mentionPing", v ? "1" : "0");
+    } catch {}
+  }
+  const mentionPingRef = useRef(mentionPingEnabled);
+  useEffect(() => {
+    mentionPingRef.current = mentionPingEnabled;
+  }, [mentionPingEnabled]);
 
   // Push-to-talk: when in PTT mode and connected to voice, the configured
   // key gates the mic. Pressing flips muted=false; releasing flips it back.
@@ -3757,7 +3795,7 @@ function App() {
             }
 
             if (isMention && !isActiveChannel && allowBump) {
-              playMentionPing();
+              if (mentionPingRef.current) playMentionPing();
               if (
                 typeof Notification !== "undefined" &&
                 Notification.permission === "granted"
@@ -5602,6 +5640,8 @@ function App() {
                 k,
               );
             }}
+            mentionPingEnabled={mentionPingEnabled}
+            onMentionPingChange={setMentionPingEnabled}
             micLevel={micLevel}
             micTesting={micTesting}
             onToggleMicTest={toggleMicTest}

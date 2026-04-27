@@ -5800,6 +5800,18 @@ function App() {
                           </button>
                         ));
                       })()}
+                    {activeHubId &&
+                      Object.keys(unreadByChannel[activeHubId] ?? {}).length > 0 && (
+                        <button
+                          className="hub-dropdown-item"
+                          onClick={() => {
+                            setHubDropdownOpen(false);
+                            clearHubUnread(activeHubId);
+                          }}
+                        >
+                          Mark all as read
+                        </button>
+                      )}
                     <button
                       className="hub-dropdown-item danger"
                       onClick={() => {

@@ -1621,6 +1621,30 @@ async fn reconnect_hub(
     Ok(())
 }
 
+/// Fetch /info from any hub URL without an active session. Used by the
+/// add-hub dialog to preview a hub's name + icon + description before
+/// committing. Trims trailing slash so users can paste either form.
+#[tauri::command]
+async fn preview_hub_info(url: String) -> Result<InfoResponse, String> {
+    let base = url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("Empty URL".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+    let resp = client
+        .get(format!("{base}/info"))
+        .send()
+        .await
+        .map_err(|e| format!("Cannot reach hub: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Hub returned {}", resp.status()));
+    }
+    resp.json().await.map_err(|e| format!("Invalid /info: {e}"))
+}
+
 /// Persist a new hub ordering. The provided list should be the desired
 /// order of hub_ids; any saved hub not in the list keeps its relative
 /// position at the end (defensive against partial drags).
@@ -3294,6 +3318,7 @@ pub fn run() {
             set_dm_typing,
             reconnect_hub,
             reorder_hubs,
+            preview_hub_info,
             voice_join,
             voice_leave,
             voice_set_muted,

@@ -2967,6 +2967,19 @@ function App() {
   const [hubs, setHubs] = useState<Hub[]>([]);
   const [activeHubId, setActiveHubId] = useState<string | null>(null);
   const [showAddHub, setShowAddHub] = useState(false);
+  const [hubPreview, setHubPreview] = useState<
+    | { state: "idle" }
+    | { state: "loading" }
+    | {
+        state: "ok";
+        url: string;
+        name: string;
+        description?: string | null;
+        icon?: string | null;
+        invite_only?: boolean;
+      }
+    | { state: "error"; message: string }
+  >({ state: "idle" });
   const [hubUrl, setHubUrl] = useState("http://localhost:3000");
   // Per-channel unread tracking: hub_id -> { channel_id: true }. Persisted
   // across restarts via Tauri so dots survive the app being closed. Derived
@@ -4669,6 +4682,47 @@ function App() {
       setError(String(e));
     }
   }
+
+  // Debounced fetch of /info while the user types a hub URL.
+  useEffect(() => {
+    if (!showAddHub) {
+      setHubPreview({ state: "idle" });
+      return;
+    }
+    const url = hubUrl.trim();
+    if (!url || !/^https?:\/\//i.test(url)) {
+      setHubPreview({ state: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setHubPreview({ state: "loading" });
+    const handle = setTimeout(async () => {
+      try {
+        const info = await invoke<{
+          name: string;
+          description?: string | null;
+          icon?: string | null;
+          invite_only?: boolean;
+        }>("preview_hub_info", { url });
+        if (!cancelled) {
+          setHubPreview({
+            state: "ok",
+            url,
+            name: info.name,
+            description: info.description,
+            icon: info.icon,
+            invite_only: info.invite_only,
+          });
+        }
+      } catch (e) {
+        if (!cancelled) setHubPreview({ state: "error", message: String(e) });
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [hubUrl, showAddHub]);
 
   async function handleAddHub() {
     setLoading(true);
@@ -7121,6 +7175,38 @@ function App() {
                 placeholder="http://hub-url:3000"
                 autoFocus
               />
+              {hubPreview.state === "loading" && (
+                <p className="muted hub-preview-status">Looking up hub…</p>
+              )}
+              {hubPreview.state === "error" && (
+                <p className="hub-preview-error">{hubPreview.message}</p>
+              )}
+              {hubPreview.state === "ok" && (
+                <div className="hub-preview">
+                  {hubPreview.icon ? (
+                    <img
+                      src={hubPreview.icon}
+                      alt=""
+                      className="hub-preview-icon"
+                    />
+                  ) : (
+                    <div className="hub-preview-icon placeholder">
+                      {hubPreview.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="hub-preview-info">
+                    <strong>{hubPreview.name}</strong>
+                    {hubPreview.description && (
+                      <p className="muted">{hubPreview.description}</p>
+                    )}
+                    {hubPreview.invite_only && (
+                      <p className="muted hub-preview-warn">
+                        🔒 Invite-only — you'll need an invite to join
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="modal-actions">
                 <button onClick={() => setShowAddHub(false)} className="btn-secondary">
                   Cancel

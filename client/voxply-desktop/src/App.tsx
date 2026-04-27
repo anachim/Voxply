@@ -3618,6 +3618,10 @@ function App() {
   // Ref to the messages container for auto-scroll
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // Ref to the channel-message input so we can auto-focus on channel switch
+  // and after sending. Lets the user start typing immediately without
+  // clicking back into the field.
+  const messageInputRef = useRef<HTMLInputElement>(null);
   // Tracks whether the user is parked near the bottom of the message list.
   // We only auto-scroll on new messages while this is true; otherwise the
   // user is reading history and scrolling them is rude. The "↓ N new" pill
@@ -3651,6 +3655,11 @@ function App() {
   useEffect(() => {
     setStickToBottom(true);
     setNewWhileScrolledUp(0);
+    // Auto-focus the message input so the user can start typing immediately.
+    // Small delay lets the new channel render first.
+    if (selectedChannel) {
+      setTimeout(() => messageInputRef.current?.focus(), 0);
+    }
   }, [selectedChannel?.id]);
 
   function handleMessagesScroll() {
@@ -6731,6 +6740,7 @@ function App() {
                     />
                   </label>
                   <input
+                    ref={messageInputRef}
                     type="text"
                     value={inputText}
                     onChange={(e) => {

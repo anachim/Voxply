@@ -75,6 +75,7 @@ pub async fn create_conversation(
             conv_type: conv_type.to_string(),
             members: all_members,
             created_at: now,
+            last_activity_at: now,
         }),
     ))
 }
@@ -105,11 +106,23 @@ pub async fn list_conversations(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+        // Last activity = most recent dm_message in this conversation, or
+        // the conversation creation time if there are no messages yet.
+        let last_msg: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(created_at) FROM dm_messages WHERE conversation_id = ?",
+        )
+        .bind(&row.id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
         result.push(ConversationResponse {
             id: row.id,
             conv_type: row.conv_type,
             members,
             created_at: row.created_at,
+            last_activity_at: last_msg.unwrap_or(row.created_at),
         });
     }
 
@@ -588,6 +601,7 @@ async fn find_existing_dm(
                 conv_type: conv.conv_type,
                 members: vec![user_a.to_string(), user_b.to_string()],
                 created_at: conv.created_at,
+                last_activity_at: conv.created_at,
             }));
         }
     }

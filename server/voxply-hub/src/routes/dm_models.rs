@@ -16,6 +16,11 @@ pub struct ConversationResponse {
     pub conv_type: String,
     pub members: Vec<String>,
     pub created_at: i64,
+    /// Most recent message timestamp; falls back to created_at when the
+    /// conversation has no messages yet. Used by the client to sort the
+    /// conversation list by recent activity rather than creation order.
+    #[serde(default)]
+    pub last_activity_at: i64,
 }
 
 #[derive(Deserialize)]

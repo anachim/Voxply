@@ -308,6 +308,7 @@ interface Conversation {
   conv_type: string;
   members: string[];
   created_at: number;
+  last_activity_at?: number;
 }
 
 interface DmMessage {
@@ -6083,7 +6084,13 @@ function App() {
                   </button>
                 </div>
                 <ul className="channel-list">
-                  {conversations.map((c) => {
+                  {[...conversations]
+                    .sort(
+                      (a, b) =>
+                        (b.last_activity_at ?? b.created_at) -
+                        (a.last_activity_at ?? a.created_at),
+                    )
+                    .map((c) => {
                     const others = c.members.filter((m) => m !== publicKey);
                     const label = others
                       .map((k) => {

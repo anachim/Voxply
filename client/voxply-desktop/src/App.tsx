@@ -6688,6 +6688,31 @@ function App() {
                               >
                                 ↩
                               </button>
+                              <button
+                                className="message-action"
+                                onClick={async () => {
+                                  const hub = hubs.find(
+                                    (h) => h.hub_id === activeHubId,
+                                  );
+                                  if (!hub) return;
+                                  // voxply:// URL is informational for now --
+                                  // there's no handler that opens it. Foundation
+                                  // for a "jump to message" feature later.
+                                  const link = `voxply://${hub.hub_url.replace(
+                                    /^https?:\/\//,
+                                    "",
+                                  )}/channel/${m.channel_id}/message/${m.id}`;
+                                  try {
+                                    await navigator.clipboard.writeText(link);
+                                    setToast("Link copied");
+                                  } catch (e) {
+                                    setError(String(e));
+                                  }
+                                }}
+                                title="Copy link"
+                              >
+                                🔗
+                              </button>
                               {isMine && (
                                 <button
                                   className="message-action"

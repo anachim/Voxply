@@ -1621,6 +1621,29 @@ async fn reconnect_hub(
     Ok(())
 }
 
+/// Wipe local-only state files (unread, notification mutes, pinned channels,
+/// collapsed categories, voice settings). Identity and saved-hubs are NOT
+/// touched -- those are user-meaningful and need an explicit recover/leave
+/// flow.
+#[tauri::command]
+fn clear_local_data() -> Result<(), String> {
+    let paths = [
+        unread_state_path()?,
+        notification_mutes_path()?,
+        pinned_channels_path()?,
+        collapsed_categories_path()?,
+        voice_settings_path()?,
+    ];
+    for p in paths {
+        if p.exists() {
+            // Best-effort: if any single file fails to delete (file in use,
+            // permissions), keep going so we delete what we can.
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+    Ok(())
+}
+
 /// Fetch /info from any hub URL without an active session. Used by the
 /// add-hub dialog to preview a hub's name + icon + description before
 /// committing. Trims trailing slash so users can paste either form.
@@ -3319,6 +3342,7 @@ pub fn run() {
             reconnect_hub,
             reorder_hubs,
             preview_hub_info,
+            clear_local_data,
             voice_join,
             voice_leave,
             voice_set_muted,

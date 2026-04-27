@@ -519,6 +519,7 @@ interface SettingsPageProps {
   recoveryPhrase: string | null;
   onShowRecovery: () => void;
   onRecoverIdentity: (phrase: string) => Promise<void>;
+  onClearLocalData: () => void;
 }
 
 /**
@@ -1231,6 +1232,21 @@ function SettingsPage(props: SettingsPageProps) {
                   {props.copiedKey ? "Copied" : "Copy full key"}
                 </button>
               </div>
+            </div>
+            <div className="settings-section">
+              <label className="settings-label">Local data</label>
+              <p className="muted">
+                Wipes per-device preferences (unread, mutes, pins, voice
+                settings, recents). Your identity and the list of saved hubs
+                are kept — use Restore from recovery phrase or Leave hub for
+                those.
+              </p>
+              <button
+                className="btn-secondary"
+                onClick={props.onClearLocalData}
+              >
+                Clear local data…
+              </button>
             </div>
           </section>
         )}
@@ -5288,6 +5304,29 @@ function App() {
     }
   }
 
+  async function handleClearLocalData() {
+    const ok = confirm(
+      "Clear local preferences?\n\nThis wipes unread, mutes, pinned channels, collapsed categories, voice settings, and recently-used emojis.\n\nYour identity and saved hubs are kept.",
+    );
+    if (!ok) return;
+    const confirm2 = confirm("Are you sure? This can't be undone.");
+    if (!confirm2) return;
+    try {
+      await invoke("clear_local_data");
+      // localStorage flags too -- those live in the webview, not on disk
+      // via Tauri.
+      try {
+        localStorage.removeItem("voxply.recentEmojis");
+        localStorage.removeItem("voxply.memberSidebarHidden");
+        localStorage.removeItem("voxply.mentionPing");
+      } catch {}
+      setToast("Local data cleared — reloading…");
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function handleRecoverIdentity(phrase: string) {
     try {
       const newPubkey = await invoke<string>("recover_identity_from_phrase", {
@@ -5823,6 +5862,7 @@ function App() {
             recoveryPhrase={recoveryPhrase}
             onShowRecovery={handleShowRecovery}
             onRecoverIdentity={handleRecoverIdentity}
+            onClearLocalData={handleClearLocalData}
           />
         ) : (
         <div className="main-layout">

@@ -1579,6 +1579,33 @@ function MessageReactions({
   );
 }
 
+const RECENT_EMOJI_KEY = "voxply.recentEmojis";
+const RECENT_EMOJI_MAX = 8;
+
+function loadRecentEmojis(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_EMOJI_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, RECENT_EMOJI_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushRecentEmoji(emoji: string) {
+  try {
+    const cur = loadRecentEmojis();
+    const next = [emoji, ...cur.filter((e) => e !== emoji)].slice(
+      0,
+      RECENT_EMOJI_MAX,
+    );
+    localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage full / disabled → just no recents, no big deal
+  }
+}
+
 function ReactionPicker({
   onPick,
 }: {
@@ -1586,6 +1613,8 @@ function ReactionPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // Re-read recents whenever we open so picks made elsewhere show up.
+  const [recents, setRecents] = useState<string[]>(() => loadRecentEmojis());
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1598,11 +1627,21 @@ function ReactionPicker({
     setQuery("");
   }
 
+  function handlePick(emoji: string) {
+    pushRecentEmoji(emoji);
+    setRecents(loadRecentEmojis());
+    onPick(emoji);
+    handleClose();
+  }
+
   return (
     <div className="reaction-picker">
       <button
         className="reaction-add-btn"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) setRecents(loadRecentEmojis());
+          setOpen((v) => !v);
+        }}
         title="Add reaction"
       >
         🙂+
@@ -1620,12 +1659,29 @@ function ReactionPicker({
             onKeyDown={(e) => {
               if (e.key === "Escape") handleClose();
               else if (e.key === "Enter" && filtered.length > 0) {
-                onPick(filtered[0][0]);
-                handleClose();
+                handlePick(filtered[0][0]);
               }
             }}
             placeholder="Search emoji…"
           />
+          {!query && recents.length > 0 && (
+            <>
+              <div className="reaction-picker-section-label">Recent</div>
+              <div className="reaction-picker-grid reaction-picker-recents">
+                {recents.map((emoji) => (
+                  <button
+                    key={`r-${emoji}`}
+                    className="reaction-picker-emoji"
+                    onClick={() => handlePick(emoji)}
+                    title={emoji}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+              <div className="reaction-picker-divider" />
+            </>
+          )}
           <div className="reaction-picker-grid">
             {filtered.length === 0 ? (
               <span className="muted reaction-picker-empty">No matches</span>
@@ -1634,10 +1690,7 @@ function ReactionPicker({
                 <button
                   key={emoji}
                   className="reaction-picker-emoji"
-                  onClick={() => {
-                    onPick(emoji);
-                    handleClose();
-                  }}
+                  onClick={() => handlePick(emoji)}
                   title={emoji}
                 >
                   {emoji}

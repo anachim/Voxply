@@ -3282,6 +3282,24 @@ function App() {
   // Ctrl+K quick-switcher palette.
   const [paletteOpen, setPaletteOpen] = useState(false);
 
+  // Whether the right-side member list is collapsed. Local-only preference;
+  // localStorage is fine since it's purely cosmetic + per-device.
+  const [memberSidebarHidden, setMemberSidebarHiddenState] = useState<boolean>(
+    () => {
+      try {
+        return localStorage.getItem("voxply.memberSidebarHidden") === "1";
+      } catch {
+        return false;
+      }
+    },
+  );
+  function setMemberSidebarHidden(v: boolean) {
+    setMemberSidebarHiddenState(v);
+    try {
+      localStorage.setItem("voxply.memberSidebarHidden", v ? "1" : "0");
+    } catch {}
+  }
+
   // Lightbox: when set, renders a full-screen image overlay. Used by image
   // attachments so clicking opens a zoom view instead of a new browser tab.
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -6282,6 +6300,17 @@ function App() {
                   >
                     🔍
                   </button>
+                  <button
+                    onClick={() => setMemberSidebarHidden(!memberSidebarHidden)}
+                    className="btn-icon-header"
+                    title={
+                      memberSidebarHidden
+                        ? "Show member list"
+                        : "Hide member list"
+                    }
+                  >
+                    {memberSidebarHidden ? "👥" : "👤"}
+                  </button>
                   {voiceChannelId === selectedChannel.id ? (
                     <button onClick={handleVoiceLeave} className="btn-voice leave">
                       🔇 Leave Voice
@@ -6718,7 +6747,7 @@ function App() {
             )}
           </div>
 
-          {view === "channels" && (
+          {view === "channels" && !memberSidebarHidden && (
             <aside className="user-list-sidebar">
               <UserListGrouped
                 users={users}

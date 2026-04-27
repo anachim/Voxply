@@ -2975,6 +2975,11 @@ function App() {
     Record<string, Record<string, boolean>>
   >({});
 
+  // Conversation unread set. In-memory only -- DMs always come back to view
+  // through the conversation list, so persisting per-launch isn't worth the
+  // complexity yet.
+  const [unreadDms, setUnreadDms] = useState<Record<string, boolean>>({});
+
   // Notification mode per scope.
   // - "all": notify on every message (default; entries omitted from state)
   // - "mentions": only notify when the current user is @-mentioned
@@ -3659,6 +3664,12 @@ function App() {
 
   // DMs
   const [view, setView] = useState<"channels" | "dms" | "game">("channels");
+  // Mirror current view in a ref so window-level event listeners can read
+  // the latest value without re-registering on every state change.
+  const viewRef = useRef<typeof view>(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [dmMessages, setDmMessages] = useState<Record<string, DmMessage[]>>({});
@@ -4132,6 +4143,14 @@ function App() {
             const list = prev[conversation_id] || [];
             return { ...prev, [conversation_id]: [...list, msg] };
           });
+          // Mark this conversation unread unless the user is currently
+          // viewing it (in DM view AND it's the selected conversation).
+          const lookingHere =
+            viewRef.current === "dms" &&
+            selectedConversationIdRef.current === conversation_id;
+          if (!lookingHere && msg.sender !== publicKeyRef.current) {
+            setUnreadDms((prev) => ({ ...prev, [conversation_id]: true }));
+          }
         })
       );
 
@@ -5246,6 +5265,11 @@ function App() {
   async function selectConversation(conv: Conversation) {
     setSelectedConversation(conv);
     setDmTypingByKey({});
+    setUnreadDms((prev) => {
+      if (!prev[conv.id]) return prev;
+      const { [conv.id]: _, ...rest } = prev;
+      return rest;
+    });
     try {
       const history = await invoke<DmMessageFull[]>("get_dm_messages", {
         conversationId: conv.id,
@@ -5749,17 +5773,26 @@ function App() {
         ) : (
         <div className="main-layout">
           <div className="hub-sidebar">
-            <button
-              className={`hub-icon dm ${view === "dms" ? "active" : ""}`}
-              onClick={() => {
-                setView("dms");
-                if (hasActiveHub) loadConversations();
-              }}
-              disabled={!hasActiveHub}
-              title="Direct Messages"
-            >
-              @
-            </button>
+            <div className="hub-icon-box">
+              <button
+                className={`hub-icon dm ${view === "dms" ? "active" : ""}`}
+                onClick={() => {
+                  setView("dms");
+                  if (hasActiveHub) loadConversations();
+                }}
+                disabled={!hasActiveHub}
+                title="Direct Messages"
+              >
+                @
+              </button>
+              {Object.keys(unreadDms).length > 0 && view !== "dms" && (
+                <span className="hub-unread-badge">
+                  {Object.keys(unreadDms).length > 99
+                    ? "99+"
+                    : Object.keys(unreadDms).length}
+                </span>
+              )}
+            </div>
             <div className="hub-sidebar-divider" />
             <DndContext sensors={dndSensors} onDragEnd={handleHubReorder}>
               <SortableContext
@@ -6214,14 +6247,16 @@ function App() {
                         return u?.display_name || k.slice(0, 12);
                       })
                       .join(", ");
+                    const unread = !!unreadDms[c.id];
                     return (
                       <li
                         key={c.id}
                         className={`channel-item ${
                           selectedConversation?.id === c.id ? "selected" : ""
-                        }`}
+                        } ${unread ? "unread" : ""}`}
                         onClick={() => selectConversation(c)}
                       >
+                        {unread && <span className="channel-unread-dot" />}
                         @ {label || "(empty)"}
                       </li>
                     );

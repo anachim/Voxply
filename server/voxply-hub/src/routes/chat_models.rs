@@ -187,6 +187,8 @@ pub enum WsClientMessage {
     VoiceSpeaking { channel_id: String, speaking: bool },
     #[serde(rename = "typing")]
     Typing { channel_id: String, typing: bool },
+    #[serde(rename = "dm_typing")]
+    DmTyping { conversation_id: String, typing: bool },
 }
 
 #[derive(Serialize, Clone)]
@@ -257,6 +259,13 @@ pub enum WsServerMessage {
         sender_name: Option<String>,
         content: String,
         timestamp: i64,
+    },
+    #[serde(rename = "dm_typing")]
+    DmTyping {
+        conversation_id: String,
+        sender: String,
+        sender_name: Option<String>,
+        typing: bool,
     },
 }
 

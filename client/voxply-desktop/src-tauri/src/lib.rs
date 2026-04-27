@@ -38,6 +38,7 @@ enum WsCommand {
     VoiceLeave { channel_id: String },
     VoiceSpeaking { channel_id: String, speaking: bool },
     Typing { channel_id: String, typing: bool },
+    DmTyping { conversation_id: String, typing: bool },
 }
 
 struct VoiceSession {
@@ -343,6 +344,13 @@ enum WsServerMessage {
         sender_name: Option<String>,
         content: String,
         timestamp: i64,
+    },
+    #[serde(rename = "dm_typing")]
+    DmTyping {
+        conversation_id: String,
+        sender: String,
+        sender_name: Option<String>,
+        typing: bool,
     },
     #[serde(other)]
     Other,
@@ -1010,6 +1018,15 @@ async fn spawn_ws_task(
                                             "timestamp": timestamp,
                                         }));
                                     }
+                                    WsServerMessage::DmTyping { conversation_id, sender, sender_name, typing } => {
+                                        let _ = app.emit("dm-typing", serde_json::json!({
+                                            "hub_id": hub_id_for_task,
+                                            "conversation_id": conversation_id,
+                                            "sender": sender,
+                                            "sender_name": sender_name,
+                                            "typing": typing,
+                                        }));
+                                    }
                                     WsServerMessage::Other => {}
                                 }
                             }
@@ -1050,6 +1067,13 @@ async fn spawn_ws_task(
                             serde_json::json!({
                                 "type": "typing",
                                 "channel_id": channel_id,
+                                "typing": typing,
+                            })
+                        }
+                        WsCommand::DmTyping { conversation_id, typing } => {
+                            serde_json::json!({
+                                "type": "dm_typing",
+                                "conversation_id": conversation_id,
                                 "typing": typing,
                             })
                         }
@@ -1634,6 +1658,17 @@ fn set_typing(
     // Best-effort: if the WS is closed, the user just doesn't broadcast a
     // typing event -- not worth surfacing to the UI.
     let _ = tx.send(WsCommand::Typing { channel_id, typing });
+    Ok(())
+}
+
+#[tauri::command]
+fn set_dm_typing(
+    conversation_id: String,
+    typing: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let tx = active_ws_tx(&state)?;
+    let _ = tx.send(WsCommand::DmTyping { conversation_id, typing });
     Ok(())
 }
 
@@ -3256,6 +3291,7 @@ pub fn run() {
             subscribe_channel,
             unsubscribe_channel,
             set_typing,
+            set_dm_typing,
             reconnect_hub,
             reorder_hubs,
             voice_join,

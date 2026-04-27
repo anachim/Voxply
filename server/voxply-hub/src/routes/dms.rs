@@ -196,7 +196,7 @@ pub async fn send_dm(
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
     .flatten();
 
-    let _ = state.dm_tx.send(DmEvent {
+    let _ = state.dm_tx.send(DmEvent::Message {
         conversation_id: conversation_id.clone(),
         sender: user.public_key.clone(),
         sender_name: sender_name.clone(),
@@ -421,7 +421,7 @@ pub async fn receive_federated_dm(
     .ok()
     .flatten();
 
-    let _ = state.dm_tx.send(DmEvent {
+    let _ = state.dm_tx.send(DmEvent::Message {
         conversation_id: req.conversation_id,
         sender: req.sender,
         sender_name,

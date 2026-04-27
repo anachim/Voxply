@@ -10,12 +10,35 @@ use crate::federation::client::FederationClient;
 use crate::routes::chat_models::{ChatEvent, WsServerMessage};
 
 #[derive(Clone, Debug, serde::Serialize)]
-pub struct DmEvent {
-    pub conversation_id: String,
-    pub sender: String,
-    pub sender_name: Option<String>,
-    pub content: String,
-    pub timestamp: i64,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DmEvent {
+    Message {
+        conversation_id: String,
+        sender: String,
+        sender_name: Option<String>,
+        content: String,
+        timestamp: i64,
+    },
+    Typing {
+        conversation_id: String,
+        sender: String,
+        sender_name: Option<String>,
+        typing: bool,
+    },
+}
+
+impl DmEvent {
+    pub fn conversation_id(&self) -> &str {
+        match self {
+            DmEvent::Message { conversation_id, .. }
+            | DmEvent::Typing { conversation_id, .. } => conversation_id,
+        }
+    }
+    pub fn sender(&self) -> &str {
+        match self {
+            DmEvent::Message { sender, .. } | DmEvent::Typing { sender, .. } => sender,
+        }
+    }
 }
 
 pub struct AppState {

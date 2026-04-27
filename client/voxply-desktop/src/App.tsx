@@ -3235,18 +3235,21 @@ function App() {
 
   // Sweep typing entries older than 5s every second. Saves us from showing
   // a stale "X is typing..." if their typing:false event got lost.
+  // Same sweep covers both channel and DM typing maps.
   useEffect(() => {
     const handle = setInterval(() => {
-      setTypingByKey((prev) => {
-        const cutoff = Date.now() - 5000;
+      const cutoff = Date.now() - 5000;
+      function trim<T extends { ts: number }>(prev: Record<string, T>) {
         let changed = false;
-        const next: typeof prev = {};
+        const next: Record<string, T> = {};
         for (const [k, v] of Object.entries(prev)) {
           if (v.ts >= cutoff) next[k] = v;
           else changed = true;
         }
         return changed ? next : prev;
-      });
+      }
+      setTypingByKey(trim);
+      setDmTypingByKey(trim);
     }, 1000);
     return () => clearInterval(handle);
   }, []);
@@ -3275,6 +3278,26 @@ function App() {
         }).catch(() => {});
       }
       lastTypingSentRef.current = 0;
+    }, 4000);
+  }
+
+  /** Same shape as pingTyping but routed through the DM broadcast. */
+  function pingDmTyping() {
+    if (!selectedConversation) return;
+    const convId = selectedConversation.id;
+    const now = Date.now();
+    if (now - lastDmTypingSentRef.current > 3000) {
+      lastDmTypingSentRef.current = now;
+      invoke("set_dm_typing", { conversationId: convId, typing: true }).catch(
+        () => {},
+      );
+    }
+    if (dmTypingDebounceRef.current) clearTimeout(dmTypingDebounceRef.current);
+    dmTypingDebounceRef.current = setTimeout(() => {
+      invoke("set_dm_typing", { conversationId: convId, typing: false }).catch(
+        () => {},
+      );
+      lastDmTypingSentRef.current = 0;
     }, 4000);
   }
   const [pingByHub, setPingByHub] = useState<Record<string, number | null>>({});
@@ -3314,6 +3337,12 @@ function App() {
   >({});
   const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSentRef = useRef<number>(0);
+  // Same shape but for the active DM conversation.
+  const [dmTypingByKey, setDmTypingByKey] = useState<
+    Record<string, { name: string; ts: number }>
+  >({});
+  const dmTypingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDmTypingSentRef = useRef<number>(0);
 
   // Per-channel search. When a query is active, the message list is
   // replaced by search results (newest-first) until the user clears it.
@@ -3903,6 +3932,39 @@ function App() {
             }
           }
         )
+      );
+
+      unlistens.push(
+        await listen<{
+          hub_id: string;
+          conversation_id: string;
+          sender: string;
+          sender_name: string | null;
+          typing: boolean;
+        }>("dm-typing", (event) => {
+          if (event.payload.hub_id !== activeHubIdRef.current) return;
+          // Only show when the user is actually viewing this conversation.
+          if (
+            event.payload.conversation_id !==
+            selectedConversationIdRef.current
+          )
+            return;
+          if (event.payload.sender === publicKeyRef.current) return;
+          const name =
+            event.payload.sender_name || formatPubkey(event.payload.sender);
+          if (event.payload.typing) {
+            setDmTypingByKey((prev) => ({
+              ...prev,
+              [event.payload.sender]: { name, ts: Date.now() },
+            }));
+          } else {
+            setDmTypingByKey((prev) => {
+              if (!prev[event.payload.sender]) return prev;
+              const { [event.payload.sender]: _, ...rest } = prev;
+              return rest;
+            });
+          }
+        }),
       );
 
       unlistens.push(
@@ -5183,6 +5245,7 @@ function App() {
 
   async function selectConversation(conv: Conversation) {
     setSelectedConversation(conv);
+    setDmTypingByKey({});
     try {
       const history = await invoke<DmMessageFull[]>("get_dm_messages", {
         conversationId: conv.id,
@@ -6337,6 +6400,7 @@ function App() {
                     })}
                     <div ref={messagesEndRef} />
                   </div>
+                  <TypingIndicator typers={Object.values(dmTypingByKey)} />
                   {pendingAttachments.length > 0 && (
                     <PendingAttachments
                       items={pendingAttachments}
@@ -6375,7 +6439,10 @@ function App() {
                     <input
                       type="text"
                       value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
+                      onChange={(e) => {
+                        setInputText(e.target.value);
+                        if (e.target.value.length > 0) pingDmTyping();
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();

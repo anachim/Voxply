@@ -255,6 +255,25 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
                                     },
                                 );
                             }
+                            Ok(WsClientMessage::DmTyping { conversation_id, typing }) => {
+                                // Same shape but routed through the DM
+                                // broadcast so it filters to conversation
+                                // members on the relay side.
+                                let display_name: Option<String> = sqlx::query_scalar(
+                                    "SELECT display_name FROM users WHERE public_key = ?",
+                                )
+                                .bind(&public_key)
+                                .fetch_optional(&state.db)
+                                .await
+                                .ok()
+                                .flatten();
+                                let _ = state.dm_tx.send(crate::state::DmEvent::Typing {
+                                    conversation_id,
+                                    sender: public_key.clone(),
+                                    sender_name: display_name,
+                                    typing,
+                                });
+                            }
                             Err(_) => {}
                         }
                     }
@@ -287,19 +306,29 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, public_key: Stri
             // DM relay
             dm_result = dm_rx.recv() => {
                 if let Ok(dm) = dm_result {
-                    // Only relay to members of this conversation (and not back to sender)
-                    if dm.sender != public_key && my_conversations.contains(&dm.conversation_id) {
-                        let msg = WsServerMessage::DirectMessage {
-                            conversation_id: dm.conversation_id,
-                            sender: dm.sender,
-                            sender_name: dm.sender_name,
-                            content: dm.content,
-                            timestamp: dm.timestamp,
-                        };
-                        let json = serde_json::to_string(&msg).unwrap();
-                        if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                            break;
+                    // Only relay to members of this conversation, and never
+                    // back to the sender (they already know they sent /
+                    // typed it).
+                    if dm.sender() == public_key
+                        || !my_conversations.contains(dm.conversation_id())
+                    {
+                        continue;
+                    }
+                    let msg = match dm {
+                        crate::state::DmEvent::Message { conversation_id, sender, sender_name, content, timestamp } => {
+                            WsServerMessage::DirectMessage {
+                                conversation_id, sender, sender_name, content, timestamp,
+                            }
                         }
+                        crate::state::DmEvent::Typing { conversation_id, sender, sender_name, typing } => {
+                            WsServerMessage::DmTyping {
+                                conversation_id, sender, sender_name, typing,
+                            }
+                        }
+                    };
+                    let json = serde_json::to_string(&msg).unwrap();
+                    if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                        break;
                     }
                 }
             }

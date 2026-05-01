@@ -399,6 +399,32 @@ fn collapsed_categories_path() -> Result<std::path::PathBuf, String> {
     Ok(home.join(".voxply").join("collapsed_categories.json"))
 }
 
+fn blocked_users_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("blocked_users.json"))
+}
+
+#[tauri::command]
+fn load_blocked_users() -> Result<Vec<String>, String> {
+    let path = blocked_users_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read: {e}"))?;
+    serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))
+}
+
+#[tauri::command]
+fn save_blocked_users(blocked: Vec<String>) -> Result<(), String> {
+    let path = blocked_users_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    let text = serde_json::to_string(&blocked).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("write: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn load_collapsed_categories() -> Result<serde_json::Value, String> {
     let path = collapsed_categories_path()?;
@@ -1632,6 +1658,7 @@ fn clear_local_data() -> Result<(), String> {
         notification_mutes_path()?,
         pinned_channels_path()?,
         collapsed_categories_path()?,
+        blocked_users_path()?,
         voice_settings_path()?,
     ];
     for p in paths {
@@ -3392,6 +3419,8 @@ pub fn run() {
             save_pinned_channels,
             load_collapsed_categories,
             save_collapsed_categories,
+            load_blocked_users,
+            save_blocked_users,
             get_talk_power,
             set_talk_power_cmd,
             assign_role,

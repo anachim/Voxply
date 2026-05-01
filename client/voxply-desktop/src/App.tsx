@@ -3030,6 +3030,23 @@ function App() {
     Record<string, Record<string, boolean>>
   >({});
 
+  // Blocked users: pubkey set. Persisted to ~/.voxply/blocked_users.json so
+  // the choice carries across sessions. Used to filter out their messages
+  // from channel + DM views without involving any hub state.
+  const [blockedUsers, setBlockedUsers] = useState<Set<string>>(new Set());
+
+  function toggleBlockUser(pubkey: string) {
+    setBlockedUsers((prev) => {
+      const next = new Set(prev);
+      if (next.has(pubkey)) next.delete(pubkey);
+      else next.add(pubkey);
+      invoke("save_blocked_users", {
+        blocked: Array.from(next),
+      }).catch(() => {});
+      return next;
+    });
+  }
+
   // Voice channel populations: channel_id -> count. Polled while a hub is
   // active so the sidebar can show "🎙️ N" hints. Channels not in the map
   // have zero participants.
@@ -3215,6 +3232,13 @@ function App() {
   useEffect(() => {
     invoke<Record<string, Record<string, boolean>>>("load_collapsed_categories")
       .then((s) => setCollapsedCategories(s ?? {}))
+      .catch(() => {});
+  }, []);
+
+  // Hydrate blocked-users list on launch.
+  useEffect(() => {
+    invoke<string[]>("load_blocked_users")
+      .then((s) => setBlockedUsers(new Set(s ?? [])))
       .catch(() => {});
   }, []);
 
@@ -6473,7 +6497,9 @@ function App() {
                     </h3>
                   </div>
                   <div className="messages">
-                    {(dmMessages[selectedConversation.id] || []).map((m, i) => {
+                    {(dmMessages[selectedConversation.id] || [])
+                      .filter((m) => !blockedUsers.has(m.sender))
+                      .map((m, i) => {
                       const senderLabel =
                         users.find((u) => u.public_key === m.sender)
                           ?.display_name ||
@@ -6730,7 +6756,9 @@ function App() {
                       )}
                     </div>
                   )}
-                  {(searchResults ?? messages).map((m, i, arr) => {
+                  {(searchResults ?? messages)
+                    .filter((m) => !blockedUsers.has(m.sender))
+                    .map((m, i, arr) => {
                     const showSeparator =
                       i === 0 ||
                       dayKey(m.created_at) !== dayKey(arr[i - 1].created_at);
@@ -7578,6 +7606,25 @@ function App() {
               >
                 Copy public key
               </button>
+              {userContextMenu.user.public_key !== publicKey && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    const u = userContextMenu.user;
+                    setUserContextMenu(null);
+                    toggleBlockUser(u.public_key);
+                    setToast(
+                      blockedUsers.has(u.public_key)
+                        ? "Unblocked"
+                        : "Blocked. Their messages will be hidden.",
+                    );
+                  }}
+                >
+                  {blockedUsers.has(userContextMenu.user.public_key)
+                    ? "Unblock user"
+                    : "Block user"}
+                </button>
+              )}
             </div>
           </div>
         )}

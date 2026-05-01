@@ -400,7 +400,7 @@ pub async fn post_alliance_channel_message(
 
 pub async fn get_alliance_channel_messages(
     State(state): State<Arc<AppState>>,
-    _user: AuthUser,
+    user: AuthUser,
     Path((alliance_id, channel_id)): Path<(String, String)>,
 ) -> Result<Json<Vec<crate::routes::chat_models::MessageResponse>>, (StatusCode, String)> {
     let hub_key = state.hub_identity.public_key_hex();
@@ -428,30 +428,33 @@ pub async fn get_alliance_channel_messages(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-        return Ok(Json(
-            rows.into_iter()
-                .map(|r| crate::routes::chat_models::MessageResponse {
-                    id: r.id,
-                    channel_id: r.channel_id,
-                    sender: r.sender,
-                    sender_name: r.sender_name,
-                    content: r.content,
-                    created_at: r.created_at,
-                    edited_at: r.edited_at,
-                    attachments: r
-                        .attachments
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .and_then(|s| serde_json::from_str(s).ok())
-                        .unwrap_or_default(),
-                    // Reactions intentionally empty in the alliance read path
-                    // for now -- federated reaction sync is a follow-up.
-                    reactions: Vec::new(),
-                    // Reply context not federated yet either.
-                    reply_to: None,
-                })
-                .collect(),
-        ));
+        let mut out: Vec<crate::routes::chat_models::MessageResponse> =
+            Vec::with_capacity(rows.len());
+        for r in rows {
+            let reactions =
+                crate::routes::messages::load_reactions(&state.db, &r.id, &user.public_key)
+                    .await?;
+            out.push(crate::routes::chat_models::MessageResponse {
+                id: r.id,
+                channel_id: r.channel_id,
+                sender: r.sender,
+                sender_name: r.sender_name,
+                content: r.content,
+                created_at: r.created_at,
+                edited_at: r.edited_at,
+                attachments: r
+                    .attachments
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_default(),
+                reactions,
+                // Reply context not federated yet -- shows fine on the owning
+                // hub, just no preview here.
+                reply_to: None,
+            });
+        }
+        return Ok(Json(out));
     }
 
     // Otherwise the channel must belong to a peer member of this alliance.

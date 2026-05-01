@@ -391,7 +391,7 @@ async fn load_reply_context(
 
 /// Load aggregated reaction counts for one message, with `me` flagged for
 /// rows the viewer reacted to.
-async fn load_reactions(
+pub(crate) async fn load_reactions(
     db: &sqlx::SqlitePool,
     message_id: &str,
     viewer: &str,

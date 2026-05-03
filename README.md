@@ -6,11 +6,13 @@ community-built games — all keypair-based identity, no central servers.
 
 ## Features
 
-- **Voice channels** — Opus over UDP with RNNoise denoise, voice activity
+- **Channels** — every channel is **unified text + voice**: chat
+  history and voice in the same room. Categories nest channels (and
+  other categories). Drag-drop reorder, collapse/pin, search, markdown,
+  code blocks, attachments (3 MB), reactions, replies, mentions, /me
+  actions, edit/delete.
+- **Voice** — Opus over UDP with RNNoise denoise, voice activity
   detection, push-to-talk, self-mute / self-deafen.
-- **Text chat** — channels with categories, drag-drop reordering,
-  collapse/pin, search, markdown, code blocks, attachments (3 MB),
-  reactions, replies, mentions, /me actions, edit/delete.
 - **Direct messages** — federated outbox with retry, attachments,
   typing indicator, unread tracking, sort by activity.
 - **Alliances** — multi-hub groups. Hubs share channels, messages, and
@@ -72,10 +74,26 @@ cd client/voxply-desktop && npm run tauri build   # desktop release
 
 ## Documentation
 
-- [`ROADMAP.md`](ROADMAP.md) — shipped features, open tasks, deferred
-  items, and product gaps.
-- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — what we defend
-  against, what we don't, and the design decisions each gap drives.
+- [`docs/`](docs/README.md) — architecture, federation, identity,
+  alliances, voice, data model, client structure, decisions, threat
+  model, and glossary. Start at [`docs/README.md`](docs/README.md).
+- [`ROADMAP.md`](ROADMAP.md) — what's next, known issues, undesigned
+  wishlist, and explicit "won't do" decisions.
+
+## Built with AI assistance
+
+This project was built with substantial help from
+[Claude](https://claude.ai) (Anthropic's AI assistant). I direct the
+product, architectural choices, and tradeoffs; Claude drafts most of
+the code, tests, and documentation, which I then review and accept,
+adjust, or rewrite.
+
+Calling this out for transparency — it's not a fully hand-written
+project, and pretending otherwise wouldn't be honest.
+
+The wiki at [`docs/`](docs/README.md) is intentionally LLM-friendly
+(file:line pointers, navigable index, "why" over "what") so Claude
+stays useful as the codebase grows.
 
 ## License
 

@@ -24,7 +24,7 @@ when adding a feature, check whether it shifts something below from
 | Account takeover via reused password        | N/A — there are no passwords.                                                            |
 | Spam / login flooding                        | Per-IP rate limit on `/auth/*` and write endpoints (token bucket).                       |
 | Random members posting in private channels   | Channel bans, role permissions, hub bans. Owner role is non-revokable.                   |
-| Voice channel intrusion                      | Voice mute (hub-wide), per-channel min talk power, channel ban.                          |
+| Unwanted voice transmission in a channel     | Voice mute (hub-wide), per-channel min talk power, channel ban.                          |
 | Hub admin abuse of own users                 | **Not defended.** Admin can read everything, ban anyone. Trust the hub or leave it.      |
 | Lost/stolen device                           | Recovery phrase rotates the identity; old key remains valid until everyone notices.       |
 | Mention noise / harassment                   | Three-state notification mode (all/mentions/silent), block-by-pubkey would help (TODO).   |
@@ -50,11 +50,12 @@ These are known gaps. Each shapes a future feature decision.
   public.**
 - **Hub server compromise.** Whoever has the hub's `hub_identity.json`
   can impersonate the hub, sign federation calls, accept arbitrary
-  alliance joins. Same blast radius as Discord losing the database.
+  alliance joins. Same blast radius as any centralized service losing
+  its database.
 - **Key compromise / no revocation.** A leaked private key is leaked
   forever. Generating a new identity loses your friend connections,
   channel membership, etc. **Mitigation later: a master key →
-  device key model (Signal-style) with revocation lists.**
+  device key model with revocation lists.**
 - **Metadata leaks.** Even with E2E DM bodies, peers see
   who-talked-to-whom-when. Onion-routing the federation transport
   would fix this; out of scope.

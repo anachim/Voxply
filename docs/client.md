@@ -72,6 +72,22 @@ or when the user leaves the hub.
 - **Client never trusts the hub for permissions** — it shows or hides UI
   based on what the hub returns; the hub re-checks every action.
 
+## Tests
+
+The Tauri Rust side has unit tests in `src-tauri/src/lib.rs` under a
+`#[cfg(test)] mod tests` block. We deliberately avoid testing Tauri
+commands directly (they need a real `AppHandle` / `State` / runtime);
+instead we cover the boundary logic that doesn't need any of that —
+URL encoding, serde shapes (so an old prefs file still round-trips),
+and small pure helpers. Run with `cargo test` from `src-tauri/`.
+
+To grow the suite: any function that takes plain values and returns
+plain values is fair game. Anything that touches `dirs::data_dir()`
+needs a refactor to take a base path before it's testable.
+
+The React side has no test framework wired up yet — that's a separate
+future task.
+
 ## What's not done
 
 - Mobile client

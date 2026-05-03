@@ -7,7 +7,7 @@ shipped features, design questions — lives in the wiki at
 
 ## 🔨 Next up
 
-- **Tauri backend tests** — hub side covered; Tauri side isn't
+*(nothing right now — pick from Wishlist below.)*
 
 ## 📌 Wishlist (undesigned)
 

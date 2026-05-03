@@ -539,8 +539,8 @@ struct LocalProfile {
     #[serde(default)]
     default_profile_id: Option<String>,
 
-    /// Visual theme preference: "calm" | "classic" | "linear". Missing or
-    /// unknown values fall back to calm at the client.
+    /// Visual theme preference: "calm" | "classic" | "linear" | "light".
+    /// Missing or unknown values fall back to calm at the client.
     #[serde(default)]
     theme: Option<String>,
 }
@@ -3462,4 +3462,156 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ---------------------------------------------------------------------------
+// Tests for pure helpers in this module. We deliberately avoid testing Tauri
+// commands directly — those need a real AppHandle / State / running runtime.
+// What we cover here is the boundary logic that doesn't need any of that:
+// URL encoding, serde shapes (so a stored prefs file from a prior version
+// still round-trips), and small pure helpers.
+//
+// To grow this: any function that takes plain values and returns plain
+// values is fair game. Anything that touches `dirs::data_dir()` would need
+// a refactor to take a base path before it's testable here.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn urlencoding_emoji_passes_unreserved_chars_through() {
+        assert_eq!(urlencoding_emoji(""), "");
+        assert_eq!(urlencoding_emoji("hello"), "hello");
+        assert_eq!(urlencoding_emoji("a-b_c.d~e"), "a-b_c.d~e");
+        assert_eq!(urlencoding_emoji("0123456789"), "0123456789");
+    }
+
+    #[test]
+    fn urlencoding_emoji_percent_encodes_reserved_and_unicode() {
+        // ASCII reserved
+        assert_eq!(urlencoding_emoji(" "), "%20");
+        assert_eq!(urlencoding_emoji("a/b"), "a%2Fb");
+        assert_eq!(urlencoding_emoji("?&="), "%3F%26%3D");
+        // Multi-byte UTF-8: thumbs-up emoji is 4 bytes (F0 9F 91 8D), each
+        // gets percent-encoded individually.
+        assert_eq!(urlencoding_emoji("👍"), "%F0%9F%91%8D");
+        // Heart emoji (U+2764) is 3 bytes (E2 9D A4).
+        assert_eq!(urlencoding_emoji("❤"), "%E2%9D%A4");
+    }
+
+    #[test]
+    fn default_approval_status_is_approved() {
+        // The default kicks in when a hub's /me response omits the field
+        // (older hubs that don't know about the approval queue).
+        assert_eq!(default_approval_status(), "approved");
+    }
+
+    #[test]
+    fn local_profile_default_is_empty_with_no_theme() {
+        let p = LocalProfile::default();
+        assert!(p.profiles.is_empty());
+        assert!(p.default_profile_id.is_none());
+        assert!(p.theme.is_none());
+        assert!(p.default_profile().is_none());
+    }
+
+    #[test]
+    fn local_profile_default_profile_falls_back_to_first_when_id_stale() {
+        let a = NamedProfile {
+            id: "id-a".to_string(),
+            label: "Profile A".to_string(),
+            display_name: "Alice".to_string(),
+            avatar: None,
+        };
+        let b = NamedProfile {
+            id: "id-b".to_string(),
+            label: "Profile B".to_string(),
+            display_name: "Bob".to_string(),
+            avatar: None,
+        };
+        let p = LocalProfile {
+            profiles: vec![a.clone(), b.clone()],
+            // ID points at a profile that no longer exists — should fall
+            // back to the first profile rather than returning None.
+            default_profile_id: Some("vanished".to_string()),
+            theme: None,
+        };
+        assert_eq!(p.default_profile().unwrap().id, "id-a");
+    }
+
+    #[test]
+    fn local_profile_default_profile_honors_explicit_id() {
+        let a = NamedProfile {
+            id: "id-a".to_string(),
+            label: "Profile A".to_string(),
+            display_name: "Alice".to_string(),
+            avatar: None,
+        };
+        let b = NamedProfile {
+            id: "id-b".to_string(),
+            label: "Profile B".to_string(),
+            display_name: "Bob".to_string(),
+            avatar: None,
+        };
+        let p = LocalProfile {
+            profiles: vec![a, b.clone()],
+            default_profile_id: Some("id-b".to_string()),
+            theme: None,
+        };
+        assert_eq!(p.default_profile().unwrap().id, "id-b");
+    }
+
+    #[test]
+    fn saved_hub_round_trips_through_json() {
+        let original = SavedHub {
+            hub_id: "h1".to_string(),
+            hub_name: "Hub One".to_string(),
+            hub_url: "https://hub.example".to_string(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: SavedHub = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.hub_id, original.hub_id);
+        assert_eq!(decoded.hub_name, original.hub_name);
+        assert_eq!(decoded.hub_url, original.hub_url);
+    }
+
+    #[test]
+    fn stored_voice_settings_decodes_with_missing_fields() {
+        // A prefs file from before we added voice_mode/ptt_key should still
+        // load — that's why both fields are #[serde(default)].
+        let old: StoredVoiceSettings =
+            serde_json::from_str(r#"{"input_device":"mic","vad_threshold":0.05}"#).unwrap();
+        assert_eq!(old.input_device.as_deref(), Some("mic"));
+        assert_eq!(old.vad_threshold, Some(0.05));
+        assert!(old.voice_mode.is_none());
+        assert!(old.ptt_key.is_none());
+    }
+
+    #[test]
+    fn stored_voice_settings_round_trips_full_payload() {
+        let s = StoredVoiceSettings {
+            input_device: Some("USB Mic".to_string()),
+            output_device: Some("Speakers".to_string()),
+            vad_threshold: Some(0.02),
+            voice_mode: Some("ptt".to_string()),
+            ptt_key: Some("Space".to_string()),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: StoredVoiceSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.input_device, s.input_device);
+        assert_eq!(back.output_device, s.output_device);
+        assert_eq!(back.vad_threshold, s.vad_threshold);
+        assert_eq!(back.voice_mode, s.voice_mode);
+        assert_eq!(back.ptt_key, s.ptt_key);
+    }
+
+    #[test]
+    fn local_profile_decodes_with_missing_theme() {
+        // Old prefs files predate the theme field; theme should default to None.
+        let old: LocalProfile = serde_json::from_str(r#"{"profiles":[]}"#).unwrap();
+        assert!(old.profiles.is_empty());
+        assert!(old.theme.is_none());
+        assert!(old.default_profile_id.is_none());
+    }
 }

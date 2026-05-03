@@ -7,7 +7,6 @@ shipped features, design questions — lives in the wiki at
 
 ## 🔨 Next up
 
-- **Cross-hub friend system** — friends keyed on pubkey, not per-hub
 - **Tauri backend tests** — hub side covered; Tauri side isn't
 
 ## 📌 Wishlist (undesigned)

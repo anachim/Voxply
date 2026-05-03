@@ -55,6 +55,23 @@ gets the messages *and* their reactions in one shot.
 loads reactions for both local and remote rows by reusing
 `messages::load_reactions` (made `pub(crate)` for this).
 
+## Cross-hub friends
+
+Friends are kept locally per hub but can point at users on other hubs.
+The `friends` table has optional `hub_url` and cached `display_name`
+columns. When you add a friend with a `hub_url`, the friendship is
+created already-accepted (no federated request flow exists yet, so
+leaving them pending forever would be misleading) and DMs to them
+route through the existing federated DM outbox using the stored URL.
+
+Code: `server/voxply-hub/src/routes/friends.rs`. Schema in
+`migrations.rs`.
+
+**v1 limitation**: cross-hub adds are one-sided. Bob doesn't get a
+notification when Alice adds him; he has to add her back manually if
+he wants the friendship to be mutual on his side. A federated
+friend-request notification flow is a future addition.
+
 ## What federation does **not** do
 
 - **No global directory**. There's no DHT or seed-list mechanism in active

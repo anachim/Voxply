@@ -300,6 +300,9 @@ interface InstalledGame {
 interface Friend {
   public_key: string;
   display_name: string | null;
+  /** When non-null, this friend lives on another hub. DMs to them will be
+   *  routed to this hub via the federated DM outbox. */
+  hub_url: string | null;
   since: number;
 }
 
@@ -3714,6 +3717,9 @@ function App() {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [pendingFriends, setPendingFriends] = useState<Friend[]>([]);
   const [friendRequestKey, setFriendRequestKey] = useState("");
+  // Optional hub URL field — when filled, the friend is treated as cross-hub
+  // and the friendship is created already-accepted (no federated request flow yet).
+  const [friendRequestHubUrl, setFriendRequestHubUrl] = useState("");
 
   // DMs
   const [view, setView] = useState<"channels" | "dms" | "game">("channels");
@@ -5406,10 +5412,13 @@ function App() {
     }
   }
 
-  async function startDmWith(targetKey: string) {
+  async function startDmWith(targetKey: string, targetHubUrl?: string | null) {
     try {
+      const memberHubs: Record<string, string> = {};
+      if (targetHubUrl) memberHubs[targetKey] = targetHubUrl;
       const conv = await invoke<Conversation>("create_conversation", {
         members: [targetKey],
+        memberHubs,
       });
       // Make sure it's in the list
       setConversations((prev) => {
@@ -5478,9 +5487,15 @@ function App() {
   async function handleSendFriendRequest() {
     const key = friendRequestKey.trim();
     if (!key) return;
+    const url = friendRequestHubUrl.trim();
     try {
-      await invoke("send_friend_request", { targetPublicKey: key });
+      await invoke("send_friend_request", {
+        targetPublicKey: key,
+        friendHubUrl: url ? url : null,
+        displayName: null,
+      });
       setFriendRequestKey("");
+      setFriendRequestHubUrl("");
       await refreshFriends();
     } catch (e) {
       setError(String(e));
@@ -7306,8 +7321,24 @@ function App() {
                       if (e.key === "Enter") handleSendFriendRequest();
                     }}
                   />
+                </div>
+                <div className="settings-row" style={{ marginTop: "6px" }}>
+                  <input
+                    type="text"
+                    value={friendRequestHubUrl}
+                    onChange={(e) => setFriendRequestHubUrl(e.target.value)}
+                    placeholder="Hub URL (optional — leave blank if friend is on this hub)"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSendFriendRequest();
+                    }}
+                  />
                   <button onClick={handleSendFriendRequest}>Send</button>
                 </div>
+                <p className="muted" style={{ marginTop: "6px", fontSize: "12px" }}>
+                  Same-hub friends require the other person to accept your
+                  request. Cross-hub friends (with a Hub URL) are added
+                  immediately as a one-sided address book entry.
+                </p>
               </div>
 
               {pendingFriends.length > 0 && (
@@ -7340,9 +7371,18 @@ function App() {
                       <li key={f.public_key} className="friend-item">
                         <span className="friend-name">
                           {f.display_name || f.public_key.slice(0, 16)}
+                          {f.hub_url && (
+                            <span
+                              className="muted"
+                              title={`Reachable on ${f.hub_url}`}
+                              style={{ marginLeft: "6px", fontSize: "12px" }}
+                            >
+                              🌐 {f.hub_url}
+                            </span>
+                          )}
                         </span>
                         <div style={{ display: "flex", gap: "6px" }}>
-                          <button onClick={() => startDmWith(f.public_key)}>
+                          <button onClick={() => startDmWith(f.public_key, f.hub_url)}>
                             Message
                           </button>
                           <button

@@ -3140,13 +3140,22 @@ async fn list_pending_friends(state: State<'_, AppState>) -> Result<Vec<FriendIn
 }
 
 #[tauri::command]
-async fn send_friend_request(target_public_key: String, state: State<'_, AppState>) -> Result<(), String> {
+async fn send_friend_request(
+    target_public_key: String,
+    friend_hub_url: Option<String>,
+    display_name: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let (hub_url, token) = active_session(&state)?;
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{hub_url}/friends"))
         .bearer_auth(&token)
-        .json(&serde_json::json!({ "target_public_key": target_public_key }))
+        .json(&serde_json::json!({
+            "target_public_key": target_public_key,
+            "hub_url": friend_hub_url,
+            "display_name": display_name,
+        }))
         .send()
         .await
         .map_err(|e| format!("Failed: {e}"))?;

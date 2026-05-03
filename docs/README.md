@@ -49,6 +49,7 @@ Reading order is for learning the system end-to-end. This section is for
 - **Typing indicators (channel + DM)** — [client.md](client.md)
 - **Pin / unpin channels** — [client.md](client.md)
 - **Direct messages (federated outbox)** — [federation.md](federation.md), [data-model.md](data-model.md)
+- **Friends (local + cross-hub via stored hub URL)** — [federation.md](federation.md)
 
 ### Voice (in any channel — every channel is unified text + voice)
 - **Opus codec + UDP relay** — [voice.md](voice.md)

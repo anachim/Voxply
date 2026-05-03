@@ -392,14 +392,26 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS friends (
             user_a TEXT NOT NULL REFERENCES users(public_key),
-            user_b TEXT NOT NULL REFERENCES users(public_key),
+            user_b TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
             created_at INTEGER NOT NULL,
+            hub_url TEXT,
+            display_name TEXT,
             PRIMARY KEY (user_a, user_b)
         )",
     )
     .execute(pool)
     .await?;
+
+    // Cross-hub friends: hub_url is where the friend is reachable; display_name
+    // is a cached snapshot (their hub may rename them later, we'll resync). Both
+    // are NULL for same-hub friends, where we look up the local users table.
+    let _ = sqlx::query("ALTER TABLE friends ADD COLUMN hub_url TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE friends ADD COLUMN display_name TEXT")
+        .execute(pool)
+        .await;
 
     // Persisted DM messages (both local and federated deliveries land here)
     sqlx::query(

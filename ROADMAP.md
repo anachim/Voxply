@@ -31,7 +31,6 @@ items live in the wiki — see
 
 - `subscribe_all` firehose — every client receives every channel's messages just for unread tracking. Fine at current scale
 - Hub name mutation is lazy — `AppState.hub_name` only read at startup; alliance code still uses the startup value
-- No WS auto-reconnect loop — HTTP re-auths silently; WS doesn't auto-reopen
 - Bounced DMs aren't surfaced in UI — `dm_outbox.bounced_at` is logged only
 - Avatars uploaded full-resolution to every hub — base64 in `users.avatar`; doesn't scale
 - No custom display font — system stack only

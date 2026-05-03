@@ -49,6 +49,20 @@ variables applied at the root via `data-theme`; switching is just a
 dataset change. Light overrides shadow tokens too — the dark-mode
 shadow values would look heavy on a light background.
 
+## WebSocket lifecycle
+
+The Tauri side opens one WebSocket per connected hub and forwards
+events to React. When the connection drops (hub restart, network blip),
+the client emits `hub-ws-status: connected=false`. The React side
+handles this by scheduling an automatic reconnect with exponential
+backoff (1s, 2s, 4s, … capped at 30s) — no user action required. The
+existing "Reconnect" button in the banner is a manual override that
+resets backoff and tries immediately.
+
+State lives in two refs: `reconnectTimers` (per-hub setTimeout IDs) and
+`reconnectAttempts` (per-hub backoff counters). Both clear on success
+or when the user leaves the hub.
+
 ## Conventions
 
 - **One `App.tsx` until pain demands a split.** Adding a folder hierarchy

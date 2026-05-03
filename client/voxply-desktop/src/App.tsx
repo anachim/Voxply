@@ -3089,6 +3089,43 @@ function App() {
   const [hubConnected, setHubConnected] = useState<Record<string, boolean>>({});
   const [reconnectingHubs, setReconnectingHubs] = useState<Record<string, boolean>>({});
 
+  // Auto-reconnect bookkeeping. Refs because we don't want re-renders for
+  // backoff state. Timer IDs let us cancel pending retries (manual reconnect,
+  // hub removal). Attempt counts drive exponential backoff: 1s, 2s, 4s, 8s,
+  // 16s, capped at 30s. Reset on successful reconnect.
+  const reconnectTimers = useRef<Record<string, number>>({});
+  const reconnectAttempts = useRef<Record<string, number>>({});
+
+  function clearReconnectTimer(hubId: string) {
+    const id = reconnectTimers.current[hubId];
+    if (id !== undefined) {
+      clearTimeout(id);
+      delete reconnectTimers.current[hubId];
+    }
+  }
+
+  function scheduleReconnect(hubId: string) {
+    // Never have two pending retries for the same hub.
+    clearReconnectTimer(hubId);
+    const attempt = reconnectAttempts.current[hubId] ?? 0;
+    const delayMs = Math.min(1000 * 2 ** attempt, 30_000);
+    setReconnectingHubs((prev) => ({ ...prev, [hubId]: true }));
+    reconnectTimers.current[hubId] = window.setTimeout(async () => {
+      delete reconnectTimers.current[hubId];
+      reconnectAttempts.current[hubId] = attempt + 1;
+      try {
+        await invoke("reconnect_hub", { hubId });
+        // Success path: the hub-ws-status:true event will reset
+        // reconnectAttempts and clear reconnectingHubs.
+      } catch {
+        // Failed — schedule the next retry with longer backoff. We don't
+        // give up automatically; the user can leave the hub if they're
+        // tired of seeing the banner.
+        scheduleReconnect(hubId);
+      }
+    }, delayMs);
+  }
+
   function toggleChannelPin(hubId: string, channelId: string) {
     setPinnedChannels((prev) => {
       const hubMap = { ...(prev[hubId] ?? {}) };
@@ -3469,6 +3506,10 @@ function App() {
 
   async function handleReconnect() {
     if (!activeHubId) return;
+    // Manual click is a fresh start: cancel any pending auto-retry and
+    // reset backoff so a subsequent failure starts at 1s again.
+    clearReconnectTimer(activeHubId);
+    reconnectAttempts.current[activeHubId] = 0;
     setReconnectingHubs((prev) => ({ ...prev, [activeHubId]: true }));
     try {
       await invoke("reconnect_hub", { hubId: activeHubId });
@@ -3481,6 +3522,9 @@ function App() {
         const { [activeHubId]: _, ...rest } = prev;
         return rest;
       });
+      // Hand control back to the auto-reconnect loop after the manual
+      // attempt fails, so we keep trying in the background.
+      scheduleReconnect(activeHubId);
     }
   }
 
@@ -4000,11 +4044,18 @@ function App() {
               return next;
             });
             if (connected) {
+              // Connection restored — cancel any pending retry, reset
+              // backoff, and clear the "reconnecting" indicator.
+              clearReconnectTimer(hub_id);
+              reconnectAttempts.current[hub_id] = 0;
               setReconnectingHubs((prev) => {
                 if (!prev[hub_id]) return prev;
                 const { [hub_id]: _, ...rest } = prev;
                 return rest;
               });
+            } else {
+              // Connection dropped — kick off the auto-reconnect loop.
+              scheduleReconnect(hub_id);
             }
           }
         )
@@ -4243,6 +4294,10 @@ function App() {
 
     return () => {
       unlistens.forEach((u) => u());
+      // Cancel any pending auto-reconnect timers so they don't fire
+      // against an unmounted component (matters in dev / HMR).
+      Object.values(reconnectTimers.current).forEach(clearTimeout);
+      reconnectTimers.current = {};
     };
   }, []);
 
@@ -4828,6 +4883,9 @@ function App() {
         setActiveHubId(remaining[0]?.hub_id ?? null);
       }
       clearHubUnread(hubId);
+      // No more reconnect attempts for a hub the user just left.
+      clearReconnectTimer(hubId);
+      delete reconnectAttempts.current[hubId];
     } catch (e) {
       setError(String(e));
     }

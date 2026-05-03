@@ -4278,22 +4278,16 @@ function App() {
 
       unlistens.push(
         await listen<{ hub_id: string; hub_name: string }>("hub-session-lost", async (event) => {
-          const { hub_id, hub_name } = event.payload;
-          setToast(`Disconnected from "${hub_name}" — you may have been banned or kicked`);
-          try {
-            await invoke("remove_hub", { hubId: hub_id });
-            const remaining = await invoke<Hub[]>("list_hubs");
-            setHubs(remaining);
-            if (activeHubIdRef.current === hub_id) {
-              setActiveHubId(remaining[0]?.hub_id ?? null);
-            }
-            setUnreadByChannel((prev) => {
-              if (!prev[hub_id]) return prev;
-              const { [hub_id]: _, ...rest } = prev;
-              invoke("save_unread_state", { state: rest }).catch(() => {});
-              return rest;
-            });
-          } catch {}
+          const { hub_name } = event.payload;
+          // Don't auto-remove the hub — that was overly destructive on
+          // transient failures (hub briefly offline, network blip, hub
+          // restart with brief auth window). The auto-reconnect loop
+          // handles real recoveries; if the user has actually been banned
+          // they'll see persistent failures and can remove the hub
+          // manually from its context menu.
+          setToast(
+            `Couldn't authenticate with "${hub_name}". The hub may be offline, or you may have been banned. Use Reconnect to retry, or right-click to remove.`
+          );
         })
       );
     })();
@@ -5004,6 +4998,50 @@ function App() {
       }
     })();
   }, []);
+
+  // Suppress the webview's default right-click menu (Reload / Inspect /
+  // Back). Tauri 2 still enables it by default and a stray right-click
+  // anywhere on the chrome would let the user accidentally reload the app.
+  // Components that want their own context menu (channel rows, messages,
+  // user list items) call e.preventDefault() in their onContextMenu, which
+  // also stops the browser default — so they keep working unchanged.
+  // Native menus stay available inside text inputs so copy/paste isn't
+  // broken.
+  useEffect(() => {
+    const onContext = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable ||
+        target.closest("[data-allow-context-menu]")
+      ) {
+        return;
+      }
+      e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onContext);
+    return () => document.removeEventListener("contextmenu", onContext);
+  }, []);
+
+  // Auto-select the first text-channel-style room when a hub loads, so
+  // the user lands on something readable instead of an empty content
+  // pane. Only fires when nothing's selected; user-driven channel
+  // changes don't re-trigger because selectedChannel is set.
+  useEffect(() => {
+    if (selectedChannel) return;
+    if (channels.length === 0) return;
+    // Skip categories (containers) — pick the first leaf channel.
+    const firstLeaf = channels.find((c) => !c.is_category);
+    if (firstLeaf) {
+      selectChannel(firstLeaf);
+    }
+    // selectChannel is stable in scope but eslint can't prove that;
+    // listing it would re-trigger every render. Channels is the real
+    // signal we want to watch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channels, selectedChannel]);
 
   // Reload data when switching hubs
   useEffect(() => {

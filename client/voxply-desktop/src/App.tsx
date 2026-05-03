@@ -6002,8 +6002,9 @@ function App() {
               </p>
               <ul className="welcome-points">
                 <li>
-                  <strong>Hubs</strong> are independently-run servers — like
-                  Discord servers but federated. Add one with its URL to join.
+                  <strong>Hubs</strong> are independently-run, federated
+                  servers. Each one is its own community. Add one with
+                  its URL to join.
                 </li>
                 <li>
                   <strong>Your identity</strong> is a keypair on this device,

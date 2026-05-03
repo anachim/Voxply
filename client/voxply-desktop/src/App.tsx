@@ -7287,6 +7287,27 @@ function App() {
                 placeholder="https://example.com/my-game/manifest.json"
                 autoFocus
               />
+              <details className="install-game-help">
+                <summary>What's a manifest?</summary>
+                <p className="muted" style={{ marginTop: "8px" }}>
+                  A small JSON file describing the game. Minimum required:
+                </p>
+                <pre className="install-game-example">{`{
+  "id": "my-cool-game",
+  "name": "My Cool Game",
+  "version": "1.0.0",
+  "entry_url": "https://example.com/my-game/index.html"
+}`}</pre>
+                <p className="muted" style={{ marginTop: "8px" }}>
+                  Optional fields: <code>description</code>,{" "}
+                  <code>thumbnail_url</code>, <code>author</code>,{" "}
+                  <code>min_players</code>, <code>max_players</code>.{" "}
+                  The <code>entry_url</code> is the HTML file the game loads
+                  in a sandboxed iframe — your server hosts it, the hub
+                  just stores the metadata. Try the demo dice game below
+                  to see one in action.
+                </p>
+              </details>
               <div className="modal-actions">
                 <button
                   onClick={handleInstallDemoGame}

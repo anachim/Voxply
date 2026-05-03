@@ -368,16 +368,20 @@ function SortableChannelItem({
   selected,
   unread,
   muted,
-  voiceCount,
+  participants,
+  isCurrentVoiceChannel,
   onClick,
+  onDoubleClick,
   onContextMenu,
 }: {
   channel: Channel;
   selected: boolean;
   unread: boolean;
   muted: boolean;
-  voiceCount: number;
+  participants: VoiceParticipant[];
+  isCurrentVoiceChannel: boolean;
   onClick: () => void;
+  onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -386,25 +390,53 @@ function SortableChannelItem({
   return (
     <li
       ref={setNodeRef}
-      className={`channel-item ${selected ? "selected" : ""} ${
-        unread ? "unread" : ""
-      } ${muted ? "muted" : ""} ${isDragging ? "dragging" : ""}`}
+      className={`channel-item-wrap ${isDragging ? "dragging" : ""}`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      {...attributes}
-      {...listeners}
     >
-      {unread && <span className="channel-unread-dot" />}
-      # {channel.name}
-      {muted && <span className="channel-muted-icon" title="Muted">🔕</span>}
-      {voiceCount > 0 && (
-        <span className="channel-voice-badge" title={`${voiceCount} in voice`}>
-          🎙️ {voiceCount}
-        </span>
+      {/* Drag listeners + click/dblclick live on the inner row, not the
+          outer li, so the nested participants list isn't a drag handle and
+          dblclick on a participant doesn't trigger a voice join. */}
+      <div
+        className={`channel-item ${selected ? "selected" : ""} ${
+          unread ? "unread" : ""
+        } ${muted ? "muted" : ""} ${
+          isCurrentVoiceChannel ? "in-voice-here" : ""
+        }`}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
+        title="Double-click to join voice"
+        {...attributes}
+        {...listeners}
+      >
+        {unread && <span className="channel-unread-dot" />}
+        # {channel.name}
+        {muted && <span className="channel-muted-icon" title="Muted">🔕</span>}
+        {participants.length > 0 && (
+          <span
+            className="channel-voice-badge"
+            title={`${participants.length} in voice`}
+          >
+            🎙️ {participants.length}
+          </span>
+        )}
+      </div>
+      {participants.length > 0 && (
+        <ul className="channel-participants">
+          {participants.map((p) => (
+            <li
+              key={p.public_key}
+              className="channel-participant"
+              title={p.public_key}
+            >
+              <span className="channel-participant-icon">🎙️</span>
+              {p.display_name || p.public_key.slice(0, 12)}
+            </li>
+          ))}
+        </ul>
       )}
     </li>
   );
@@ -3064,9 +3096,14 @@ function App() {
   // Voice channel populations: channel_id -> count. Polled while a hub is
   // active so the sidebar can show "🎙️ N" hints. Channels not in the map
   // have zero participants.
-  const [voicePops, setVoicePops] = useState<Record<string, number>>({});
+  // Per-channel voice participants (with display names so the sidebar can
+  // show who is in each voice room, not just the count). Polled alongside
+  // voiceActiveUsers. Channels with no participants are absent from the map.
+  const [voicePartByChannel, setVoicePartByChannel] = useState<
+    Record<string, VoiceParticipant[]>
+  >({});
   // Public keys of users currently in any voice channel on the active hub.
-  // Polled alongside voicePops; lets the member list show a 🎙️ chip.
+  // Polled alongside voicePartByChannel; lets the member list show a 🎙️ chip.
   const [voiceActiveUsers, setVoiceActiveUsers] = useState<Set<string>>(
     new Set(),
   );
@@ -3298,19 +3335,19 @@ function App() {
   // joins or leaves voice you'd see the count flip within that window.
   useEffect(() => {
     if (!activeHubId) {
-      setVoicePops({});
+      setVoicePartByChannel({});
       setVoiceActiveUsers(new Set());
       return;
     }
     let cancelled = false;
     async function tick() {
       try {
-        const [pops, active] = await Promise.all([
-          invoke<Record<string, number>>("voice_populations"),
+        const [parts, active] = await Promise.all([
+          invoke<Record<string, VoiceParticipant[]>>("voice_channel_participants"),
           invoke<string[]>("voice_active_users"),
         ]);
         if (!cancelled) {
-          setVoicePops(pops);
+          setVoicePartByChannel(parts);
           setVoiceActiveUsers(new Set(active));
         }
       } catch {
@@ -3679,8 +3716,6 @@ function App() {
 
   // Voice
   const [voiceChannelId, setVoiceChannelId] = useState<string | null>(null);
-  const [voiceParticipants, setVoiceParticipants] = useState<VoiceParticipant[]>([]);
-  const [speakingKeys, setSpeakingKeys] = useState<Set<string>>(new Set());
   // Local self-state for the voice bar. Reset on leave so the next channel
   // join starts unmuted/un-deafened (no surprise carryover).
   const [selfMuted, setSelfMuted] = useState(false);
@@ -4167,55 +4202,14 @@ function App() {
         }>("voice-joined", (event) => {
           if (event.payload.hub_id !== activeHubIdRef.current) return;
           setVoiceChannelId(event.payload.channel_id);
-          setVoiceParticipants(event.payload.participants);
         })
       );
 
-      unlistens.push(
-        await listen<{ hub_id: string; channel_id: string; participant: VoiceParticipant }>(
-          "voice-participant-joined",
-          (event) => {
-            if (event.payload.hub_id !== activeHubIdRef.current) return;
-            setVoiceParticipants((prev) => {
-              if (prev.some((p) => p.public_key === event.payload.participant.public_key)) return prev;
-              return [...prev, event.payload.participant];
-            });
-          }
-        )
-      );
-
-      unlistens.push(
-        await listen<{ hub_id: string; channel_id: string; public_key: string }>(
-          "voice-participant-left",
-          (event) => {
-            if (event.payload.hub_id !== activeHubIdRef.current) return;
-            setVoiceParticipants((prev) =>
-              prev.filter((p) => p.public_key !== event.payload.public_key)
-            );
-            setSpeakingKeys((prev) => {
-              if (!prev.has(event.payload.public_key)) return prev;
-              const next = new Set(prev);
-              next.delete(event.payload.public_key);
-              return next;
-            });
-          }
-        )
-      );
-
-      unlistens.push(
-        await listen<{ hub_id: string; channel_id: string; public_key: string; speaking: boolean }>(
-          "voice-participant-speaking",
-          (event) => {
-            if (event.payload.hub_id !== activeHubIdRef.current) return;
-            setSpeakingKeys((prev) => {
-              const next = new Set(prev);
-              if (event.payload.speaking) next.add(event.payload.public_key);
-              else next.delete(event.payload.public_key);
-              return next;
-            });
-          }
-        )
-      );
+      // The voice-participant-{joined,left,speaking} events come from the
+      // Tauri backend in real time. The sidebar polls for participant
+      // presence on a 5s cadence which is plenty for who-is-where, so we
+      // don't subscribe to these here. Re-add them if we want live
+      // speaking indicators in the sidebar later.
 
       unlistens.push(
         await listen<number>("mic-level", (event) => {
@@ -4236,25 +4230,11 @@ function App() {
                 await invoke("voice_leave");
               } catch {}
               setVoiceChannelId(null);
-              setVoiceParticipants([]);
-              setSpeakingKeys(new Set());
             }
           }
         )
       );
 
-      unlistens.push(
-        await listen<{ speaking: boolean }>("voice-self-speaking", (event) => {
-          const myKey = publicKeyRef.current;
-          if (!myKey) return;
-          setSpeakingKeys((prev) => {
-            const next = new Set(prev);
-            if (event.payload.speaking) next.add(myKey);
-            else next.delete(myKey);
-            return next;
-          });
-        })
-      );
 
       unlistens.push(
         await listen<DmMessage & { hub_id: string; conversation_id: string }>("dm", (event) => {
@@ -5288,10 +5268,15 @@ function App() {
     }
   }
 
-  async function handleVoiceJoin() {
-    if (!selectedChannel) return;
+  async function handleVoiceJoin(channel?: Channel) {
+    // Defaults to the currently-selected channel (the existing
+    // "join voice" button behavior). When called from a double-click in
+    // the sidebar we pass the clicked channel explicitly so the user
+    // doesn't have to select-then-join.
+    const target = channel ?? selectedChannel;
+    if (!target) return;
     try {
-      await invoke("voice_join", { channelId: selectedChannel.id });
+      await invoke("voice_join", { channelId: target.id });
     } catch (e) {
       setError(String(e));
     }
@@ -5709,8 +5694,6 @@ function App() {
     try {
       await invoke("voice_leave");
       setVoiceChannelId(null);
-      setVoiceParticipants([]);
-      setSpeakingKeys(new Set());
       setSelfMuted(false);
       setSelfDeafened(false);
     } catch (e) {
@@ -6309,8 +6292,12 @@ function App() {
                                   effectiveNotifyMode(activeHubId, c.id) ===
                                     "silent"
                                 }
-                                voiceCount={voicePops[c.id] ?? 0}
+                                participants={voicePartByChannel[c.id] ?? []}
+                                isCurrentVoiceChannel={voiceChannelId === c.id}
                                 onClick={() => selectChannel(c)}
+                                onDoubleClick={() => {
+                                  if (voiceChannelId !== c.id) handleVoiceJoin(c);
+                                }}
                                 onContextMenu={(e) => openContextMenu(e, c)}
                               />
                             ))}
@@ -6331,8 +6318,12 @@ function App() {
                           effectiveNotifyMode(activeHubId, node.id) ===
                             "silent"
                         }
-                        voiceCount={voicePops[node.id] ?? 0}
+                        participants={voicePartByChannel[node.id] ?? []}
+                        isCurrentVoiceChannel={voiceChannelId === node.id}
                         onClick={() => selectChannel(node)}
+                        onDoubleClick={() => {
+                          if (voiceChannelId !== node.id) handleVoiceJoin(node);
+                        }}
                         onContextMenu={(e) => openContextMenu(e, node)}
                       />
                     )
@@ -6510,6 +6501,24 @@ function App() {
                     || publicKey?.slice(0, 12)
                     || "You"}
                 </span>
+                {voiceChannelId && (
+                  <>
+                    <button
+                      onClick={toggleSelfMute}
+                      className={`btn-icon-gear ${selfMuted ? "active" : ""}`}
+                      title={selfMuted ? "Unmute mic" : "Mute mic"}
+                    >
+                      {selfMuted ? "🚫🎙️" : "🎙️"}
+                    </button>
+                    <button
+                      onClick={toggleSelfDeafen}
+                      className={`btn-icon-gear ${selfDeafened ? "active" : ""}`}
+                      title={selfDeafened ? "Undeafen" : "Deafen"}
+                    >
+                      {selfDeafened ? "🚫🔊" : "🔊"}
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={openSettings}
                   className="btn-icon-gear"
@@ -6767,7 +6776,7 @@ function App() {
                     </button>
                   ) : (
                     <button
-                      onClick={handleVoiceJoin}
+                      onClick={() => handleVoiceJoin()}
                       className="btn-voice join"
                       disabled={voiceChannelId !== null}
                       title={voiceChannelId ? "Leave current voice channel first" : ""}
@@ -6799,40 +6808,10 @@ function App() {
                     </button>
                   </div>
                 )}
-                {voiceChannelId === selectedChannel.id && (
-                  <div className="voice-bar">
-                    <button
-                      onClick={toggleSelfMute}
-                      className={`voice-toggle ${selfMuted ? "active" : ""}`}
-                      title={selfMuted ? "Unmute" : "Mute mic"}
-                    >
-                      {selfMuted ? "🚫🎙️" : "🎙️"}
-                    </button>
-                    <button
-                      onClick={toggleSelfDeafen}
-                      className={`voice-toggle ${selfDeafened ? "active" : ""}`}
-                      title={selfDeafened ? "Undeafen" : "Deafen"}
-                    >
-                      {selfDeafened ? "🚫🔊" : "🔊"}
-                    </button>
-                    {voiceParticipants.length > 0 && (
-                      <div className="voice-participants">
-                        <span className="muted">In voice: </span>
-                        {voiceParticipants.map((p) => {
-                          const isSpeaking = speakingKeys.has(p.public_key);
-                          return (
-                            <span
-                              key={p.public_key}
-                              className={`voice-participant ${isSpeaking ? "speaking" : ""}`}
-                            >
-                              🎙️ {p.display_name || p.public_key.slice(0, 16)}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* The old in-channel voice-bar moved out: participants are
+                    nested under each channel in the sidebar (see
+                    SortableChannelItem) and mute/deafen live in the user
+                    footer next to the settings gear. */}
                 <div
                   className="messages"
                   ref={messagesContainerRef}

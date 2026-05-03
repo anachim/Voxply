@@ -76,6 +76,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/channels/{channel_id}/members", get(routes::users::channel_members))
         .route("/voice/populations", get(routes::channels::voice_populations))
         .route("/voice/active-users", get(routes::channels::voice_active_users))
+        .route("/voice/participants", get(routes::channels::voice_channel_participants))
         .route("/ws", get(routes::ws::ws_handler))
         .route("/conversations", get(routes::dms::list_conversations))
         .route(

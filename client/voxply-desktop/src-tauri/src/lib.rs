@@ -1512,6 +1512,28 @@ async fn voice_populations(
     resp.json().await.map_err(|e| format!("Invalid: {e}"))
 }
 
+/// Returns voice participants grouped by channel id, with display_name
+/// populated from the local users table on the hub. Lets the sidebar render
+/// participant names nested under each voice-active channel rather than just
+/// a count. Reuses the existing VoiceParticipantInfo struct.
+#[tauri::command]
+async fn voice_channel_participants(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, Vec<VoiceParticipantInfo>>, String> {
+    let (hub_url, token) = active_session(&state)?;
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{hub_url}/voice/participants"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(resp.text().await.unwrap_or_default());
+    }
+    resp.json().await.map_err(|e| format!("Invalid: {e}"))
+}
+
 #[tauri::command]
 async fn voice_active_users(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let (hub_url, token) = active_session(&state)?;
@@ -3366,6 +3388,7 @@ pub fn run() {
             search_messages,
             voice_populations,
             voice_active_users,
+            voice_channel_participants,
             add_reaction,
             remove_reaction,
             send_message,

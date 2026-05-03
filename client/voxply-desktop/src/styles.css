@@ -1366,6 +1366,20 @@ select,
   color: var(--text);
 }
 
+/* Pressed-state for mute / deafen toggles when they sit in the user
+   footer alongside the gear. The button is "active" when the toggle is
+   on (mic muted, audio deafened) — using the danger color makes the
+   live state unmistakable at a glance. */
+.btn-icon-gear.active {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-icon-gear.active:hover {
+  background: var(--danger-hover);
+  color: white;
+}
+
 .btn-small {
   padding: var(--space-2) var(--space-3);
   border: none;
@@ -1492,67 +1506,45 @@ select,
   background: var(--danger-hover);
 }
 
-.voice-bar {
+/* Sidebar voice participants — nested under each channel that has
+   anyone in voice. Indented under the channel name so the tree shape
+   matches the room/people relationship. */
+.channel-item-wrap {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.channel-item.in-voice-here {
+  /* Subtle marker on the channel where this user is currently in voice.
+     Don't fight selected/unread highlights — just add a left accent. */
+  box-shadow: inset 2px 0 0 var(--success);
+}
+
+.channel-participants {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 4px var(--space-5);
+}
+
+.channel-participant {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-elevated);
-  border-radius: var(--r-md);
-  margin-bottom: var(--space-3);
-}
-
-.voice-toggle {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-md);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  cursor: pointer;
-  font-size: var(--text-md);
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.voice-toggle:hover {
-  border-color: var(--accent);
-}
-
-.voice-toggle.active {
-  background: var(--danger);
-  color: white;
-  border-color: var(--danger);
-}
-
-.voice-participants {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
-  flex: 1;
-}
-
-.voice-participant {
-  background: var(--surface);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--r-sm);
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
   font-size: var(--text-xs);
-  color: var(--success);
-  transition: box-shadow var(--transition-fast), background var(--transition-fast);
+  color: var(--text-muted);
+  border-radius: var(--r-sm);
 }
 
-.voice-participant.speaking {
+.channel-participant:hover {
   background: var(--surface-hover);
-  box-shadow: 0 0 0 2px var(--success);
-  animation: voice-pulse 1.2s ease-in-out infinite;
+  color: var(--text);
 }
 
-@keyframes voice-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px var(--success); }
-  50%      { box-shadow: 0 0 0 4px var(--ring); }
+.channel-participant-icon {
+  font-size: var(--text-xs);
+  opacity: 0.7;
 }
 
 .voice-status {

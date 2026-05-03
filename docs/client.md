@@ -49,6 +49,19 @@ variables applied at the root via `data-theme`; switching is just a
 dataset change. Light overrides shadow tokens too — the dark-mode
 shadow values would look heavy on a light background.
 
+## Voice surface in the sidebar
+
+Each channel that has anyone in voice renders the participants nested
+underneath it in the sidebar — names indented under the channel row.
+The data comes from `GET /voice/participants` (polled every 5s); the
+channel row itself shows a `🎙️ N` count badge when there are people in
+voice. Double-clicking any channel joins voice on it.
+
+The user's mute mic and deafen toggles live in the sidebar footer next
+to the settings gear, and only render when the user is in voice on
+some channel. The button shape is `.btn-icon-gear` shared with the
+gear; an `.active` modifier turns it red while toggled on.
+
 ## WebSocket lifecycle
 
 The Tauri side opens one WebSocket per connected hub and forwards

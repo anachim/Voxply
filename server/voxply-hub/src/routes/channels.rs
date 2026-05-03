@@ -27,6 +27,69 @@ pub async fn voice_populations(
     Json(out)
 }
 
+/// Returns voice participants grouped by channel, enriched with each
+/// member's display_name from the local users table. Lets the sidebar
+/// show participant names nested under each voice-active channel rather
+/// than just a count.
+///
+/// Shape: { channel_id: [{ public_key, display_name }] }. Channels with
+/// zero participants are omitted.
+pub async fn voice_channel_participants(
+    State(state): State<Arc<AppState>>,
+    _user: AuthUser,
+) -> Result<Json<HashMap<String, Vec<VoiceParticipantInfo>>>, (StatusCode, String)> {
+    let voice = state.voice_channels.read().await;
+
+    // Collect every distinct pubkey first so we can look up display names
+    // in one query. Avoids N round-trips for a hub with many in-voice users.
+    let mut all_keys: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for members in voice.values() {
+        for pk in members.keys() {
+            all_keys.insert(pk.clone());
+        }
+    }
+
+    let mut name_by_key: HashMap<String, Option<String>> = HashMap::new();
+    if !all_keys.is_empty() {
+        // sqlx doesn't have great IN-clause helpers; this loop is cheap and
+        // bounded by hub size. The lookup itself is one indexed PK fetch.
+        for key in &all_keys {
+            let name: Option<String> = sqlx::query_scalar(
+                "SELECT display_name FROM users WHERE public_key = ?",
+            )
+            .bind(key)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+            .flatten();
+            name_by_key.insert(key.clone(), name);
+        }
+    }
+
+    let mut out: HashMap<String, Vec<VoiceParticipantInfo>> = HashMap::new();
+    for (channel_id, members) in voice.iter() {
+        if members.is_empty() {
+            continue;
+        }
+        let participants = members
+            .keys()
+            .map(|pk| VoiceParticipantInfo {
+                public_key: pk.clone(),
+                display_name: name_by_key.get(pk).cloned().flatten(),
+            })
+            .collect();
+        out.insert(channel_id.clone(), participants);
+    }
+    Ok(Json(out))
+}
+
+#[derive(serde::Serialize)]
+pub struct VoiceParticipantInfo {
+    pub public_key: String,
+    pub display_name: Option<String>,
+}
+
 /// Returns the set of public keys currently in any voice channel on this
 /// hub. Used by the client to show a 🎙️ next to in-voice users in the
 /// member list.

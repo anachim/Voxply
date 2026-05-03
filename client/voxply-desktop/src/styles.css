@@ -1359,6 +1359,10 @@ select,
   cursor: pointer;
   font-size: var(--text-lg);
   line-height: 1;
+  /* Center inline children (SVGs, single emojis) inside the square. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-icon-gear:hover {

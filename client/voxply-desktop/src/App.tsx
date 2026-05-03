@@ -2021,6 +2021,50 @@ function MessageContent({
 }
 
 /**
+ * Inline phone icons. Plain SVG with stroke="currentColor" so the
+ * green/red CSS on the wrapping button actually paints the glyph (as
+ * opposed to the default 📞 emoji, which is a full-color image and
+ * ignores CSS color). Phone-off variant for "leave" — same handset
+ * shape with a strikethrough line, conventional for end-call buttons.
+ */
+function PhoneIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  );
+}
+
+function PhoneOffIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+      <line x1="23" y1="1" x2="1" y2="23" />
+    </svg>
+  );
+}
+
+/**
  * Plays a short two-tone "ping" via WebAudio. We synthesize it on demand
  * rather than bundle an audio file -- it's ~20 lines, has no licensing
  * concerns, and the user can tell what they're hearing without waiting
@@ -4261,14 +4305,69 @@ function App() {
         }>("voice-joined", (event) => {
           if (event.payload.hub_id !== activeHubIdRef.current) return;
           setVoiceChannelId(event.payload.channel_id);
+          // Seed the sidebar participant list with the channel's full
+          // member list at join time, so we don't have to wait for the
+          // next 5s poll to render anything.
+          setVoicePartByChannel((prev) => ({
+            ...prev,
+            [event.payload.channel_id]: event.payload.participants,
+          }));
         })
       );
 
-      // The voice-participant-{joined,left,speaking} events come from the
-      // Tauri backend in real time. The sidebar polls for participant
-      // presence on a 5s cadence which is plenty for who-is-where, so we
-      // don't subscribe to these here. Re-add them if we want live
-      // speaking indicators in the sidebar later.
+      // Live participant updates so the sidebar reflects join/leave
+      // immediately rather than at the next 5s poll. The polling loop
+      // still runs as a backstop in case we miss an event.
+      unlistens.push(
+        await listen<{ hub_id: string; channel_id: string; participant: VoiceParticipant }>(
+          "voice-participant-joined",
+          (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
+            const { channel_id, participant } = event.payload;
+            setVoicePartByChannel((prev) => {
+              const existing = prev[channel_id] ?? [];
+              if (existing.some((p) => p.public_key === participant.public_key)) {
+                return prev;
+              }
+              return { ...prev, [channel_id]: [...existing, participant] };
+            });
+            setVoiceActiveUsers((prev) => {
+              if (prev.has(participant.public_key)) return prev;
+              const next = new Set(prev);
+              next.add(participant.public_key);
+              return next;
+            });
+          }
+        )
+      );
+
+      unlistens.push(
+        await listen<{ hub_id: string; channel_id: string; public_key: string }>(
+          "voice-participant-left",
+          (event) => {
+            if (event.payload.hub_id !== activeHubIdRef.current) return;
+            const { channel_id, public_key } = event.payload;
+            setVoicePartByChannel((prev) => {
+              const existing = prev[channel_id];
+              if (!existing) return prev;
+              const next = existing.filter((p) => p.public_key !== public_key);
+              // Drop the channel key entirely when nobody's left in it,
+              // so the sidebar collapses the participants block too.
+              if (next.length === 0) {
+                const { [channel_id]: _, ...rest } = prev;
+                return rest;
+              }
+              return { ...prev, [channel_id]: next };
+            });
+            setVoiceActiveUsers((prev) => {
+              if (!prev.has(public_key)) return prev;
+              const next = new Set(prev);
+              next.delete(public_key);
+              return next;
+            });
+          }
+        )
+      );
 
       unlistens.push(
         await listen<number>("mic-level", (event) => {
@@ -6690,8 +6789,10 @@ function App() {
                 )}
                 {/* Phone toggle: joins the selected channel when not in
                     voice (disabled if no leaf channel is selected),
-                    leaves voice when in. Same icon, two states — call
-                    on green, end call red. */}
+                    leaves voice when in. Inline SVGs (not emoji) so the
+                    icon respects CSS color and we get a proper handset-
+                    down shape for leave instead of just a tinted ring
+                    around the same glyph. */}
                 {voiceChannelId ? (
                   <button
                     onClick={handleVoiceLeave}
@@ -6699,7 +6800,7 @@ function App() {
                     title="Leave voice"
                     aria-label="Leave voice"
                   >
-                    📞
+                    <PhoneOffIcon />
                   </button>
                 ) : (
                   <button
@@ -6713,7 +6814,7 @@ function App() {
                     }
                     aria-label="Join voice"
                   >
-                    📞
+                    <PhoneIcon />
                   </button>
                 )}
                 <button

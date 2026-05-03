@@ -14,16 +14,24 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::middleware::AuthUser;
-use crate::permissions::{self, ADMIN};
+use crate::permissions::{self, MANAGE_GAMES};
 use crate::state::AppState;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct GameManifest {
-    pub id: String,
+    /// Optional. When omitted we derive a stable id from the entry_url so
+    /// re-installing the same URL upserts (which is the natural "update
+    /// this game" behavior). Authors who want to control their own id —
+    /// e.g. to keep it stable across hosting moves — can still set it.
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    pub version: String,
+    /// Optional. Defaults to "1.0.0" — version is purely informational
+    /// today (shown in the games list, not used for any functional logic).
+    #[serde(default)]
+    pub version: Option<String>,
     pub entry_url: String,
     #[serde(default)]
     pub thumbnail_url: Option<String>,
@@ -40,6 +48,18 @@ fn default_min_players() -> i64 {
 }
 fn default_max_players() -> i64 {
     1
+}
+
+/// Stable id derived from the entry_url. FNV-1a 64-bit — no crypto needed
+/// since we just want "same URL re-installed = same id (= upsert)" with
+/// negligible collision risk at our scale.
+fn derive_id_from_entry_url(entry_url: &str) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in entry_url.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("game-{h:016x}")
 }
 
 #[derive(Deserialize)]
@@ -74,7 +94,7 @@ pub async fn install_game(
     Json(req): Json<InstallGameRequest>,
 ) -> Result<(StatusCode, Json<InstalledGame>), (StatusCode, String)> {
     let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
-    perms.require(ADMIN)?;
+    perms.require(MANAGE_GAMES)?;
 
     // Prefer an inline manifest if provided (useful for builtin demo games);
     // otherwise fetch the URL.
@@ -107,10 +127,10 @@ pub async fn install_game(
         })?
     };
 
-    // Sanity checks — names must be non-empty, entry_url must be http(s) or a
-    // data URL. We allow data URLs so small demo games can ship inline.
-    if manifest.id.trim().is_empty() || manifest.name.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "Manifest id and name are required".to_string()));
+    // Sanity checks — name must be non-empty; id/version get derived if
+    // omitted so authors don't have to invent bookkeeping fields.
+    if manifest.name.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Manifest name is required".to_string()));
     }
     let u = manifest.entry_url.as_str();
     // Accept absolute http(s):// URLs, data URLs (inline games), and paths
@@ -130,6 +150,18 @@ pub async fn install_game(
 
     let now = crate::auth::handlers::unix_timestamp();
 
+    // Apply defaults for the optional fields. id ties to entry_url so the
+    // same URL re-installed = upsert (= "update this game"). Version is
+    // informational only.
+    let id = manifest
+        .id
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| derive_id_from_entry_url(&manifest.entry_url));
+    let version = manifest
+        .version
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "1.0.0".to_string());
+
     sqlx::query(
         "INSERT INTO hub_games
          (id, name, description, version, entry_url, thumbnail_url, author,
@@ -146,10 +178,10 @@ pub async fn install_game(
            max_players = excluded.max_players,
            manifest_url = excluded.manifest_url",
     )
-    .bind(&manifest.id)
+    .bind(&id)
     .bind(&manifest.name)
     .bind(&manifest.description)
-    .bind(&manifest.version)
+    .bind(&version)
     .bind(&manifest.entry_url)
     .bind(&manifest.thumbnail_url)
     .bind(&manifest.author)
@@ -162,15 +194,15 @@ pub async fn install_game(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    tracing::info!("Installed game '{}' ({})", manifest.name, manifest.id);
+    tracing::info!("Installed game '{}' ({})", manifest.name, id);
 
     Ok((
         StatusCode::CREATED,
         Json(InstalledGame {
-            id: manifest.id,
+            id,
             name: manifest.name,
             description: manifest.description,
-            version: manifest.version,
+            version,
             entry_url: manifest.entry_url,
             thumbnail_url: manifest.thumbnail_url,
             author: manifest.author,
@@ -222,7 +254,7 @@ pub async fn uninstall_game(
     Path(game_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let perms = permissions::user_permissions(&state.db, &user.public_key).await?;
-    perms.require(ADMIN)?;
+    perms.require(MANAGE_GAMES)?;
 
     let result = sqlx::query("DELETE FROM hub_games WHERE id = ?")
         .bind(&game_id)

@@ -126,6 +126,75 @@ async fn non_admin_cannot_install_games() {
 }
 
 #[tokio::test]
+async fn install_derives_id_and_version_when_omitted() {
+    let server = setup().await;
+    let owner = authenticate(&server, &Identity::generate()).await;
+
+    // Manifest with ONLY name + entry_url (no id, no version) — what the
+    // quick-install form sends.
+    let resp = server
+        .post("/hub/games")
+        .authorization_bearer(&owner)
+        .json(&json!({
+            "manifest_url": "inline:https://example.com/g/index.html",
+            "manifest": {
+                "name": "Quick Install Test",
+                "entry_url": "https://example.com/g/index.html",
+            }
+        }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let body = resp.json::<serde_json::Value>();
+    let id = body["id"].as_str().unwrap();
+    assert!(id.starts_with("game-"), "derived id should be prefixed: got {id}");
+    assert_eq!(body["version"], "1.0.0", "default version should be 1.0.0");
+    assert_eq!(body["name"], "Quick Install Test");
+
+    // Re-installing the same entry_url should upsert (= same id) so the
+    // listing stays at 1 entry, not duplicate.
+    let resp = server
+        .post("/hub/games")
+        .authorization_bearer(&owner)
+        .json(&json!({
+            "manifest_url": "inline:https://example.com/g/index.html",
+            "manifest": {
+                "name": "Renamed",
+                "entry_url": "https://example.com/g/index.html",
+            }
+        }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+
+    let list: serde_json::Value = server
+        .get("/hub/games")
+        .authorization_bearer(&owner)
+        .await
+        .json();
+    let arr = list.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "same entry_url should upsert, not duplicate");
+    assert_eq!(arr[0]["name"], "Renamed", "the upsert should have applied");
+}
+
+#[tokio::test]
+async fn install_rejects_missing_name() {
+    let server = setup().await;
+    let owner = authenticate(&server, &Identity::generate()).await;
+
+    let resp = server
+        .post("/hub/games")
+        .authorization_bearer(&owner)
+        .json(&json!({
+            "manifest_url": "inline:no-name",
+            "manifest": {
+                "name": "",
+                "entry_url": "https://example.com/g.html",
+            }
+        }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn install_rejects_bad_entry_url() {
     let server = setup().await;
     let owner = authenticate(&server, &Identity::generate()).await;

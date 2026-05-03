@@ -1511,6 +1511,7 @@ const ALL_PERMISSIONS: { id: string; label: string }[] = [
   { id: "ban_members", label: "Ban members" },
   { id: "mute_members", label: "Mute members" },
   { id: "timeout_members", label: "Timeout members" },
+  { id: "manage_games", label: "Install / uninstall games" },
   { id: "read_messages", label: "Read messages" },
   { id: "send_messages", label: "Send messages" },
 ];
@@ -3682,8 +3683,16 @@ function App() {
   const [selectedGame, setSelectedGame] = useState<InstalledGame | null>(null);
   const [showInstallGame, setShowInstallGame] = useState(false);
   const [installManifestUrl, setInstallManifestUrl] = useState("");
+  // Quick-install fields — let users add a game with just a name + entry URL
+  // without authoring a full manifest JSON. The hub fills in id/version
+  // defaults; the manifest JSON path stays available for published games.
+  const [installSimpleName, setInstallSimpleName] = useState("");
+  const [installSimpleEntryUrl, setInstallSimpleEntryUrl] = useState("");
 
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
+  const canManageGames = myRoles.some((r) =>
+    r.permissions.includes("admin") || r.permissions.includes("manage_games")
+  );
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; channel: Channel } | null>(null);
@@ -4375,6 +4384,28 @@ function App() {
     try {
       await invoke("install_game", { manifestUrl: url, manifest: null });
       setInstallManifestUrl("");
+      setShowInstallGame(false);
+      await refreshGames();
+      setToast("Game installed");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleQuickInstallGame() {
+    const name = installSimpleName.trim();
+    const entryUrl = installSimpleEntryUrl.trim();
+    if (!name || !entryUrl) return;
+    try {
+      // Hand the hub an inline manifest with just the two fields the user
+      // cares about. The hub derives a stable id from entry_url and
+      // defaults version to "1.0.0".
+      await invoke("install_game", {
+        manifestUrl: `inline:${entryUrl}`,
+        manifest: { name, entry_url: entryUrl },
+      });
+      setInstallSimpleName("");
+      setInstallSimpleEntryUrl("");
       setShowInstallGame(false);
       await refreshGames();
       setToast("Game installed");
@@ -6380,7 +6411,7 @@ function App() {
 
             <div className="sidebar-header sidebar-header-games">
               <h3>Games</h3>
-              {isAdmin && (
+              {canManageGames && (
                 <button
                   className="btn-icon"
                   onClick={() => setShowInstallGame(true)}
@@ -6400,7 +6431,7 @@ function App() {
                   onClick={() => launchGame(g)}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    if (isAdmin) handleUninstallGame(g.id, g.name);
+                    if (canManageGames) handleUninstallGame(g.id, g.name);
                   }}
                   title={g.description ?? ""}
                 >
@@ -6410,7 +6441,7 @@ function App() {
             </ul>
             {installedGames.length === 0 && (
               <p className="muted">
-                {isAdmin ? "No games yet — click + to install." : "No games yet."}
+                {canManageGames ? "No games yet — click + to install." : "No games yet."}
               </p>
             )}
 
@@ -7273,40 +7304,61 @@ function App() {
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <h3>Install game</h3>
               <p className="muted">
-                Paste a manifest URL (JSON). The game will be available to
-                everyone on this hub.
+                Give the game a name and the URL where its HTML lives.
+                The hub takes care of the rest.
               </p>
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Name
+              </label>
               <input
                 type="text"
-                value={installManifestUrl}
-                onChange={(e) => setInstallManifestUrl(e.target.value)}
+                value={installSimpleName}
+                onChange={(e) => setInstallSimpleName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleInstallGameFromUrl();
+                  if (e.key === "Enter") handleQuickInstallGame();
                   if (e.key === "Escape") setShowInstallGame(false);
                 }}
-                placeholder="https://example.com/my-game/manifest.json"
+                placeholder="My Cool Game"
                 autoFocus
               />
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Game URL
+              </label>
+              <input
+                type="text"
+                value={installSimpleEntryUrl}
+                onChange={(e) => setInstallSimpleEntryUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleQuickInstallGame();
+                  if (e.key === "Escape") setShowInstallGame(false);
+                }}
+                placeholder="https://example.com/my-game/index.html"
+              />
               <details className="install-game-help">
-                <summary>What's a manifest?</summary>
+                <summary>Advanced: install from a manifest URL</summary>
                 <p className="muted" style={{ marginTop: "8px" }}>
-                  A small JSON file describing the game. Minimum required:
+                  Game authors can publish a <code>manifest.json</code>{" "}
+                  with name, entry URL, and optional fields like{" "}
+                  <code>description</code>, <code>thumbnail_url</code>,{" "}
+                  <code>author</code>. Paste its URL here.
                 </p>
-                <pre className="install-game-example">{`{
-  "id": "my-cool-game",
-  "name": "My Cool Game",
-  "version": "1.0.0",
-  "entry_url": "https://example.com/my-game/index.html"
-}`}</pre>
-                <p className="muted" style={{ marginTop: "8px" }}>
-                  Optional fields: <code>description</code>,{" "}
-                  <code>thumbnail_url</code>, <code>author</code>,{" "}
-                  <code>min_players</code>, <code>max_players</code>.{" "}
-                  The <code>entry_url</code> is the HTML file the game loads
-                  in a sandboxed iframe — your server hosts it, the hub
-                  just stores the metadata. Try the demo dice game below
-                  to see one in action.
-                </p>
+                <input
+                  type="text"
+                  value={installManifestUrl}
+                  onChange={(e) => setInstallManifestUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleInstallGameFromUrl();
+                  }}
+                  placeholder="https://example.com/my-game/manifest.json"
+                  style={{ marginTop: "8px" }}
+                />
+                <button
+                  onClick={handleInstallGameFromUrl}
+                  className="btn-secondary"
+                  style={{ marginTop: "8px" }}
+                >
+                  Install from manifest URL
+                </button>
               </details>
               <div className="modal-actions">
                 <button
@@ -7322,7 +7374,7 @@ function App() {
                 >
                   Cancel
                 </button>
-                <button onClick={handleInstallGameFromUrl}>Install</button>
+                <button onClick={handleQuickInstallGame}>Install</button>
               </div>
             </div>
           </div>

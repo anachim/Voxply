@@ -95,15 +95,32 @@ the iframe sandbox model, and the postMessage SDK.
 
 ### The manifest
 
-A game is a JSON file conventionally named `manifest.json`. Schema:
+A game is a JSON file conventionally named `manifest.json`. The
+**minimum viable manifest** is two fields:
 
 ```json
 {
-  "id": "my-cool-game",
   "name": "My Cool Game",
-  "version": "1.0.0",
+  "entry_url": "https://example.com/my-cool-game/index.html"
+}
+```
+
+That's it. The hub fills in everything else: `id` is derived from a
+hash of `entry_url` (so the same URL re-installed = upsert, which is
+the natural "update this game" behavior), `version` defaults to
+`"1.0.0"`. Game authors with no opinions on either don't need to think
+about them.
+
+The full schema, with everything optional except `name` and
+`entry_url`:
+
+```json
+{
+  "name": "My Cool Game",
   "entry_url": "https://example.com/my-cool-game/index.html",
 
+  "id": "my-cool-game",
+  "version": "1.0.0",
   "description": "Optional one-line description.",
   "thumbnail_url": "https://example.com/my-cool-game/thumb.png",
   "author": "Your Name",
@@ -114,10 +131,10 @@ A game is a JSON file conventionally named `manifest.json`. Schema:
 
 | Field | Required | What it is |
 |-------|----------|------------|
-| `id` | yes | Stable unique identifier. Re-installing with the same id updates the existing entry — use this for game updates. |
-| `name` | yes | Display name in the sidebar and game launcher. |
-| `version` | yes | Semver string. Shown in the games list. |
-| `entry_url` | yes | The URL the iframe loads. Must start with `http://`, `https://`, `data:`, or `/`. `javascript:`, `file:`, and other schemes are rejected. |
+| `name` | **yes** | Display name in the sidebar and game launcher. |
+| `entry_url` | **yes** | The URL the iframe loads. Must start with `http://`, `https://`, `data:`, or `/`. `javascript:`, `file:`, and other schemes are rejected. |
+| `id` | no | Stable unique identifier. Defaults to a hash of `entry_url`. Set it explicitly only if you want to keep the same id across hosting moves (entry_url changes). |
+| `version` | no | Free-form string, conventionally semver. Defaults to `"1.0.0"`. Purely informational today. |
 | `description` | no | One-line description. |
 | `thumbnail_url` | no | URL of a thumbnail (currently used in the title hover, future: rendered inline). |
 | `author` | no | Free-form attribution. |
@@ -126,15 +143,18 @@ A game is a JSON file conventionally named `manifest.json`. Schema:
 
 ### How install works
 
-A hub admin opens **Install game** in the games sidebar and provides
-the game in one of two ways:
+A hub member with the `manage_games` permission (or `admin`) opens
+**Install game** in the games sidebar. There are three install paths:
 
-1. **Manifest URL** — paste a URL that returns the JSON above. The hub
-   fetches it, validates the fields, and stores the metadata in
-   `hub_games`. Use this for any game hosted somewhere reachable.
-2. **Inline manifest** — pass the JSON directly via the Tauri command
-   without a URL. Used by the bundled demo dice game (its `entry_url`
-   points at `/demo-games/dice.html` shipped inside the desktop client).
+1. **Quick install** (default) — type a name and the game URL. The hub
+   builds a minimal manifest internally, derives the id, and installs.
+   No JSON authoring required. Right pick for one-off / personal games.
+2. **Manifest URL** (advanced section in the dialog) — paste a URL that
+   returns a `manifest.json`. The hub fetches it, validates, and stores
+   the metadata. Right pick for games an author has properly published.
+3. **Inline manifest** via the Tauri command directly — used by the
+   bundled demo dice game (its `entry_url` points at
+   `/demo-games/dice.html` shipped inside the desktop client).
 
 Once installed, the game shows up in the sidebar **for every member of
 that hub** and clicking it opens the iframe in the main panel.
@@ -225,9 +245,9 @@ Hub admin pastes the manifest URL → game appears in everyone's sidebar.
 
 ### Updating a game
 
-Re-install with the same `id` and a new `version`. The hub does an
-upsert: name/description/version/entry_url all replace; install metadata
-(who installed it, when) is preserved.
+Re-install at the same `entry_url` (or with the same explicit `id`).
+The hub does an upsert: name / description / version / entry_url all
+replace; install metadata (who installed it, when) is preserved.
 
 ### Uninstalling
 

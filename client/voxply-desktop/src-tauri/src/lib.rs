@@ -178,15 +178,32 @@ struct InstalledGame {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct GameManifest {
-    id: String,
+    // Only name and entry_url are required — everything else is filled in
+    // by the hub. Mirrors the hub-side schema in routes::games.rs so the
+    // quick-install form (just name + URL) can deserialize cleanly.
     name: String,
-    description: Option<String>,
-    version: String,
     entry_url: String,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
     thumbnail_url: Option<String>,
+    #[serde(default)]
     author: Option<String>,
+    #[serde(default = "default_min_players")]
     min_players: i64,
+    #[serde(default = "default_max_players")]
     max_players: i64,
+}
+
+fn default_min_players() -> i64 {
+    1
+}
+fn default_max_players() -> i64 {
+    1
 }
 
 #[derive(Serialize, Deserialize, Clone)]

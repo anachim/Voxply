@@ -40,6 +40,12 @@ pub struct DmMessageResponse {
     pub created_at: i64,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// True when at least one outbox row for this message exhausted retries
+    /// (`bounced_at` is set). Lets the client mark the bubble "delivery
+    /// failed". Always false for received messages and for messages with no
+    /// remote recipients.
+    #[serde(default)]
+    pub delivery_failed: bool,
 }
 
 /// Hub-to-hub DM delivery envelope (POST /federation/dm).

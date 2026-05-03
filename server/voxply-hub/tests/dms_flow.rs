@@ -14,11 +14,20 @@ use voxply_hub::state::AppState;
 use voxply_identity::Identity;
 
 async fn setup() -> TestServer {
+    let (server, _pool) = setup_with_pool().await;
+    server
+}
+
+/// Same as setup() but also returns the SqlitePool so tests can poke the
+/// database directly (e.g. to mark a dm_outbox row as bounced for a test
+/// that exercises the delivery_failed reporting path).
+async fn setup_with_pool() -> (TestServer, sqlx::SqlitePool) {
     let db = SqlitePoolOptions::new()
         .connect("sqlite::memory:")
         .await
         .unwrap();
     db::migrations::run(&db).await.unwrap();
+    let pool_handle = db.clone();
     let (chat_tx, _) = broadcast::channel(256);
     let (voice_event_tx, _) = broadcast::channel(16);
 
@@ -37,7 +46,7 @@ async fn setup() -> TestServer {
         online_users: RwLock::new(std::collections::HashSet::new()),
     });
     let app = server::create_router(state);
-    TestServer::new(app)
+    (TestServer::new(app), pool_handle)
 }
 
 async fn authenticate(server: &TestServer, identity: &Identity) -> String {
@@ -501,3 +510,92 @@ async fn dm_retries_when_recipient_hub_comes_online() {
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["content"], "hi from retry land");
 }
+
+#[tokio::test]
+async fn list_dm_messages_marks_bounced_as_delivery_failed() {
+    let (server, pool) = setup_with_pool().await;
+    let alice = Identity::generate();
+    let alice_token = authenticate(&server, &alice).await;
+    let bob = Identity::generate();
+
+    // Alice creates a DM to Bob with a remote hub URL — Bob isn't on this
+    // hub, so the conversation needs hub_url for him.
+    let resp = server
+        .post("/conversations")
+        .authorization_bearer(&alice_token)
+        .json(&json!({
+            "members": [bob.public_key_hex()],
+            "member_hubs": { bob.public_key_hex(): "http://unreachable.example" },
+        }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let conv: ConversationResponse = resp.json();
+
+    // Send a message. The send_dm path will try to deliver synchronously,
+    // fail (unreachable URL), and leave the row in the outbox at attempts=1.
+    server
+        .post(&format!("/conversations/{}/messages", conv.id))
+        .authorization_bearer(&alice_token)
+        .json(&json!({ "content": "this won't make it" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    // Pretend the worker exhausted retries — mark the outbox row bounced.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    sqlx::query("UPDATE dm_outbox SET bounced_at = ? WHERE recipient_hub_url = ?")
+        .bind(now)
+        .bind("http://unreachable.example")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // List the conversation — the message should be marked delivery_failed=true.
+    let resp = server
+        .get(&format!("/conversations/{}/messages", conv.id))
+        .authorization_bearer(&alice_token)
+        .await;
+    resp.assert_status_ok();
+    let messages = resp.json::<serde_json::Value>();
+    let arr = messages.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(
+        arr[0]["delivery_failed"], true,
+        "bounced outbox row should surface as delivery_failed on the message"
+    );
+}
+
+#[tokio::test]
+async fn list_dm_messages_returns_delivery_failed_false_for_local_conversation() {
+    let server = setup().await;
+    let alice = Identity::generate();
+    let alice_token = authenticate(&server, &alice).await;
+    let bob = Identity::generate();
+    authenticate(&server, &bob).await;
+
+    let resp = server
+        .post("/conversations")
+        .authorization_bearer(&alice_token)
+        .json(&json!({ "members": [bob.public_key_hex()] }))
+        .await;
+    let conv: ConversationResponse = resp.json();
+
+    server
+        .post(&format!("/conversations/{}/messages", conv.id))
+        .authorization_bearer(&alice_token)
+        .json(&json!({ "content": "hi" }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let resp = server
+        .get(&format!("/conversations/{}/messages", conv.id))
+        .authorization_bearer(&alice_token)
+        .await;
+    let messages = resp.json::<serde_json::Value>();
+    let arr = messages.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["delivery_failed"], false);
+}
+

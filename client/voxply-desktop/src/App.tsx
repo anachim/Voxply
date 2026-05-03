@@ -320,6 +320,10 @@ interface DmMessage {
   content: string;
   timestamp: number;
   attachments?: Attachment[];
+  /** True when at least one outbox row for this message has bounced
+   *  (retries exhausted). Renders a delivery-failed mark next to the
+   *  message. False/missing for received messages and not-yet-bounced sends. */
+  delivery_failed?: boolean;
 }
 
 interface DmMessageFull {
@@ -330,6 +334,7 @@ interface DmMessageFull {
   content: string;
   created_at: number;
   attachments?: Attachment[];
+  delivery_failed?: boolean;
 }
 
 /** Hub icon wrapped in dnd-kit's useSortable so the user can drag-reorder
@@ -5469,6 +5474,7 @@ function App() {
           content: m.content,
           timestamp: m.created_at,
           attachments: m.attachments,
+          delivery_failed: m.delivery_failed,
         })),
       }));
     } catch (e) {
@@ -6585,6 +6591,18 @@ function App() {
                           ?.display_name ||
                         m.sender_name ||
                         formatPubkey(m.sender);
+                      // Only show "delivery failed" on outgoing messages —
+                      // it'd be confusing on a received message we read fine.
+                      const showFailed =
+                        m.delivery_failed === true && m.sender === publicKey;
+                      const failedBadge = showFailed ? (
+                        <span
+                          className="dm-delivery-failed"
+                          title="The sender's hub couldn't deliver this to one or more recipients after retries."
+                        >
+                          ⚠ Delivery failed
+                        </span>
+                      ) : null;
                       const actionText = meAction(m.content);
                       if (actionText !== null) {
                         return (
@@ -6609,6 +6627,7 @@ function App() {
                             >
                               {formatRelative(m.timestamp)}
                             </span>
+                            {failedBadge}
                           </div>
                         );
                       }
@@ -6630,6 +6649,7 @@ function App() {
                           {m.attachments && m.attachments.length > 0 && (
                             <MessageAttachments items={m.attachments} onImageClick={openImage} />
                           )}
+                          {failedBadge}
                         </div>
                       );
                     })}

@@ -2623,6 +2623,20 @@ select:focus {
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* "⚠ Delivery failed" mark on outgoing DMs whose dm_outbox row bounced
+   after retries. Subtle but unmistakable — sender needs to know the
+   message didn't make it. */
+.dm-delivery-failed {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--r-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: help;
+}
+
 .context-menu-header {
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);

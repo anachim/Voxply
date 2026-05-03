@@ -280,6 +280,9 @@ pub async fn send_dm(
             content: req.content,
             created_at: now,
             attachments: req.attachments,
+            // Just-sent message — bounce status only becomes meaningful after
+            // dm_worker exhausts retries.
+            delivery_failed: false,
         }),
     ))
 }
@@ -302,9 +305,16 @@ pub async fn list_dm_messages(
         return Err((StatusCode::FORBIDDEN, "Not a member of this conversation".to_string()));
     }
 
+    // Bounce status comes from dm_outbox: a message is "delivery failed" if
+    // ANY of its outbox rows has bounced_at set. We compute it inline so
+    // there's no extra round-trip per message.
     let rows = sqlx::query_as::<_, DmMessageRow>(
         "SELECT m.id, m.conversation_id, m.sender, u.display_name as sender_name,
-                m.content, m.attachments, m.created_at
+                m.content, m.attachments, m.created_at,
+                EXISTS (
+                    SELECT 1 FROM dm_outbox o
+                    WHERE o.message_id = m.id AND o.bounced_at IS NOT NULL
+                ) AS delivery_failed
          FROM dm_messages m
          LEFT JOIN users u ON u.public_key = m.sender
          WHERE m.conversation_id = ?
@@ -325,6 +335,7 @@ pub async fn list_dm_messages(
                 content: r.content,
                 created_at: r.created_at,
                 attachments: parse_dm_attachments(r.attachments),
+                delivery_failed: r.delivery_failed != 0,
             })
             .collect(),
     ))
@@ -625,4 +636,7 @@ struct DmMessageRow {
     content: String,
     attachments: Option<String>,
     created_at: i64,
+    /// 0 or 1 from SQLite EXISTS — there's no native bool, so we cast at
+    /// the boundary in list_dm_messages.
+    delivery_failed: i64,
 }

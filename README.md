@@ -25,7 +25,7 @@ community-built games — all keypair-based identity, no central servers.
   approval queue.
 - **Notifications** — three-state per scope (all / mentions only /
   silent), system tray badge, OS notifications, mention sound.
-- **Themes** — Calm (default), Classic, Linear.
+- **Themes** — Calm (default), Classic, Linear, Light.
 
 ## Architecture
 

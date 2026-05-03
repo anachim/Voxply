@@ -496,8 +496,8 @@ interface SettingsPageProps {
   onSetDefaultProfile: (id: string) => void;
   onApplyProfileToHub: (id: string) => void;
 
-  theme: "calm" | "classic" | "linear";
-  onThemeChange: (t: "calm" | "classic" | "linear") => void;
+  theme: "calm" | "classic" | "linear" | "light";
+  onThemeChange: (t: "calm" | "classic" | "linear" | "light") => void;
   hasActiveHub: boolean;
   publicKey: string | null;
   copiedKey: boolean;
@@ -696,7 +696,7 @@ function ProfileTab({
  * theme's palette regardless of which theme is currently active.
  */
 const THEMES: {
-  id: "calm" | "classic" | "linear";
+  id: "calm" | "classic" | "linear" | "light";
   name: string;
   tagline: string;
   swatches: [string, string, string];
@@ -719,14 +719,20 @@ const THEMES: {
     tagline: "Near-black with a sharp violet-blue accent. Minimal.",
     swatches: ["#0c0d11", "#1a1c22", "#6571f0"],
   },
+  {
+    id: "light",
+    name: "Light",
+    tagline: "Off-white with a dusty teal accent. Reads well in daylight.",
+    swatches: ["#fafaf7", "#f5f4ef", "#4a8d7a"],
+  },
 ];
 
 function ThemePicker({
   value,
   onChange,
 }: {
-  value: "calm" | "classic" | "linear";
-  onChange: (t: "calm" | "classic" | "linear") => void;
+  value: "calm" | "classic" | "linear" | "light";
+  onChange: (t: "calm" | "classic" | "linear" | "light") => void;
 }) {
   return (
     <div className="theme-cards">
@@ -3634,7 +3640,7 @@ function App() {
   // Settings
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("profile");
-  const [theme, setTheme] = useState<"calm" | "classic" | "linear">("calm");
+  const [theme, setTheme] = useState<"calm" | "classic" | "linear" | "light">("calm");
   const [profiles, setProfiles] = useState<NamedProfile[]>([]);
   const [defaultProfileId, setDefaultProfileId] = useState<string | null>(null);
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
@@ -4834,8 +4840,8 @@ function App() {
       // default palette.
       try {
         const profile = await invoke<{ theme?: string | null }>("get_profile");
-        const t = (profile.theme ?? "calm") as "calm" | "classic" | "linear";
-        const valid = t === "calm" || t === "classic" || t === "linear" ? t : "calm";
+        const t = (profile.theme ?? "calm") as "calm" | "classic" | "linear" | "light";
+        const valid = t === "calm" || t === "classic" || t === "linear" || t === "light" ? t : "calm";
         setTheme(valid);
         document.documentElement.dataset.theme = valid;
       } catch {
@@ -5233,7 +5239,7 @@ function App() {
   async function persistProfileFile(overrides: {
     profiles?: NamedProfile[];
     defaultProfileId?: string | null;
-    theme?: "calm" | "classic" | "linear";
+    theme?: "calm" | "classic" | "linear" | "light";
   } = {}) {
     const next = {
       profiles: overrides.profiles ?? profiles,
@@ -5319,7 +5325,7 @@ function App() {
     }
   }
 
-  async function handleSetTheme(t: "calm" | "classic" | "linear") {
+  async function handleSetTheme(t: "calm" | "classic" | "linear" | "light") {
     setTheme(t);
     document.documentElement.dataset.theme = t;
     await persistProfileFile({ theme: t });

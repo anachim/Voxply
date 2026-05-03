@@ -34,7 +34,6 @@ items live in the wiki — see
 - No WS auto-reconnect loop — HTTP re-auths silently; WS doesn't auto-reopen
 - Bounced DMs aren't surfaced in UI — `dm_outbox.bounced_at` is logged only
 - Avatars uploaded full-resolution to every hub — base64 in `users.avatar`; doesn't scale
-- No light theme yet — token system supports it; not authored
 - No custom display font — system stack only
 
 ## 💤 Won't do

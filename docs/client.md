@@ -44,8 +44,10 @@ list:
 
 ## Themes
 
-Three: Calm (default), Classic, Linear. Theme tokens are CSS variables
-applied at the root; switching is just a class change on `<body>`.
+Four: Calm (default), Classic, Linear, Light. Theme tokens are CSS
+variables applied at the root via `data-theme`; switching is just a
+dataset change. Light overrides shadow tokens too — the dark-mode
+shadow values would look heavy on a light background.
 
 ## Conventions
 

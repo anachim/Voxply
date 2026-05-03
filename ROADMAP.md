@@ -20,7 +20,6 @@ items live in the wiki — see
 - **Screen share** — WebRTC or similar; multi-week
 - **E2E encryption for DMs** — sender-key against recipient pubkey; group DMs are the hard part
 - **Onboarding / first-run** — guided first-hub flow, demo hub option
-- **Hub operator docs** — systemd unit, TLS guide, backup, upgrade path
 - **Cross-platform packaging** — installers for macOS / Linux / mobile
 - **Performance ceiling** — load test WS broadcast, search, voice relay
 - **Accessibility + i18n** — keyboard nav audit, screen-reader, localization
@@ -30,7 +29,6 @@ items live in the wiki — see
 ## ⚠️ Known issues
 
 - `subscribe_all` firehose — every client receives every channel's messages just for unread tracking. Fine at current scale
-- Hub name mutation is lazy — `AppState.hub_name` only read at startup; alliance code still uses the startup value
 - Avatars uploaded full-resolution to every hub — base64 in `users.avatar`; doesn't scale
 - No custom display font — system stack only
 

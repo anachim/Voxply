@@ -53,6 +53,9 @@ cargo run -p voxply-hub
 # Set VOXPLY_TLS_CERT and VOXPLY_TLS_KEY for HTTPS.
 ```
 
+For a real production deployment (systemd unit, TLS, backups, upgrades),
+see [`docs/hosting.md`](docs/hosting.md).
+
 ### Desktop client
 
 ```bash

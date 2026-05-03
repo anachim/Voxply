@@ -19,6 +19,10 @@ If you're new, read in this order:
 9. [threat-model.md](threat-model.md) — what we defend against, what we don't
 10. [glossary.md](glossary.md) — terms
 
+### Running a hub
+
+- [hosting.md](hosting.md) — practical guide: systemd, TLS, backups, upgrades
+
 ### Future direction (designed, not built)
 
 11. [farm-model.md](farm-model.md) — multi-hub server layer + 5-layer architecture

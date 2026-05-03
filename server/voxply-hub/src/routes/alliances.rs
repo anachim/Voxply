@@ -30,13 +30,15 @@ pub async fn create_alliance(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
-    // Add this hub as the first member
+    // Add this hub as the first member. Use the live name from hub_settings
+    // (an admin may have renamed since startup) rather than state.hub_name.
+    let hub_name = crate::routes::hub::current_hub_name(&state).await;
     sqlx::query(
         "INSERT INTO alliance_members (alliance_id, hub_public_key, hub_name, hub_url, joined_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&state.hub_identity.public_key_hex())
-    .bind(&state.hub_name)
+    .bind(&hub_name)
     .bind("self")
     .bind(now)
     .execute(&state.db)
@@ -206,13 +208,14 @@ pub async fn list_shared_channels(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
 
+    let local_hub_name = crate::routes::hub::current_hub_name(&state).await;
     let mut out: Vec<SharedChannelResponse> = rows
         .into_iter()
         .map(|r| SharedChannelResponse {
             channel_id: r.channel_id,
             channel_name: r.channel_name,
             hub_public_key: hub_key.clone(),
-            hub_name: state.hub_name.clone(),
+            hub_name: local_hub_name.clone(),
         })
         .collect();
 
@@ -373,9 +376,10 @@ pub async fn post_alliance_channel_message(
         .await
         .ok()
         .flatten();
+        let local_hub_name = crate::routes::hub::current_hub_name(&state).await;
         let prefix = match user_label {
-            Some(name) => format!("[{name} via {}] ", state.hub_name),
-            None => format!("[{} via {}] ", &user.public_key[..16], state.hub_name),
+            Some(name) => format!("[{name} via {}] ", local_hub_name),
+            None => format!("[{} via {}] ", &user.public_key[..16], local_hub_name),
         };
         let prefixed = format!("{prefix}{}", req.content);
 

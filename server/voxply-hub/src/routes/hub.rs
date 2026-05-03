@@ -169,12 +169,19 @@ pub struct HubBranding {
 
 /// Read all three branding fields with fallback to the value seeded in AppState.
 pub async fn read_branding(state: &AppState) -> HubBranding {
-    let name = read_setting(&state.db, "hub_name")
-        .await
-        .unwrap_or_else(|| state.hub_name.clone());
+    let name = current_hub_name(state).await;
     let description = read_setting(&state.db, "hub_description").await;
     let icon = read_setting(&state.db, "hub_icon").await;
     HubBranding { name, description, icon }
+}
+
+/// Live hub name. The startup-time AppState.hub_name is only the fallback —
+/// callers that want what an admin renamed the hub to (alliance member rows,
+/// federated DM prefixes, etc.) should use this instead of state.hub_name.
+pub async fn current_hub_name(state: &AppState) -> String {
+    read_setting(&state.db, "hub_name")
+        .await
+        .unwrap_or_else(|| state.hub_name.clone())
 }
 
 async fn read_setting(db: &sqlx::SqlitePool, key: &str) -> Option<String> {

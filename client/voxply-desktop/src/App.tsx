@@ -3682,12 +3682,24 @@ function App() {
   const [installedGames, setInstalledGames] = useState<InstalledGame[]>([]);
   const [selectedGame, setSelectedGame] = useState<InstalledGame | null>(null);
   const [showInstallGame, setShowInstallGame] = useState(false);
-  const [installManifestUrl, setInstallManifestUrl] = useState("");
-  // Quick-install fields — let users add a game with just a name + entry URL
-  // without authoring a full manifest JSON. The hub fills in id/version
-  // defaults; the manifest JSON path stays available for published games.
+  // Install form fields. Required: name + entry URL. Optional fields under
+  // a "More options" disclosure for users who want to add metadata at
+  // install time. The hub fills in id/version defaults.
   const [installSimpleName, setInstallSimpleName] = useState("");
   const [installSimpleEntryUrl, setInstallSimpleEntryUrl] = useState("");
+  const [installDescription, setInstallDescription] = useState("");
+  const [installThumbnailUrl, setInstallThumbnailUrl] = useState("");
+  const [installAuthor, setInstallAuthor] = useState("");
+
+  // Per-game edit modal — replaces the right-click-to-uninstall affordance
+  // with a proper settings panel reachable from the gear icon next to
+  // each game in the sidebar.
+  const [editingGame, setEditingGame] = useState<InstalledGame | null>(null);
+  const [editGameName, setEditGameName] = useState("");
+  const [editGameEntryUrl, setEditGameEntryUrl] = useState("");
+  const [editGameDescription, setEditGameDescription] = useState("");
+  const [editGameThumbnailUrl, setEditGameThumbnailUrl] = useState("");
+  const [editGameAuthor, setEditGameAuthor] = useState("");
 
   const isAdmin = myRoles.some((r) => r.permissions.includes("admin"));
   const canManageGames = myRoles.some((r) =>
@@ -4378,12 +4390,31 @@ function App() {
     }
   }
 
-  async function handleInstallGameFromUrl() {
-    const url = installManifestUrl.trim();
-    if (!url) return;
+  function resetInstallForm() {
+    setInstallSimpleName("");
+    setInstallSimpleEntryUrl("");
+    setInstallDescription("");
+    setInstallThumbnailUrl("");
+    setInstallAuthor("");
+  }
+
+  async function handleQuickInstallGame() {
+    const name = installSimpleName.trim();
+    const entryUrl = installSimpleEntryUrl.trim();
+    if (!name || !entryUrl) return;
+    // Build the inline manifest from whatever the user filled in. Hub
+    // derives id from entry_url and defaults version to "1.0.0", so the
+    // user only ever has to think about user-facing fields.
+    const manifest: Record<string, unknown> = { name, entry_url: entryUrl };
+    if (installDescription.trim()) manifest.description = installDescription.trim();
+    if (installThumbnailUrl.trim()) manifest.thumbnail_url = installThumbnailUrl.trim();
+    if (installAuthor.trim()) manifest.author = installAuthor.trim();
     try {
-      await invoke("install_game", { manifestUrl: url, manifest: null });
-      setInstallManifestUrl("");
+      await invoke("install_game", {
+        manifestUrl: `inline:${entryUrl}`,
+        manifest,
+      });
+      resetInstallForm();
       setShowInstallGame(false);
       await refreshGames();
       setToast("Game installed");
@@ -4392,23 +4423,61 @@ function App() {
     }
   }
 
-  async function handleQuickInstallGame() {
-    const name = installSimpleName.trim();
-    const entryUrl = installSimpleEntryUrl.trim();
+  function openEditGame(game: InstalledGame) {
+    setEditingGame(game);
+    setEditGameName(game.name);
+    setEditGameEntryUrl(game.entry_url);
+    setEditGameDescription(game.description ?? "");
+    setEditGameThumbnailUrl(game.thumbnail_url ?? "");
+    setEditGameAuthor(game.author ?? "");
+  }
+
+  function closeEditGame() {
+    setEditingGame(null);
+  }
+
+  async function handleSaveGameEdit() {
+    if (!editingGame) return;
+    const name = editGameName.trim();
+    const entryUrl = editGameEntryUrl.trim();
     if (!name || !entryUrl) return;
+    // Pass the EXISTING id explicitly so the upsert hits the same row
+    // even if the user changed entry_url (which would otherwise produce
+    // a different derived id and create a new entry).
+    const manifest: Record<string, unknown> = {
+      id: editingGame.id,
+      name,
+      entry_url: entryUrl,
+      description: editGameDescription.trim() || null,
+      thumbnail_url: editGameThumbnailUrl.trim() || null,
+      author: editGameAuthor.trim() || null,
+    };
     try {
-      // Hand the hub an inline manifest with just the two fields the user
-      // cares about. The hub derives a stable id from entry_url and
-      // defaults version to "1.0.0".
       await invoke("install_game", {
-        manifestUrl: `inline:${entryUrl}`,
-        manifest: { name, entry_url: entryUrl },
+        manifestUrl: editingGame.manifest_url || `inline:${entryUrl}`,
+        manifest,
       });
-      setInstallSimpleName("");
-      setInstallSimpleEntryUrl("");
-      setShowInstallGame(false);
+      closeEditGame();
       await refreshGames();
-      setToast("Game installed");
+      setToast("Game updated");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteGameFromEditor() {
+    if (!editingGame) return;
+    if (!confirm(`Uninstall "${editingGame.name}"?`)) return;
+    try {
+      await invoke("uninstall_game", { gameId: editingGame.id });
+      const wasSelected = selectedGame?.id === editingGame.id;
+      closeEditGame();
+      await refreshGames();
+      if (wasSelected) {
+        setSelectedGame(null);
+        setView("channels");
+      }
+      setToast("Game uninstalled");
     } catch (e) {
       setError(String(e));
     }
@@ -4436,21 +4505,6 @@ function App() {
       setShowInstallGame(false);
       await refreshGames();
       setToast("Demo game installed");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function handleUninstallGame(gameId: string, name: string) {
-    if (!confirm(`Uninstall "${name}"?`)) return;
-    try {
-      await invoke("uninstall_game", { gameId });
-      await refreshGames();
-      if (selectedGame?.id === gameId) {
-        setSelectedGame(null);
-        setView("channels");
-      }
-      setToast("Game uninstalled");
     } catch (e) {
       setError(String(e));
     }
@@ -6425,17 +6479,26 @@ function App() {
               {installedGames.map((g) => (
                 <li
                   key={g.id}
-                  className={`channel-item ${
+                  className={`channel-item game-item ${
                     view === "game" && selectedGame?.id === g.id ? "selected" : ""
                   }`}
                   onClick={() => launchGame(g)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (canManageGames) handleUninstallGame(g.id, g.name);
-                  }}
                   title={g.description ?? ""}
                 >
-                  🎮 {g.name}
+                  <span className="game-item-label">🎮 {g.name}</span>
+                  {canManageGames && (
+                    <button
+                      className="game-item-gear"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditGame(g);
+                      }}
+                      title="Game settings"
+                      aria-label={`Settings for ${g.name}`}
+                    >
+                      ⚙
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -7335,32 +7398,36 @@ function App() {
                 placeholder="https://example.com/my-game/index.html"
               />
               <details className="install-game-help">
-                <summary>Advanced: install from a manifest URL</summary>
-                <p className="muted" style={{ marginTop: "8px" }}>
-                  Game authors can publish a <code>manifest.json</code>{" "}
-                  with name, entry URL, and optional fields like{" "}
-                  <code>description</code>, <code>thumbnail_url</code>,{" "}
-                  <code>author</code>. Paste its URL here.
-                </p>
+                <summary>More options</summary>
+                <label className="settings-label" style={{ marginTop: "10px" }}>
+                  Description
+                </label>
                 <input
                   type="text"
-                  value={installManifestUrl}
-                  onChange={(e) => setInstallManifestUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleInstallGameFromUrl();
-                  }}
-                  placeholder="https://example.com/my-game/manifest.json"
-                  style={{ marginTop: "8px" }}
+                  value={installDescription}
+                  onChange={(e) => setInstallDescription(e.target.value)}
+                  placeholder="Short description shown in the games list"
                 />
-                <button
-                  onClick={handleInstallGameFromUrl}
-                  className="btn-secondary"
-                  style={{ marginTop: "8px" }}
-                >
-                  Install from manifest URL
-                </button>
+                <label className="settings-label" style={{ marginTop: "8px" }}>
+                  Thumbnail URL
+                </label>
+                <input
+                  type="text"
+                  value={installThumbnailUrl}
+                  onChange={(e) => setInstallThumbnailUrl(e.target.value)}
+                  placeholder="https://example.com/my-game/thumb.png"
+                />
+                <label className="settings-label" style={{ marginTop: "8px" }}>
+                  Author
+                </label>
+                <input
+                  type="text"
+                  value={installAuthor}
+                  onChange={(e) => setInstallAuthor(e.target.value)}
+                  placeholder="Who made this game"
+                />
               </details>
-              <div className="modal-actions">
+              <div className="modal-actions" style={{ marginTop: "16px" }}>
                 <button
                   onClick={handleInstallDemoGame}
                   className="btn-secondary"
@@ -7369,12 +7436,96 @@ function App() {
                   Install demo dice game
                 </button>
                 <button
-                  onClick={() => setShowInstallGame(false)}
+                  onClick={() => {
+                    resetInstallForm();
+                    setShowInstallGame(false);
+                  }}
                   className="btn-secondary"
                 >
                   Cancel
                 </button>
                 <button onClick={handleQuickInstallGame}>Install</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {editingGame && (
+          <div className="modal-overlay" onClick={closeEditGame}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Game settings</h3>
+              <p className="muted">
+                Update the game's metadata or uninstall it. Changes apply
+                to everyone on this hub.
+              </p>
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Name
+              </label>
+              <input
+                type="text"
+                value={editGameName}
+                onChange={(e) => setEditGameName(e.target.value)}
+                autoFocus
+              />
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Game URL
+              </label>
+              <input
+                type="text"
+                value={editGameEntryUrl}
+                onChange={(e) => setEditGameEntryUrl(e.target.value)}
+              />
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Description
+              </label>
+              <input
+                type="text"
+                value={editGameDescription}
+                onChange={(e) => setEditGameDescription(e.target.value)}
+                placeholder="Short description shown in the games list"
+              />
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Thumbnail URL
+              </label>
+              <input
+                type="text"
+                value={editGameThumbnailUrl}
+                onChange={(e) => setEditGameThumbnailUrl(e.target.value)}
+                placeholder="https://example.com/my-game/thumb.png"
+              />
+              {editGameThumbnailUrl.trim() && (
+                <img
+                  src={editGameThumbnailUrl.trim()}
+                  alt=""
+                  className="game-thumbnail-preview"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                  onLoad={(e) => {
+                    (e.target as HTMLImageElement).style.display = "";
+                  }}
+                />
+              )}
+              <label className="settings-label" style={{ marginTop: "8px" }}>
+                Author
+              </label>
+              <input
+                type="text"
+                value={editGameAuthor}
+                onChange={(e) => setEditGameAuthor(e.target.value)}
+              />
+              <div className="modal-actions" style={{ marginTop: "16px" }}>
+                <button
+                  onClick={handleDeleteGameFromEditor}
+                  className="btn-secondary game-delete-btn"
+                  title="Uninstall this game from the hub"
+                >
+                  Uninstall
+                </button>
+                <button onClick={closeEditGame} className="btn-secondary">
+                  Cancel
+                </button>
+                <button onClick={handleSaveGameEdit}>Save</button>
               </div>
             </div>
           </div>

@@ -2055,6 +2055,44 @@ function playMentionPing() {
 }
 
 /**
+ * Voice-channel join/leave cues. Synthesized like the mention ping —
+ * rising two-tone for join (connecting feel), descending two-tone for
+ * leave (disconnecting feel). Same WebAudio context, same fail-silent
+ * behavior.
+ */
+function playVoiceTone(direction: "up" | "down") {
+  try {
+    const ctx =
+      cachedAudioCtx ??
+      (cachedAudioCtx = new (window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext)());
+    const now = ctx.currentTime;
+    const tone = (freq: number, start: number, dur: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0, now + start);
+      gain.gain.linearRampToValueAtTime(0.14, now + start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur);
+    };
+    if (direction === "up") {
+      tone(523, 0, 0.1); // C5
+      tone(784, 0.07, 0.16); // G5
+    } else {
+      tone(784, 0, 0.1); // G5
+      tone(523, 0.07, 0.16); // C5
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+/**
  * "/me does the thing" → render in third person. Only triggers when /me is
  * the very first 4 chars of the message and there's at least one trailing
  * char of action text. Keeps the expected IRC-style behavior without
@@ -5392,14 +5430,15 @@ function App() {
   }
 
   async function handleVoiceJoin(channel?: Channel) {
-    // Defaults to the currently-selected channel (the existing
-    // "join voice" button behavior). When called from a double-click in
-    // the sidebar we pass the clicked channel explicitly so the user
+    // Defaults to the currently-selected channel — the phone-toggle in
+    // the user footer uses this. When called from a double-click in the
+    // sidebar we pass the clicked channel explicitly so the user
     // doesn't have to select-then-join.
     const target = channel ?? selectedChannel;
-    if (!target) return;
+    if (!target || target.is_category) return;
     try {
       await invoke("voice_join", { channelId: target.id });
+      playVoiceTone("up");
     } catch (e) {
       setError(String(e));
     }
@@ -5819,6 +5858,7 @@ function App() {
       setVoiceChannelId(null);
       setSelfMuted(false);
       setSelfDeafened(false);
+      playVoiceTone("down");
     } catch (e) {
       setError(String(e));
     }
@@ -6619,9 +6659,6 @@ function App() {
                         : `${pingByHub[activeHubId]}ms`}
                     </span>
                   )}
-                  <button onClick={handleVoiceLeave} className="btn-small leave">
-                    Leave
-                  </button>
                 </div>
               )}
               <div className="user-footer">
@@ -6650,6 +6687,34 @@ function App() {
                       {selfDeafened ? "🚫🔊" : "🔊"}
                     </button>
                   </>
+                )}
+                {/* Phone toggle: joins the selected channel when not in
+                    voice (disabled if no leaf channel is selected),
+                    leaves voice when in. Same icon, two states — call
+                    on green, end call red. */}
+                {voiceChannelId ? (
+                  <button
+                    onClick={handleVoiceLeave}
+                    className="btn-icon-gear voice-call-btn end"
+                    title="Leave voice"
+                    aria-label="Leave voice"
+                  >
+                    📞
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleVoiceJoin()}
+                    className="btn-icon-gear voice-call-btn start"
+                    disabled={!selectedChannel || selectedChannel.is_category}
+                    title={
+                      !selectedChannel || selectedChannel.is_category
+                        ? "Select a channel first to join voice"
+                        : `Join voice on #${selectedChannel.name}`
+                    }
+                    aria-label="Join voice"
+                  >
+                    📞
+                  </button>
                 )}
                 <button
                   onClick={openSettings}
@@ -6902,20 +6967,6 @@ function App() {
                   >
                     {memberSidebarHidden ? "👥" : "👤"}
                   </button>
-                  {voiceChannelId === selectedChannel.id ? (
-                    <button onClick={handleVoiceLeave} className="btn-voice leave">
-                      🔇 Leave Voice
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleVoiceJoin()}
-                      className="btn-voice join"
-                      disabled={voiceChannelId !== null}
-                      title={voiceChannelId ? "Leave current voice channel first" : ""}
-                    >
-                      🎙️ Join Voice
-                    </button>
-                  )}
                 </div>
                 {searchOpen && (
                   <div className="search-bar">

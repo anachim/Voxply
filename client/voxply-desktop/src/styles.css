@@ -1380,6 +1380,38 @@ select,
   color: white;
 }
 
+/* Phone toggle in the user footer. Green ring when ready to join,
+   filled red when currently in voice (= "end call"). The emoji itself
+   stays the same; the surrounding chrome carries the state cue. */
+.btn-icon-gear.voice-call-btn.start {
+  color: var(--success);
+  border: 1px solid var(--success);
+  background: transparent;
+}
+
+.btn-icon-gear.voice-call-btn.start:hover:not(:disabled) {
+  background: var(--success);
+  color: white;
+}
+
+.btn-icon-gear.voice-call-btn.start:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+
+.btn-icon-gear.voice-call-btn.end {
+  background: var(--danger);
+  color: white;
+  border: 1px solid var(--danger);
+}
+
+.btn-icon-gear.voice-call-btn.end:hover {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
 /* Inline help disclosure inside the Install Game modal — collapsed by
    default so the modal stays small for users who already know the
    format, expandable for the rest. */

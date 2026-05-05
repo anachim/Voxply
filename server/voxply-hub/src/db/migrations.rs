@@ -277,6 +277,21 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
         .execute(pool)
         .await;
 
+    // Multi-device: NULL for legacy single-key users, set for users
+    // who have authenticated at least once with a master-signed
+    // SubkeyCert. The canonical user identity is `users.public_key`
+    // for everyone — this column just records which master "owns"
+    // the row, so a second paired device authenticating with the
+    // same master finds the existing row.
+    let _ = sqlx::query("ALTER TABLE users ADD COLUMN master_pubkey TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_users_master_pubkey ON users(master_pubkey)",
+    )
+    .execute(pool)
+    .await;
+
     // Games installed per hub (admin installs a manifest; all members can play).
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS hub_games (

@@ -5,9 +5,73 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use rand::RngCore;
+use sqlx::SqlitePool;
+use voxply_identity::SubkeyCert;
 
 use crate::auth::models::{ChallengeRequest, ChallengeResponse, VerifyRequest, VerifyResponse};
 use crate::state::{AppState, PendingChallenge};
+
+/// Map an authenticating (subkey, optional cert) pair to a stable
+/// canonical user identity. Returns (canonical_pubkey, master_pubkey).
+///
+/// - No cert: legacy single-key auth. Canonical = the auth pubkey.
+///   No master is recorded.
+/// - Cert + matching master already in users.master_pubkey: resolves
+///   to that user's canonical pubkey. This is the "second paired
+///   device finds existing user" case.
+/// - Cert + the auth pubkey already exists as a legacy user
+///   (master_pubkey IS NULL): treated as the legacy-user upgrade
+///   path — canonical stays the legacy pubkey so existing roles and
+///   memberships carry over, but the cert's master will be recorded.
+/// - Cert + neither: brand-new paired device. Canonical = the
+///   master pubkey.
+pub async fn resolve_canonical_identity(
+    db: &SqlitePool,
+    auth_pubkey: &str,
+    cert: Option<&SubkeyCert>,
+) -> Result<(String, Option<String>), (StatusCode, String)> {
+    let cert = match cert {
+        None => return Ok((auth_pubkey.to_string(), None)),
+        Some(c) => c,
+    };
+
+    cert.verify()
+        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Invalid cert: {e}")))?;
+    if cert.subkey_pubkey != auth_pubkey {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Cert subkey_pubkey doesn't match auth pubkey".to_string(),
+        ));
+    }
+    let master = cert.master_pubkey.clone();
+
+    // Existing multi-device user?
+    if let Some(canonical) = sqlx::query_scalar::<_, String>(
+        "SELECT public_key FROM users WHERE master_pubkey = ?",
+    )
+    .bind(&master)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?
+    {
+        return Ok((canonical, Some(master)));
+    }
+
+    // Legacy user upgrading? (the auth subkey is the legacy pubkey)
+    let legacy_exists: Option<String> = sqlx::query_scalar(
+        "SELECT public_key FROM users WHERE public_key = ? AND master_pubkey IS NULL",
+    )
+    .bind(auth_pubkey)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
+    if let Some(canonical) = legacy_exists {
+        return Ok((canonical, Some(master)));
+    }
+
+    // Brand-new paired device.
+    Ok((master.clone(), Some(master)))
+}
 
 pub async fn challenge(
     State(state): State<Arc<AppState>>,
@@ -66,8 +130,16 @@ pub async fn verify(
     voxply_identity::verify_signature(&req.public_key, &challenge_bytes, &signature_bytes)
         .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid signature".to_string()))?;
 
-    // Check if user is banned
-    if crate::routes::moderation::is_banned(&state.db, &req.public_key).await? {
+    // Multi-device: if a cert is presented, resolve to the canonical
+    // user identity (master or, for legacy upgrades, the existing
+    // legacy pubkey). Without a cert, the auth pubkey IS the canonical.
+    let (canonical_pubkey, master_pubkey) =
+        resolve_canonical_identity(&state.db, &req.public_key, req.subkey_cert.as_ref())
+            .await?;
+
+    // Bans follow the canonical identity — a banned user can't
+    // bypass by pairing a new device.
+    if crate::routes::moderation::is_banned(&state.db, &canonical_pubkey).await? {
         return Err((StatusCode::FORBIDDEN, "User is banned".to_string()));
     }
 
@@ -126,15 +198,21 @@ pub async fn verify(
         "approved"
     };
 
+    // Upsert the canonical user row. COALESCE on master_pubkey means a
+    // row that already has a master keeps it — no second device with
+    // a different cert can hijack an existing identity.
     sqlx::query(
-        "INSERT INTO users (public_key, first_seen_at, last_seen_at, approval_status)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(public_key) DO UPDATE SET last_seen_at = ?",
+        "INSERT INTO users (public_key, first_seen_at, last_seen_at, approval_status, master_pubkey)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(public_key) DO UPDATE SET
+            last_seen_at = ?,
+            master_pubkey = COALESCE(users.master_pubkey, excluded.master_pubkey)",
     )
-    .bind(&req.public_key)
+    .bind(&canonical_pubkey)
     .bind(&now)
     .bind(&now)
     .bind(initial_status)
+    .bind(&master_pubkey)
     .bind(&now)
     .execute(&state.db)
     .await
@@ -148,7 +226,7 @@ pub async fn verify(
 
     sqlx::query("INSERT INTO sessions (token, public_key, created_at) VALUES (?, ?, ?)")
         .bind(&token)
-        .bind(&req.public_key)
+        .bind(&canonical_pubkey)
         .bind(&now)
         .execute(&state.db)
         .await
@@ -158,7 +236,7 @@ pub async fn verify(
     let has_roles: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_roles WHERE user_public_key = ?",
     )
-    .bind(&req.public_key)
+    .bind(&canonical_pubkey)
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
@@ -184,7 +262,7 @@ pub async fn verify(
     let has_roles: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM user_roles WHERE user_public_key = ?",
     )
-    .bind(&req.public_key)
+    .bind(&canonical_pubkey)
     .fetch_one(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
@@ -202,7 +280,7 @@ pub async fn verify(
             sqlx::query(
                 "INSERT INTO user_roles (user_public_key, role_id, assigned_at) VALUES (?, 'builtin-owner', ?)",
             )
-            .bind(&req.public_key)
+            .bind(&canonical_pubkey)
             .bind(&now)
             .execute(&state.db)
             .await
@@ -212,14 +290,18 @@ pub async fn verify(
         sqlx::query(
             "INSERT OR IGNORE INTO user_roles (user_public_key, role_id, assigned_at) VALUES (?, 'builtin-everyone', ?)",
         )
-        .bind(&req.public_key)
+        .bind(&canonical_pubkey)
         .bind(&now)
         .execute(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {e}")))?;
     }
 
-    tracing::info!("User authenticated: {}", &req.public_key[..16]);
+    tracing::info!(
+        "User authenticated: canonical={} (cert={})",
+        &canonical_pubkey[..16],
+        master_pubkey.is_some()
+    );
 
     Ok(Json(VerifyResponse { token }))
 }

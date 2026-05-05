@@ -56,8 +56,6 @@ import {
   EMOJI_CATALOG,
   QUICK_REACTIONS,
   MAX_ATTACHMENT_BYTES,
-  MIC_METER_MAX,
-  RECOVERY_ACK_KEY,
   ALL_PERMISSIONS,
   EXPIRY_OPTIONS,
   THEMES,
@@ -75,6 +73,11 @@ import {
 import { playMentionPing, playVoiceTone } from "./utils/audio";
 import { loadRecentEmojis, pushRecentEmoji } from "./utils/recentEmoji";
 import { PhoneIcon, PhoneOffIcon } from "./components/Icons";
+import { Avatar } from "./components/Avatar";
+import { TypingIndicator } from "./components/TypingIndicator";
+import { Lightbox } from "./components/Lightbox";
+import { MicLevelMeter } from "./components/MicLevelMeter";
+import { WelcomeRecoveryBlock } from "./components/WelcomeRecoveryBlock";
 
 /** Hub icon wrapped in dnd-kit's useSortable so the user can drag-reorder
  * the hub sidebar. The drag handle is the whole icon -- there's no second
@@ -494,36 +497,6 @@ function ThemePicker({
   );
 }
 
-function Avatar({
-  src,
-  name,
-  size = 24,
-}: {
-  src?: string | null;
-  name: string | null | undefined;
-  size?: number;
-}) {
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt=""
-        className="avatar-img"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
-  const initials = (name || "?").trim().slice(0, 2).toUpperCase();
-  return (
-    <span
-      className="avatar-fallback"
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.45) }}
-    >
-      {initials}
-    </span>
-  );
-}
-
 /**
  * Drop-zone + button file picker that base64-encodes the chosen image
  * and hands it back as a data URL. Shared between the avatar and hub-icon
@@ -791,62 +764,6 @@ function UserListGrouped({
         </div>
       ))}
     </>
-  );
-}
-
-function MicLevelMeter({
-  level,
-  threshold,
-  onChange,
-}: {
-  level: number;
-  threshold: number;
-  onChange: (v: number) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
-
-  function valueAt(clientX: number): number {
-    const rect = ref.current?.getBoundingClientRect();
-    if (!rect) return threshold;
-    const pct = (clientX - rect.left) / rect.width;
-    const v = Math.max(0.001, Math.min(MIC_METER_MAX, pct * MIC_METER_MAX));
-    return v;
-  }
-
-  function handleDown(e: React.MouseEvent) {
-    dragging.current = true;
-    onChange(valueAt(e.clientX));
-  }
-
-  useEffect(() => {
-    function up() {
-      dragging.current = false;
-    }
-    function move(e: MouseEvent) {
-      if (!dragging.current) return;
-      onChange(valueAt(e.clientX));
-    }
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-    return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-  }, [onChange]);
-
-  const fillPct = Math.min(100, (level / MIC_METER_MAX) * 100);
-  const markerPct = Math.min(100, (threshold / MIC_METER_MAX) * 100);
-  const triggered = level >= threshold;
-
-  return (
-    <div className="mic-meter" ref={ref} onMouseDown={handleDown}>
-      <div
-        className={`mic-meter-fill ${triggered ? "triggered" : ""}`}
-        style={{ width: `${fillPct}%` }}
-      />
-      <div className="mic-meter-marker" style={{ left: `${markerPct}%` }} />
-    </div>
   );
 }
 
@@ -1308,18 +1225,6 @@ function InvitesSection({
   );
 }
 
-function TypingIndicator({ typers }: { typers: { name: string }[] }) {
-  if (typers.length === 0) return null;
-  let label: string;
-  if (typers.length === 1) label = `${typers[0].name} is typing…`;
-  else if (typers.length === 2)
-    label = `${typers[0].name} and ${typers[1].name} are typing…`;
-  else if (typers.length === 3)
-    label = `${typers[0].name}, ${typers[1].name}, and ${typers[2].name} are typing…`;
-  else label = "Several people are typing…";
-  return <div className="typing-indicator">{label}</div>;
-}
-
 function MessageReactions({
   reactions,
   onToggle,
@@ -1516,42 +1421,6 @@ function MessageAttachments({
   );
 }
 
-function Lightbox({
-  src,
-  alt,
-  onClose,
-}: {
-  src: string;
-  alt: string;
-  onClose: () => void;
-}) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="lightbox" onClick={onClose}>
-      <img
-        src={src}
-        alt={alt}
-        className="lightbox-img"
-        onClick={(e) => e.stopPropagation()}
-      />
-      <button
-        className="lightbox-close"
-        onClick={onClose}
-        title="Close (Esc)"
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
 /**
  * Pipeline-style markdown renderer. Each pass walks the current array of
  * (string | ReactNode) parts and replaces any matches in the *string*
@@ -1679,77 +1548,6 @@ function MessageContent({
  * because it's a per-device thing anyway, no need to round-trip
  * through the Tauri backend or the hub.
  */
-function WelcomeRecoveryBlock() {
-  const [acked, setAcked] = useState<boolean>(
-    () => localStorage.getItem(RECOVERY_ACK_KEY) === "1",
-  );
-  const [phrase, setPhrase] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  if (acked) {
-    return (
-      <div className="welcome-recovery acked">
-        <span className="welcome-recovery-check">✓</span>
-        <span>
-          Recovery phrase backed up. You can re-reveal it any time from{" "}
-          <strong>Settings → Security</strong>.
-        </span>
-      </div>
-    );
-  }
-
-  async function reveal() {
-    setBusy(true);
-    try {
-      const p = await invoke<string>("get_recovery_phrase");
-      setPhrase(p);
-    } catch {
-      // If recovery isn't available yet (e.g. mid-load), the user can
-      // come back to this from Settings; the welcome block just stays
-      // in the unrevealed state.
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function acknowledge() {
-    localStorage.setItem(RECOVERY_ACK_KEY, "1");
-    setAcked(true);
-  }
-
-  return (
-    <div className="welcome-recovery">
-      <h3>📝 Back up your recovery phrase first</h3>
-      {phrase ? (
-        <>
-          <p className="muted">
-            These 24 words are the <strong>only</strong> way to recover
-            your identity. Write them down on paper or save them in a
-            password manager. Anyone with these words can impersonate
-            you on every hub you've joined — keep them private.
-          </p>
-          <div className="recovery-phrase">{phrase}</div>
-          <button onClick={acknowledge} className="primary">
-            I've backed it up — continue
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="muted">
-            Voxply has no "forgot password" — your identity is a keypair
-            on this device. If you lose the device without writing down
-            the recovery phrase, every hub forgets you forever. Do this
-            now, before you join your first hub.
-          </p>
-          <button onClick={reveal} className="btn-secondary" disabled={busy}>
-            {busy ? "Loading…" : "Reveal my recovery phrase"}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 function MemberRow({
   member,
   allRoles,

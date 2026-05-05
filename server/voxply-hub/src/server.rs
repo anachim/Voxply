@@ -132,6 +132,10 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/identity/{master}/prefs",
             get(routes::identity::get_prefs).put(routes::identity::put_prefs),
         )
+        .route("/identity/pairing/offer", post(routes::pairing::post_offer))
+        .route("/identity/pairing/claim", post(routes::pairing::post_claim))
+        .route("/identity/pairing/complete", post(routes::pairing::post_complete))
+        .route("/identity/pairing/status/{token}", get(routes::pairing::get_status))
         .route("/federation/peers", get(federation::handlers::list_peers))
         .route("/federation/peers", post(federation::handlers::add_peer))
         .route("/federation/peers/{peer_key}/channels", get(federation::handlers::peer_channels))

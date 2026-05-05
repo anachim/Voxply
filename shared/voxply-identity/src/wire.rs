@@ -189,3 +189,106 @@ impl SignedPrefsBlob {
         check_sig(&self.master_pubkey, &bytes, &self.signature)
     }
 }
+
+/// QR-encoded pairing offer created by the existing device (E) and
+/// posted to every hub in the user's home hub list. The home hub
+/// stores it short-lived, keyed by `pairing_token`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingOffer {
+    pub master_pubkey: String,
+    pub home_hubs: Vec<String>,
+    pub pairing_token: String,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub signature: String,
+}
+
+impl PairingOffer {
+    pub fn signing_bytes(
+        master_pubkey: &str,
+        home_hubs: &[String],
+        pairing_token: &str,
+        issued_at: u64,
+        expires_at: u64,
+    ) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"voxply/pairing-offer/v1\0");
+        write_str(&mut buf, master_pubkey);
+        write_str_vec(&mut buf, home_hubs);
+        write_str(&mut buf, pairing_token);
+        write_u64_le(&mut buf, issued_at);
+        write_u64_le(&mut buf, expires_at);
+        buf
+    }
+
+    pub fn to_signing_bytes(&self) -> Vec<u8> {
+        Self::signing_bytes(
+            &self.master_pubkey,
+            &self.home_hubs,
+            &self.pairing_token,
+            self.issued_at,
+            self.expires_at,
+        )
+    }
+
+    pub fn verify(&self) -> Result<()> {
+        check_sig(&self.master_pubkey, &self.to_signing_bytes(), &self.signature)
+    }
+}
+
+/// New device's claim against an offer. Signed by the new device's
+/// subkey to prove possession of the corresponding private key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingClaim {
+    pub pairing_token: String,
+    pub subkey_pubkey: String,
+    pub device_label: String,
+    pub proof: String,
+}
+
+impl PairingClaim {
+    pub fn signing_bytes(pairing_token: &str, subkey_pubkey: &str, device_label: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"voxply/pairing-claim/v1\0");
+        write_str(&mut buf, pairing_token);
+        write_str(&mut buf, subkey_pubkey);
+        write_str(&mut buf, device_label);
+        buf
+    }
+
+    pub fn to_signing_bytes(&self) -> Vec<u8> {
+        Self::signing_bytes(&self.pairing_token, &self.subkey_pubkey, &self.device_label)
+    }
+
+    pub fn verify(&self) -> Result<()> {
+        check_sig(&self.subkey_pubkey, &self.to_signing_bytes(), &self.proof)
+    }
+}
+
+/// Existing device finalizes pairing by attaching the master-signed
+/// cert and the prefs-blob key wrapped for the new device's pubkey.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingComplete {
+    pub pairing_token: String,
+    pub cert: SubkeyCert,
+    pub wrapped_blob_key_hex: String,
+}
+
+/// Status returned by the pairing status endpoint. Both sides poll
+/// this to advance the protocol. The pairing token is the
+/// unguessable secret that gates access.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum PairingStatus {
+    Pending,
+    Claimed {
+        subkey_pubkey: String,
+        device_label: String,
+    },
+    Complete {
+        cert: SubkeyCert,
+        wrapped_blob_key_hex: String,
+    },
+    Expired,
+}
+

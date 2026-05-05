@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 pub use master::MasterIdentity;
 pub use pow::{compute_security_level, leading_zero_bits, verify_security_level};
 pub use subkey::DeviceSubkey;
-pub use wire::{HomeHubList, RevocationEntry, SignedPrefsBlob, SubkeyCert};
+pub use wire::{
+    HomeHubList, PairingClaim, PairingComplete, PairingOffer, PairingStatus, RevocationEntry,
+    SignedPrefsBlob, SubkeyCert,
+};
 
 pub struct Identity {
     signing_key: SigningKey,

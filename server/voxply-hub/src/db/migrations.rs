@@ -514,6 +514,30 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Short-lived pairing state. State machine: pending → claimed →
+    // complete. Rows are pruned when expires_at passes; cleanup runs
+    // lazily on each access to avoid a background task for now.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pairing_offers (
+            pairing_token    TEXT PRIMARY KEY,
+            master_pubkey    TEXT NOT NULL,
+            home_hubs_json   TEXT NOT NULL,
+            issued_at        INTEGER NOT NULL,
+            expires_at       INTEGER NOT NULL,
+            offer_signature  TEXT NOT NULL,
+            state            TEXT NOT NULL DEFAULT 'pending',
+            subkey_pubkey    TEXT,
+            device_label     TEXT,
+            claim_proof      TEXT,
+            cert_json        TEXT,
+            wrapped_key_hex  TEXT,
+            created_at       INTEGER NOT NULL,
+            updated_at       INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

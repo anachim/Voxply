@@ -8,6 +8,8 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use voxply_identity::Identity;
 
+mod home_hub;
+
 // --- Shared state ---
 
 #[derive(Default)]
@@ -3499,6 +3501,8 @@ pub fn run() {
             create_conversation,
             get_dm_messages,
             send_dm,
+            home_hub::set_home_hub_list,
+            home_hub::get_home_hub_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

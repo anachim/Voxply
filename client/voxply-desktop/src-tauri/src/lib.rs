@@ -9,6 +9,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use voxply_identity::Identity;
 
 mod home_hub;
+mod pairing;
 
 // --- Shared state ---
 
@@ -3503,6 +3504,11 @@ pub fn run() {
             send_dm,
             home_hub::set_home_hub_list,
             home_hub::get_home_hub_list,
+            pairing::start_pairing_offer,
+            pairing::poll_pairing_status,
+            pairing::complete_pairing,
+            pairing::home_hubs_from_offer,
+            pairing::fingerprint_pubkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

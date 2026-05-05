@@ -26,7 +26,6 @@ import { CSS } from "@dnd-kit/utilities";
 import type {
   Channel,
   Attachment,
-  Reaction,
   ReplyContext,
   Message,
   NotifyMode,
@@ -53,8 +52,6 @@ import type {
   AllianceSharedChannel,
 } from "./types";
 import {
-  EMOJI_CATALOG,
-  QUICK_REACTIONS,
   MAX_ATTACHMENT_BYTES,
   ALL_PERMISSIONS,
   EXPIRY_OPTIONS,
@@ -71,13 +68,19 @@ import {
   formatRelative,
 } from "./utils/format";
 import { playMentionPing, playVoiceTone } from "./utils/audio";
-import { loadRecentEmojis, pushRecentEmoji } from "./utils/recentEmoji";
 import { PhoneIcon, PhoneOffIcon } from "./components/Icons";
 import { Avatar } from "./components/Avatar";
 import { TypingIndicator } from "./components/TypingIndicator";
 import { Lightbox } from "./components/Lightbox";
 import { MicLevelMeter } from "./components/MicLevelMeter";
 import { WelcomeRecoveryBlock } from "./components/WelcomeRecoveryBlock";
+import { MessageReactions } from "./components/MessageReactions";
+import { ReactionPicker } from "./components/ReactionPicker";
+import {
+  PendingAttachments,
+  MessageAttachments,
+} from "./components/Attachments";
+import { MessageContent } from "./components/MessageContent";
 
 /** Hub icon wrapped in dnd-kit's useSortable so the user can drag-reorder
  * the hub sidebar. The drag handle is the whole icon -- there's no second
@@ -1225,329 +1228,6 @@ function InvitesSection({
   );
 }
 
-function MessageReactions({
-  reactions,
-  onToggle,
-}: {
-  reactions: Reaction[];
-  onToggle: (emoji: string) => void;
-}) {
-  if (!reactions || reactions.length === 0) return null;
-  return (
-    <div className="message-reactions">
-      {reactions.map((r) => (
-        <button
-          key={r.emoji}
-          className={`reaction-chip ${r.me ? "mine" : ""}`}
-          onClick={() => onToggle(r.emoji)}
-          title={r.me ? "Remove your reaction" : "Add your reaction"}
-        >
-          <span className="reaction-emoji">{r.emoji}</span>
-          <span className="reaction-count">{r.count}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ReactionPicker({
-  onPick,
-}: {
-  onPick: (emoji: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  // Re-read recents whenever we open so picks made elsewhere show up.
-  const [recents, setRecents] = useState<string[]>(() => loadRecentEmojis());
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return EMOJI_CATALOG;
-    return EMOJI_CATALOG.filter(([_emoji, kw]) => kw.includes(q));
-  }, [query]);
-
-  function handleClose() {
-    setOpen(false);
-    setQuery("");
-  }
-
-  function handlePick(emoji: string) {
-    pushRecentEmoji(emoji);
-    setRecents(loadRecentEmojis());
-    onPick(emoji);
-    handleClose();
-  }
-
-  return (
-    <div className="reaction-picker">
-      <button
-        className="reaction-add-btn"
-        onClick={() => {
-          if (!open) setRecents(loadRecentEmojis());
-          setOpen((v) => !v);
-        }}
-        title="Add reaction"
-      >
-        🙂+
-      </button>
-      {open && (
-        <div
-          className="reaction-picker-popup"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            autoFocus
-            className="reaction-picker-search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") handleClose();
-              else if (e.key === "Enter" && filtered.length > 0) {
-                handlePick(filtered[0][0]);
-              }
-            }}
-            placeholder="Search emoji…"
-          />
-          {!query && recents.length > 0 && (
-            <>
-              <div className="reaction-picker-section-label">Recent</div>
-              <div className="reaction-picker-grid reaction-picker-recents">
-                {recents.map((emoji) => (
-                  <button
-                    key={`r-${emoji}`}
-                    className="reaction-picker-emoji"
-                    onClick={() => handlePick(emoji)}
-                    title={emoji}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-              <div className="reaction-picker-divider" />
-            </>
-          )}
-          <div className="reaction-picker-grid">
-            {filtered.length === 0 ? (
-              <span className="muted reaction-picker-empty">No matches</span>
-            ) : (
-              filtered.map(([emoji]) => (
-                <button
-                  key={emoji}
-                  className="reaction-picker-emoji"
-                  onClick={() => handlePick(emoji)}
-                  title={emoji}
-                >
-                  {emoji}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PendingAttachments({
-  items,
-  onRemove,
-}: {
-  items: Attachment[];
-  onRemove: (i: number) => void;
-}) {
-  return (
-    <div className="pending-attachments">
-      {items.map((a, i) => (
-        <div key={i} className="pending-attachment">
-          {a.mime.startsWith("image/") ? (
-            <img
-              src={`data:${a.mime};base64,${a.data_b64}`}
-              alt={a.name}
-              className="pending-attachment-thumb"
-            />
-          ) : (
-            <span className="pending-attachment-file">📄 {a.name}</span>
-          )}
-          <button
-            className="pending-attachment-remove"
-            onClick={() => onRemove(i)}
-            title="Remove"
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MessageAttachments({
-  items,
-  onImageClick,
-}: {
-  items: Attachment[];
-  onImageClick?: (url: string, alt: string) => void;
-}) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div className="message-attachments">
-      {items.map((a, i) => {
-        const url = `data:${a.mime};base64,${a.data_b64}`;
-        if (a.mime.startsWith("image/")) {
-          return (
-            <button
-              key={i}
-              type="button"
-              className="message-attachment-img-button"
-              onClick={() => onImageClick?.(url, a.name)}
-              title="Click to enlarge"
-            >
-              <img src={url} alt={a.name} className="message-attachment-img" />
-            </button>
-          );
-        }
-        return (
-          <a
-            key={i}
-            href={url}
-            download={a.name}
-            className="message-attachment-file"
-          >
-            📄 {a.name}
-          </a>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * Pipeline-style markdown renderer. Each pass walks the current array of
- * (string | ReactNode) parts and replaces any matches in the *string*
- * parts with the rendered React node. Because we never feed user input
- * into innerHTML, this is XSS-safe by construction -- React escapes text
- * children automatically.
- *
- * Order matters: code blocks first (their content shouldn't be parsed
- * for any other rules), then inline code, then bold, italic, mentions,
- * URLs.
- */
-type Part = string | React.ReactNode;
-
-function splitOnPattern(
-  parts: Part[],
-  re: RegExp,
-  render: (match: RegExpExecArray, key: string) => React.ReactNode
-): Part[] {
-  const out: Part[] = [];
-  parts.forEach((p, i) => {
-    if (typeof p !== "string") {
-      out.push(p);
-      return;
-    }
-    let lastIdx = 0;
-    let m: RegExpExecArray | null;
-    const rx = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
-    let n = 0;
-    while ((m = rx.exec(p)) !== null) {
-      if (m.index > lastIdx) out.push(p.slice(lastIdx, m.index));
-      out.push(render(m, `${i}-${n++}`));
-      lastIdx = m.index + m[0].length;
-      // Guard against zero-width matches looping forever.
-      if (m[0].length === 0) rx.lastIndex++;
-    }
-    if (lastIdx < p.length) out.push(p.slice(lastIdx));
-  });
-  return out;
-}
-
-function MessageContent({
-  content,
-  knownNames,
-  myName,
-}: {
-  content: string;
-  knownNames: Set<string>;
-  myName: string | null;
-}) {
-  const myLower = myName?.toLowerCase() ?? null;
-  let parts: Part[] = [content];
-
-  // Fenced code blocks. Optionally accept a language hint on the same line
-  // as the opening fence: ```rust\n...\n```. The hint becomes a small label
-  // above the block; we don't actually highlight by language yet, but the
-  // tag is preserved instead of leaking into the rendered code.
-  parts = splitOnPattern(
-    parts,
-    /```([A-Za-z0-9_+-]*)\n?([\s\S]+?)```/,
-    (m, key) => {
-      const lang = m[1] || "";
-      const body = m[2].replace(/^\n/, "").replace(/\n$/, "");
-      return (
-        <div key={key} className="md-codeblock-wrap">
-          {lang && <div className="md-codeblock-lang">{lang}</div>}
-          <pre className="md-codeblock">
-            <code>{body}</code>
-          </pre>
-        </div>
-      );
-    }
-  );
-
-  // Inline code
-  parts = splitOnPattern(parts, /`([^`\n]+)`/, (m, key) => (
-    <code key={key} className="md-code">
-      {m[1]}
-    </code>
-  ));
-
-  // Bold (must run before italic since ** would otherwise match * twice)
-  parts = splitOnPattern(parts, /\*\*([^*\n]+)\*\*/, (m, key) => (
-    <strong key={key}>{m[1]}</strong>
-  ));
-
-  // Italic — single asterisk with no spaces flanking.
-  parts = splitOnPattern(parts, /\*([^*\s][^*\n]*[^*\s]|[^*\s])\*/, (m, key) => (
-    <em key={key}>{m[1]}</em>
-  ));
-
-  // Bare URLs → external links
-  parts = splitOnPattern(parts, /https?:\/\/[^\s<]+/, (m, key) => (
-    <a key={key} href={m[0]} target="_blank" rel="noreferrer">
-      {m[0]}
-    </a>
-  ));
-
-  // Mentions — last so they don't collide with URL/markdown chars
-  parts = splitOnPattern(parts, /@([\w.\-]+)/, (m, key) => {
-    const name = m[1].toLowerCase();
-    if (!knownNames.has(name)) return m[0];
-    const isSelf = myLower !== null && name === myLower;
-    return (
-      <span key={key} className={`mention ${isSelf ? "mention-self" : ""}`}>
-        {m[0]}
-      </span>
-    );
-  });
-
-  return <>{parts.map((p, i) => (typeof p === "string" ? <span key={i}>{p}</span> : p))}</>;
-}
-
-/**
- * Inline phone icons. Plain SVG with stroke="currentColor" so the
- * green/red CSS on the wrapping button actually paints the glyph (as
- * opposed to the default 📞 emoji, which is a full-color image and
- * ignores CSS color). Phone-off variant for "leave" — same handset
- * shape with a strikethrough line, conventional for end-call buttons.
- */
-/**
- * Recovery-phrase nudge shown on the welcome screen before the user
- * joins their first hub. The phrase is the only path back if they lose
- * the device, so we want them to see it once and acknowledge they
- * wrote it down. Acknowledgement persists in localStorage — clean
- * because it's a per-device thing anyway, no need to round-trip
- * through the Tauri backend or the hub.
- */
 function MemberRow({
   member,
   allRoles,

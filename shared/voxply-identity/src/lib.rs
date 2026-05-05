@@ -1,5 +1,7 @@
+mod master;
 mod pow;
 mod recovery;
+mod subkey;
 
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -9,7 +11,9 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use pow::{compute_security_level, verify_security_level, leading_zero_bits};
+pub use master::MasterIdentity;
+pub use pow::{compute_security_level, leading_zero_bits, verify_security_level};
+pub use subkey::DeviceSubkey;
 
 pub struct Identity {
     signing_key: SigningKey,
@@ -99,6 +103,21 @@ impl Identity {
     pub fn default_path() -> Result<PathBuf> {
         let home = dirs::home_dir().context("Could not find home directory")?;
         Ok(home.join(".voxply").join("identity.json"))
+    }
+
+    /// Derive the master keypair from this identity's secret bytes.
+    /// Phase-1 helper toward multi-device pairing — the secret bytes
+    /// double as BIP39 entropy and as the seed input to HKDF.
+    pub fn master(&self) -> Result<MasterIdentity> {
+        let entropy = self.signing_key.to_bytes();
+        MasterIdentity::derive_from_entropy(&entropy)
+    }
+
+    /// Wrap this identity as subkey 0 with a user-facing label.
+    /// Non-upgraded hubs see the same pubkey they always saw.
+    pub fn as_subkey_zero(&self, label: String) -> DeviceSubkey {
+        let entropy = self.signing_key.to_bytes();
+        DeviceSubkey::subkey_zero_from_entropy(&entropy, label)
     }
 }
 
@@ -202,5 +221,58 @@ mod tests {
         // Fake nonce should not verify at level 20
         let valid = verify_security_level(&identity.public_key_hex(), 12345, 20);
         assert!(!valid);
+    }
+
+    #[test]
+    fn master_derivation_is_deterministic() {
+        let identity = Identity::generate();
+        let m1 = identity.master().unwrap();
+        let m2 = identity.master().unwrap();
+        assert_eq!(m1.public_key_hex(), m2.public_key_hex());
+    }
+
+    #[test]
+    fn master_pubkey_distinct_from_subkey_zero() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        assert_ne!(master.public_key_hex(), identity.public_key_hex());
+    }
+
+    #[test]
+    fn subkey_zero_preserves_existing_pubkey() {
+        let identity = Identity::generate();
+        let subkey = identity.as_subkey_zero("test-device".to_string());
+        assert_eq!(subkey.public_key_hex(), identity.public_key_hex());
+    }
+
+    #[test]
+    fn master_from_phrase_matches_master_from_identity() {
+        let identity = Identity::generate();
+        let phrase = identity.recovery_phrase();
+        let m_from_phrase = MasterIdentity::derive_from_phrase(&phrase).unwrap();
+        let m_from_identity = identity.master().unwrap();
+        assert_eq!(m_from_phrase.public_key_hex(), m_from_identity.public_key_hex());
+    }
+
+    #[test]
+    fn master_sign_and_verify() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        let message = b"phase 1 wiring";
+        let signature = master.sign(message);
+
+        let result = verify_signature(
+            &master.public_key_hex(),
+            message,
+            &signature.to_bytes(),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn subkey_generate_is_random() {
+        let a = DeviceSubkey::generate("a".to_string());
+        let b = DeviceSubkey::generate("b".to_string());
+        assert_ne!(a.public_key_hex(), b.public_key_hex());
     }
 }

@@ -26,3 +26,9 @@ sha2 = "0.10"
 
 # BIP39 mnemonic recovery phrases (24 words ↔ secret key)
 bip39 = "2"
+
+# hkdf — HMAC-based Key Derivation Function (RFC 5869). Like .NET's
+# HKDF.DeriveKey: expands one secret into multiple distinct keys via a
+# domain-separation label. Used to derive the master keypair from the
+# same BIP39 entropy that already backs the per-device subkey.
+hkdf = "0.12"

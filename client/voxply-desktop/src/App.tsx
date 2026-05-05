@@ -23,319 +23,58 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-interface Channel {
-  id: string;
-  name: string;
-  created_by: string;
-  parent_id: string | null;
-  is_category: boolean;
-  display_order: number;
-  description: string | null;
-  created_at: number;
-}
-
-interface Attachment {
-  name: string;
-  mime: string;
-  data_b64: string;
-}
-
-interface Reaction {
-  emoji: string;
-  count: number;
-  me: boolean;
-}
-
-interface ReplyContext {
-  message_id: string;
-  sender: string;
-  sender_name: string | null;
-  content_preview: string;
-}
-
-interface Message {
-  id: string;
-  channel_id: string;
-  sender: string;
-  sender_name: string | null;
-  content: string;
-  created_at: number;
-  edited_at: number | null;
-  attachments?: Attachment[];
-  reactions?: Reaction[];
-  reply_to?: ReplyContext | null;
-}
-
-/**
- * Curated emoji catalog for the picker. Each entry is [emoji, keywords].
- * Keywords are matched as substrings against the user's query so "thumb"
- * finds 👍 and "fire" finds 🔥. The first 8 also serve as the always-visible
- * frequent set when the search is empty.
- */
-const EMOJI_CATALOG: [string, string][] = [
-  ["👍", "thumbs up yes ok approve"],
-  ["❤️", "heart love"],
-  ["😂", "laugh joy lol cry"],
-  ["🎉", "party celebrate tada"],
-  ["🔥", "fire lit hot"],
-  ["👀", "eyes look watch see"],
-  ["😢", "sad cry tear"],
-  ["🙏", "pray thanks please"],
-  ["👎", "thumbs down no nope"],
-  ["✅", "check yes done correct"],
-  ["❌", "x cross no wrong"],
-  ["💯", "100 perfect score"],
-  ["🤔", "think thinking hmm"],
-  ["😅", "sweat smile awkward"],
-  ["😎", "cool sunglasses"],
-  ["😭", "crying sob bawl"],
-  ["😡", "angry mad rage"],
-  ["🤯", "mind blown shocked"],
-  ["🥳", "party celebrate happy"],
-  ["🤝", "handshake deal agree"],
-  ["💪", "muscle strong flex"],
-  ["👏", "clap applause bravo"],
-  ["🙌", "raised hands praise"],
-  ["✨", "sparkle shiny stars"],
-  ["⭐", "star favorite"],
-  ["💡", "idea bulb"],
-  ["⚡", "lightning fast bolt"],
-  ["🐛", "bug insect"],
-  ["🚀", "rocket launch ship"],
-  ["🎯", "target dart bullseye"],
-  ["💀", "skull dead rip"],
-  ["👻", "ghost spooky"],
-  ["🤖", "robot bot"],
-  ["☕", "coffee mug"],
-  ["🍕", "pizza"],
-  ["🍔", "burger food"],
-  ["🍺", "beer drink"],
-  ["🍰", "cake birthday"],
-  ["🌮", "taco food"],
-  ["🎵", "music note song"],
-  ["🎮", "game controller play"],
-  ["📺", "tv television"],
-  ["💻", "laptop computer"],
-  ["📱", "phone mobile"],
-  ["⌨️", "keyboard"],
-  ["🖱️", "mouse"],
-  ["🐶", "dog puppy"],
-  ["🐱", "cat kitten"],
-  ["🦊", "fox"],
-  ["🦁", "lion"],
-  ["🐧", "penguin"],
-  ["🦄", "unicorn magic"],
-  ["🐢", "turtle slow"],
-  ["🌈", "rainbow"],
-  ["☀️", "sun sunny day"],
-  ["🌙", "moon night"],
-  ["🌧️", "rain"],
-  ["❄️", "snow snowflake winter"],
-  ["🌊", "wave water ocean"],
-  ["🌍", "earth world globe"],
-  ["💚", "green heart"],
-  ["💙", "blue heart"],
-  ["💜", "purple heart"],
-  ["🖤", "black heart"],
-  ["💛", "yellow heart"],
-  ["💔", "broken heart sad"],
-  ["💕", "two hearts love"],
-  ["😀", "grin smile"],
-  ["😊", "smile happy"],
-  ["😉", "wink"],
-  ["😌", "relieved calm"],
-  ["😘", "kiss"],
-  ["😏", "smirk smug"],
-  ["😴", "sleep zzz tired"],
-  ["🤐", "zip mouth shut"],
-  ["🤫", "shush quiet"],
-  ["🤣", "rofl laugh"],
-  ["😬", "grimace awkward"],
-  ["🙃", "upside down silly"],
-  ["😱", "scream shock fear"],
-  ["😳", "flushed embarrassed"],
-  ["🥺", "pleading puppy eyes"],
-  ["😷", "mask sick"],
-  ["🤒", "thermometer sick fever"],
-  ["🥵", "hot heat sweat"],
-  ["🥶", "cold freeze"],
-  ["😈", "devil mischief"],
-  ["💩", "poop"],
-  ["🎂", "cake birthday"],
-  ["🎁", "gift present"],
-  ["🏆", "trophy win"],
-  ["🥇", "gold medal first"],
-  ["💎", "diamond gem"],
-  ["💰", "money cash bag"],
-  ["📈", "chart up growth"],
-  ["📉", "chart down decline"],
-  ["🔔", "bell notification"],
-  ["🔒", "lock secure"],
-  ["🔑", "key"],
-  ["🛠️", "tools wrench fix"],
-  ["📌", "pin"],
-  ["📎", "paperclip attach"],
-  ["📝", "memo write note"],
-  ["📚", "books read"],
-  ["🎓", "graduation cap"],
-  ["🌟", "glowing star"],
-  ["🐝", "bee"],
-  ["🦋", "butterfly"],
-  ["🍎", "apple"],
-  ["🍌", "banana"],
-  ["🍇", "grapes"],
-  ["🥑", "avocado"],
-  ["🥦", "broccoli"],
-  ["🍿", "popcorn"],
-  ["🧀", "cheese"],
-  ["🍩", "donut"],
-  ["🍪", "cookie"],
-  ["🍷", "wine"],
-  ["🥤", "soda drink"],
-];
-const QUICK_REACTIONS = EMOJI_CATALOG.slice(0, 8).map(([e]) => e);
-
-type NotifyMode = "all" | "mentions" | "silent";
-
-const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // matches the hub cap
-
-interface User {
-  public_key: string;
-  display_name: string | null;
-  avatar: string | null;
-  online: boolean;
-  group_role: string | null;
-}
-
-interface VoiceParticipant {
-  public_key: string;
-  display_name: string | null;
-}
-
-interface Hub {
-  hub_id: string;
-  hub_name: string;
-  hub_url: string;
-  hub_icon: string | null;
-  is_active: boolean;
-}
-
-interface RoleInfo {
-  id: string;
-  name: string;
-  permissions: string[];
-  priority: number;
-  display_separately?: boolean;
-}
-
-interface NamedProfile {
-  id: string;
-  label: string;
-  display_name: string;
-  avatar: string | null;
-}
-
-interface MeInfo {
-  public_key: string;
-  display_name: string | null;
-  avatar: string | null;
-  approval_status: "approved" | "pending";
-  roles: RoleInfo[];
-}
-
-interface MemberAdminInfo {
-  public_key: string;
-  display_name: string | null;
-  online: boolean;
-  first_seen_at: number;
-  last_seen_at: number;
-  roles: RoleInfo[];
-}
-
-interface BanInfo {
-  target_public_key: string;
-  banned_by: string;
-  reason: string | null;
-  created_at: number;
-}
-
-interface VoiceMuteInfo {
-  target_public_key: string;
-  muted_by: string;
-  reason: string | null;
-  created_at: number;
-}
-
-interface InviteInfo {
-  code: string;
-  created_by: string;
-  max_uses: number | null;
-  uses: number;
-  expires_at: number | null;
-  created_at: number;
-}
-
-interface PendingUser {
-  public_key: string;
-  display_name: string | null;
-  first_seen_at: number;
-}
-
-interface InstalledGame {
-  id: string;
-  name: string;
-  description: string | null;
-  version: string;
-  entry_url: string;
-  thumbnail_url: string | null;
-  author: string | null;
-  min_players: number;
-  max_players: number;
-  installed_by: string;
-  installed_at: number;
-  manifest_url: string;
-}
-
-interface Friend {
-  public_key: string;
-  display_name: string | null;
-  /** When non-null, this friend lives on another hub. DMs to them will be
-   *  routed to this hub via the federated DM outbox. */
-  hub_url: string | null;
-  since: number;
-}
-
-interface Conversation {
-  id: string;
-  conv_type: string;
-  members: string[];
-  created_at: number;
-  last_activity_at?: number;
-}
-
-interface DmMessage {
-  sender: string;
-  sender_name: string | null;
-  content: string;
-  timestamp: number;
-  attachments?: Attachment[];
-  /** True when at least one outbox row for this message has bounced
-   *  (retries exhausted). Renders a delivery-failed mark next to the
-   *  message. False/missing for received messages and not-yet-bounced sends. */
-  delivery_failed?: boolean;
-}
-
-interface DmMessageFull {
-  id: string;
-  conversation_id: string;
-  sender: string;
-  sender_name: string | null;
-  content: string;
-  created_at: number;
-  attachments?: Attachment[];
-  delivery_failed?: boolean;
-}
+import type {
+  Channel,
+  Attachment,
+  Reaction,
+  ReplyContext,
+  Message,
+  NotifyMode,
+  User,
+  VoiceParticipant,
+  Hub,
+  RoleInfo,
+  NamedProfile,
+  MeInfo,
+  MemberAdminInfo,
+  BanInfo,
+  VoiceMuteInfo,
+  InviteInfo,
+  PendingUser,
+  InstalledGame,
+  Friend,
+  Conversation,
+  DmMessage,
+  DmMessageFull,
+  AllianceInfo,
+  AllianceMemberInfo,
+  AllianceDetail,
+  AllianceInvite,
+  AllianceSharedChannel,
+} from "./types";
+import {
+  EMOJI_CATALOG,
+  QUICK_REACTIONS,
+  MAX_ATTACHMENT_BYTES,
+  MIC_METER_MAX,
+  RECOVERY_ACK_KEY,
+  ALL_PERMISSIONS,
+  EXPIRY_OPTIONS,
+  THEMES,
+} from "./constants";
+import {
+  formatPubkey,
+  meAction,
+  mentionsName,
+  colorForKey,
+  dayKey,
+  formatDayLabel,
+  formatFullTimestamp,
+  formatRelative,
+} from "./utils/format";
+import { playMentionPing, playVoiceTone } from "./utils/audio";
+import { loadRecentEmojis, pushRecentEmoji } from "./utils/recentEmoji";
+import { PhoneIcon, PhoneOffIcon } from "./components/Icons";
 
 /** Hub icon wrapped in dnd-kit's useSortable so the user can drag-reorder
  * the hub sidebar. The drag handle is the whole icon -- there's no second
@@ -502,17 +241,6 @@ function SortableCategoryItem({
       {!collapsed && children}
     </li>
   );
-}
-
-/** Format a public key for display: 12 hex chars in groups of 4, separated
- * by dashes, followed by the last 4 chars. Full key still copied/sent under
- * the hood — this is purely visual. */
-function formatPubkey(key: string | null | undefined): string {
-  if (!key) return "";
-  if (key.length < 20) return key;
-  const head = key.slice(0, 12).match(/.{1,4}/g)!.join("-");
-  const tail = key.slice(-4);
-  return `${head}…${tail}`;
 }
 
 type SettingsTab = "profile" | "account" | "appearance" | "voice" | "security" | "about";
@@ -732,38 +460,6 @@ function ProfileTab({
  * Calm. Swatch colors are hardcoded here because they need to render the
  * theme's palette regardless of which theme is currently active.
  */
-const THEMES: {
-  id: "calm" | "classic" | "linear" | "light";
-  name: string;
-  tagline: string;
-  swatches: [string, string, string];
-}[] = [
-  {
-    id: "calm",
-    name: "Calm",
-    tagline: "Warm dark, dusty teal. Soft on the eyes — fits everyone.",
-    swatches: ["#1c1a1f", "#2c2a31", "#88b8a8"],
-  },
-  {
-    id: "classic",
-    name: "Classic",
-    tagline: "Deep navy + violet purple. Familiar and tech-forward.",
-    swatches: ["#1a1a2e", "#1e2a47", "#7c3aed"],
-  },
-  {
-    id: "linear",
-    name: "Linear",
-    tagline: "Near-black with a sharp violet-blue accent. Minimal.",
-    swatches: ["#0c0d11", "#1a1c22", "#6571f0"],
-  },
-  {
-    id: "light",
-    name: "Light",
-    tagline: "Off-white with a dusty teal accent. Reads well in daylight.",
-    swatches: ["#fafaf7", "#f5f4ef", "#4a8d7a"],
-  },
-];
-
 function ThemePicker({
   value,
   onChange,
@@ -1097,8 +793,6 @@ function UserListGrouped({
     </>
   );
 }
-
-const MIC_METER_MAX = 0.2;
 
 function MicLevelMeter({
   level,
@@ -1502,29 +1196,6 @@ interface HubAdminPageProps {
   channels: Channel[];
 }
 
-const ALL_PERMISSIONS: { id: string; label: string }[] = [
-  { id: "admin", label: "Administrator (grants everything)" },
-  { id: "manage_channels", label: "Manage channels" },
-  { id: "manage_roles", label: "Manage roles" },
-  { id: "manage_messages", label: "Manage messages" },
-  { id: "kick_members", label: "Kick members" },
-  { id: "ban_members", label: "Ban members" },
-  { id: "mute_members", label: "Mute members" },
-  { id: "timeout_members", label: "Timeout members" },
-  { id: "manage_games", label: "Install / uninstall games" },
-  { id: "read_messages", label: "Read messages" },
-  { id: "send_messages", label: "Send messages" },
-];
-
-const EXPIRY_OPTIONS: { label: string; seconds: number | null }[] = [
-  { label: "Never", seconds: null },
-  { label: "30 minutes", seconds: 30 * 60 },
-  { label: "1 hour", seconds: 60 * 60 },
-  { label: "6 hours", seconds: 6 * 60 * 60 },
-  { label: "1 day", seconds: 24 * 60 * 60 },
-  { label: "7 days", seconds: 7 * 24 * 60 * 60 },
-];
-
 function InvitesSection({
   invites,
   hubUrl,
@@ -1672,33 +1343,6 @@ function MessageReactions({
       ))}
     </div>
   );
-}
-
-const RECENT_EMOJI_KEY = "voxply.recentEmojis";
-const RECENT_EMOJI_MAX = 8;
-
-function loadRecentEmojis(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_EMOJI_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.slice(0, RECENT_EMOJI_MAX) : [];
-  } catch {
-    return [];
-  }
-}
-
-function pushRecentEmoji(emoji: string) {
-  try {
-    const cur = loadRecentEmojis();
-    const next = [emoji, ...cur.filter((e) => e !== emoji)].slice(
-      0,
-      RECENT_EMOJI_MAX,
-    );
-    localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(next));
-  } catch {
-    // localStorage full / disabled → just no recents, no big deal
-  }
 }
 
 function ReactionPicker({
@@ -2035,8 +1679,6 @@ function MessageContent({
  * because it's a per-device thing anyway, no need to round-trip
  * through the Tauri backend or the hub.
  */
-const RECOVERY_ACK_KEY = "voxply.recoveryAcknowledged";
-
 function WelcomeRecoveryBlock() {
   const [acked, setAcked] = useState<boolean>(
     () => localStorage.getItem(RECOVERY_ACK_KEY) === "1",
@@ -2106,208 +1748,6 @@ function WelcomeRecoveryBlock() {
       )}
     </div>
   );
-}
-
-function PhoneIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-    </svg>
-  );
-}
-
-function PhoneOffIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
-      <line x1="23" y1="1" x2="1" y2="23" />
-    </svg>
-  );
-}
-
-/**
- * Plays a short two-tone "ping" via WebAudio. We synthesize it on demand
- * rather than bundle an audio file -- it's ~20 lines, has no licensing
- * concerns, and the user can tell what they're hearing without waiting
- * for a file fetch on first play.
- */
-let cachedAudioCtx: AudioContext | null = null;
-function playMentionPing() {
-  try {
-    const ctx =
-      cachedAudioCtx ??
-      (cachedAudioCtx = new (window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext)());
-    const now = ctx.currentTime;
-    const tone = (freq: number, start: number, dur: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = freq;
-      osc.type = "sine";
-      gain.gain.setValueAtTime(0, now + start);
-      gain.gain.linearRampToValueAtTime(0.18, now + start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now + start);
-      osc.stop(now + start + dur);
-    };
-    tone(880, 0, 0.12);
-    tone(1175, 0.08, 0.18);
-  } catch {
-    // Audio is best-effort; fail silently if the context can't start.
-  }
-}
-
-/**
- * Voice-channel join/leave cues. Synthesized like the mention ping —
- * rising two-tone for join (connecting feel), descending two-tone for
- * leave (disconnecting feel). Same WebAudio context, same fail-silent
- * behavior.
- */
-function playVoiceTone(direction: "up" | "down") {
-  try {
-    const ctx =
-      cachedAudioCtx ??
-      (cachedAudioCtx = new (window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext)());
-    const now = ctx.currentTime;
-    const tone = (freq: number, start: number, dur: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = freq;
-      osc.type = "sine";
-      gain.gain.setValueAtTime(0, now + start);
-      gain.gain.linearRampToValueAtTime(0.14, now + start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now + start);
-      osc.stop(now + start + dur);
-    };
-    if (direction === "up") {
-      tone(523, 0, 0.1); // C5
-      tone(784, 0.07, 0.16); // G5
-    } else {
-      tone(784, 0, 0.1); // G5
-      tone(523, 0.07, 0.16); // C5
-    }
-  } catch {
-    // best-effort
-  }
-}
-
-/**
- * "/me does the thing" → render in third person. Only triggers when /me is
- * the very first 4 chars of the message and there's at least one trailing
- * char of action text. Keeps the expected IRC-style behavior without
- * accidentally swallowing messages that happen to mention "/me " mid-line.
- */
-function meAction(content: string): string | null {
-  if (content.startsWith("/me ") && content.length > 4) {
-    return content.slice(4);
-  }
-  return null;
-}
-
-/** Returns true if `content` contains an @mention of `name` (case-insensitive). */
-function mentionsName(content: string, name: string | null): boolean {
-  if (!name) return false;
-  const lower = name.toLowerCase();
-  const re = /@([\w.\-]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    if (m[1].toLowerCase() === lower) return true;
-  }
-  return false;
-}
-
-/**
- * Stable color for a public key. Hashes the pubkey to a hue and pins
- * saturation/lightness so the result is always legible against the dark
- * theme. Empty/missing keys fall back to the accent color.
- */
-function colorForKey(pubkey: string | null | undefined): string {
-  if (!pubkey) return "var(--accent)";
-  // Tiny FNV-1a — plenty of entropy for hue distribution and cheap to run
-  // on every render.
-  let h = 2166136261;
-  for (let i = 0; i < pubkey.length; i++) {
-    h ^= pubkey.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const hue = ((h >>> 0) % 360);
-  return `hsl(${hue}, 55%, 65%)`;
-}
-
-/** Local-day key (yyyy-mm-dd) used to detect day boundaries. */
-function dayKey(unixSec: number): string {
-  const d = new Date(unixSec * 1000);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-/** Friendly label for a day separator: Today / Yesterday / Mar 4 / Mar 4, 2024. */
-function formatDayLabel(unixSec: number): string {
-  const d = new Date(unixSec * 1000);
-  const today = new Date();
-  const yest = new Date();
-  yest.setDate(today.getDate() - 1);
-  if (dayKey(unixSec) === dayKey(today.getTime() / 1000)) return "Today";
-  if (dayKey(unixSec) === dayKey(yest.getTime() / 1000)) return "Yesterday";
-  const sameYear = d.getFullYear() === today.getFullYear();
-  return d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: sameYear ? undefined : "numeric",
-  });
-}
-
-/** Localized full timestamp suitable for a hover tooltip. */
-function formatFullTimestamp(unixSec: number): string {
-  if (!unixSec) return "";
-  const d = new Date(unixSec * 1000);
-  return d.toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year:
-      d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function formatRelative(unixSec: number): string {
-  if (!unixSec) return "—";
-  const now = Math.floor(Date.now() / 1000);
-  const diff = now - unixSec;
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 function MemberRow({
@@ -2848,42 +2288,6 @@ function HubAdminPage(props: HubAdminPageProps) {
       </main>
     </div>
   );
-}
-
-interface AllianceInfo {
-  id: string;
-  name: string;
-  created_by: string;
-  created_at: number;
-}
-
-interface AllianceMemberInfo {
-  hub_public_key: string;
-  hub_name: string;
-  hub_url: string;
-  joined_at: number;
-}
-
-interface AllianceDetail {
-  id: string;
-  name: string;
-  created_by: string;
-  created_at: number;
-  members: AllianceMemberInfo[];
-}
-
-interface AllianceInvite {
-  token: string;
-  alliance_id: string;
-  alliance_name: string;
-  hub_url: string;
-}
-
-interface AllianceSharedChannel {
-  channel_id: string;
-  channel_name: string;
-  hub_public_key: string;
-  hub_name: string;
 }
 
 function AlliancesSection({

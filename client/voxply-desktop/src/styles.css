@@ -344,6 +344,79 @@ select,
   font-size: var(--text-xs);
 }
 
+/* Recovery-phrase nudge on the welcome screen — visually distinct from
+   the body bullets so users notice it before adding a hub. Border ring
+   uses --accent so it reads as "do this" rather than danger. */
+.welcome-recovery {
+  width: 100%;
+  max-width: 540px;
+  margin: var(--space-5) 0;
+  padding: var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-elevated);
+  text-align: left;
+}
+
+.welcome-recovery h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  color: var(--accent);
+}
+
+.welcome-recovery p {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.welcome-recovery .recovery-phrase {
+  margin-bottom: var(--space-3);
+}
+
+.welcome-recovery.acked {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-color: var(--success);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.welcome-recovery-check {
+  color: var(--success);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-md);
+}
+
+/* Quick tips on empty channels — small list under the welcome message
+   so new users get a hint at the unique features without leaving the
+   channel they just opened. */
+.channel-empty-tips {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  text-align: left;
+  max-width: 480px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.channel-empty-tips li {
+  padding: var(--space-1) 0;
+}
+
+.channel-empty-tips kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
 .hub-preview-status,
 .hub-preview-error {
   margin: var(--space-2) 0;

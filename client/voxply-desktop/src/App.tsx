@@ -2027,6 +2027,87 @@ function MessageContent({
  * ignores CSS color). Phone-off variant for "leave" — same handset
  * shape with a strikethrough line, conventional for end-call buttons.
  */
+/**
+ * Recovery-phrase nudge shown on the welcome screen before the user
+ * joins their first hub. The phrase is the only path back if they lose
+ * the device, so we want them to see it once and acknowledge they
+ * wrote it down. Acknowledgement persists in localStorage — clean
+ * because it's a per-device thing anyway, no need to round-trip
+ * through the Tauri backend or the hub.
+ */
+const RECOVERY_ACK_KEY = "voxply.recoveryAcknowledged";
+
+function WelcomeRecoveryBlock() {
+  const [acked, setAcked] = useState<boolean>(
+    () => localStorage.getItem(RECOVERY_ACK_KEY) === "1",
+  );
+  const [phrase, setPhrase] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (acked) {
+    return (
+      <div className="welcome-recovery acked">
+        <span className="welcome-recovery-check">✓</span>
+        <span>
+          Recovery phrase backed up. You can re-reveal it any time from{" "}
+          <strong>Settings → Security</strong>.
+        </span>
+      </div>
+    );
+  }
+
+  async function reveal() {
+    setBusy(true);
+    try {
+      const p = await invoke<string>("get_recovery_phrase");
+      setPhrase(p);
+    } catch {
+      // If recovery isn't available yet (e.g. mid-load), the user can
+      // come back to this from Settings; the welcome block just stays
+      // in the unrevealed state.
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function acknowledge() {
+    localStorage.setItem(RECOVERY_ACK_KEY, "1");
+    setAcked(true);
+  }
+
+  return (
+    <div className="welcome-recovery">
+      <h3>📝 Back up your recovery phrase first</h3>
+      {phrase ? (
+        <>
+          <p className="muted">
+            These 24 words are the <strong>only</strong> way to recover
+            your identity. Write them down on paper or save them in a
+            password manager. Anyone with these words can impersonate
+            you on every hub you've joined — keep them private.
+          </p>
+          <div className="recovery-phrase">{phrase}</div>
+          <button onClick={acknowledge} className="primary">
+            I've backed it up — continue
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="muted">
+            Voxply has no "forgot password" — your identity is a keypair
+            on this device. If you lose the device without writing down
+            the recovery phrase, every hub forgets you forever. Do this
+            now, before you join your first hub.
+          </p>
+          <button onClick={reveal} className="btn-secondary" disabled={busy}>
+            {busy ? "Loading…" : "Reveal my recovery phrase"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PhoneIcon() {
   return (
     <svg
@@ -6326,31 +6407,35 @@ function App() {
           </div>
           {!hasActiveHub ? (
             <div className="empty-state welcome">
-              <h1>Voxply</h1>
+              <h1>Welcome to Voxply</h1>
               <p className="welcome-tagline">
-                Decentralized voice chat + community platform
+                Decentralized voice chat where you bring your identity
+                with you. No accounts, no central server.
               </p>
               <ul className="welcome-points">
                 <li>
-                  <strong>Hubs</strong> are independently-run, federated
-                  servers. Each one is its own community. Add one with
-                  its URL to join.
+                  <strong>Hubs</strong> are independently-run servers — pick
+                  any one to join, or run your own. The same you works on
+                  every hub.
                 </li>
                 <li>
-                  <strong>Your identity</strong> is a keypair on this device,
-                  not an account. The same identity works on every hub. Back
-                  up your recovery phrase from Settings → Security.
+                  <strong>Your identity</strong> is a keypair stored on this
+                  device, not an account on a service. Nobody can deplatform
+                  you.
                 </li>
                 <li>
-                  <strong>Alliances</strong> let hubs share channels and voice
-                  across topics — your messages travel with you.
+                  <strong>Alliances</strong> let hubs share channels with
+                  each other so communities stay connected without merging.
                 </li>
               </ul>
+              <WelcomeRecoveryBlock />
               <button className="primary" onClick={() => setShowAddHub(true)}>
                 Add your first hub
               </button>
               <p className="welcome-hint muted">
-                Don't have one? Ask a friend for a hub URL or invite link.
+                Don't have one? Ask a friend for a hub URL, paste an
+                invite link, or run a hub yourself — see{" "}
+                <code>docs/hosting.md</code> in the repo.
               </p>
             </div>
           ) : myApprovalStatus === "pending" ? (
@@ -7110,11 +7195,29 @@ function App() {
                           <div className="channel-empty-icon">👋</div>
                           <h2>Welcome to #{selectedChannel.name}</h2>
                           <p>
-                            This is the start of the channel.
                             {selectedChannel.description
-                              ? ` ${selectedChannel.description}`
-                              : " Say hello!"}
+                              ? selectedChannel.description
+                              : "This is the start of the channel — say hello!"}
                           </p>
+                          <ul className="channel-empty-tips">
+                            <li>
+                              <strong>Double-click</strong> any channel in
+                              the sidebar to jump into voice.
+                            </li>
+                            <li>
+                              <strong>Drag a file</strong> into the message
+                              area to share it (up to 3 MB).
+                            </li>
+                            <li>
+                              Type <code>@name</code> to mention someone,{" "}
+                              <code>/me</code> for an action, or paste a
+                              code block with <code>```</code>.
+                            </li>
+                            <li>
+                              Press <kbd>Ctrl</kbd>+<kbd>K</kbd> to jump to
+                              another channel from anywhere.
+                            </li>
+                          </ul>
                         </>
                       )}
                     </div>
@@ -7725,6 +7828,10 @@ function App() {
           <div className="modal-overlay" onClick={() => setShowAddHub(false)}>
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <h3>Add Hub</h3>
+              <p className="muted" style={{ marginBottom: "var(--space-3)" }}>
+                Paste the URL of a hub you want to join. The hub's name
+                and description will appear below as you type.
+              </p>
               <input
                 type="text"
                 value={hubUrl}
@@ -7733,7 +7840,7 @@ function App() {
                   if (e.key === "Enter") handleAddHub();
                   if (e.key === "Escape") setShowAddHub(false);
                 }}
-                placeholder="http://hub-url:3000"
+                placeholder="https://hub.example.com"
                 autoFocus
               />
               {hubPreview.state === "loading" && (

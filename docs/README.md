@@ -27,7 +27,9 @@ If you're new, read in this order:
 
 11. [farm-model.md](farm-model.md) — multi-hub server layer + 5-layer architecture
 12. [gaming.md](gaming.md) — game distribution platform + tier progression
-13. [future-features.md](future-features.md) — anti-spam, moderation, recovery, bots
+13. [home-hub.md](home-hub.md) — personal-axis state: home hub list, replication, DM canonicalization
+14. [multi-device.md](multi-device.md) — master+subkey identity, QR pairing protocol
+15. [future-features.md](future-features.md) — anti-spam, moderation, recovery, bots
 
 ## Find by feature
 
@@ -83,6 +85,8 @@ Reading order is for learning the system end-to-end. This section is for
 - **Identity recovery (device linking, recovery contacts)** — [future-features.md](future-features.md)
 - **Bots & integrations** — [future-features.md](future-features.md)
 - **Server tags (federated portable badges)** — [future-features.md](future-features.md)
+- **Home hub list (personal-axis state, DM canonicalization)** — [home-hub.md](home-hub.md)
+- **Multi-device pairing (QR, master+subkey)** — [multi-device.md](multi-device.md)
 - **Farm model (multi-hub server, SSO, discovery)** — [farm-model.md](farm-model.md)
 - **Gaming platform (tiers, SDK, sandbox)** — [gaming.md](gaming.md)
 

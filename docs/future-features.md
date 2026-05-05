@@ -129,6 +129,12 @@ paint ourselves into a corner.
 
 ## Multi-device pairing
 
+**Status**: design committed. The canonical docs are
+[multi-device.md](multi-device.md) (identity + QR pairing) and
+[home-hub.md](home-hub.md) (storage layer for personal-axis state).
+Read those — the writeup below is the *pre-decision* exploration kept
+for historical context only and may drift from the committed design.
+
 **Goal**: let one user have Voxply on multiple devices (phone + desktop)
 under a single identity. Today every device generates its own keypair
 and is treated as a separate user. Pasting the recovery phrase on a

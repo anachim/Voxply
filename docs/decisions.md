@@ -4,6 +4,41 @@ Why Voxply is shaped the way it is. Each entry: the decision, the
 alternative we considered, and why we chose this. New decisions go at
 the top.
 
+## Personal state lives on a home hub list; community state stays direct
+
+**Decision**: a user designates a master-signed, ordered list of
+**home hubs** that hold their *personal-axis* state — devices, prefs,
+DMs, friends. Community-axis state (channel messages, voice,
+alliances) still flows direct between client and the relevant
+community hub. Writes to personal-axis state replicate across the
+list; reads can hit any hub in the list.
+
+**Alternative considered**: continue with no home hub at all (the
+prior decision), pushing every personal-axis feature to invent its
+own ad-hoc per-hub or per-device sync.
+
+**Why a list wins**:
+- Multi-device needs a single canonical place to publish device
+  certs and revocations. Without one, every community hub would
+  need its own copy and would drift.
+- DMs need a canonical inbox view so phone + desktop see the same
+  list. Spraying across community hubs without a canonical view
+  forces every device to log into every hub.
+- A *list* (rather than a single home hub) preserves the failover
+  resilience that drove "DM failover, not load-balanced routing"
+  below — any hub in the list can serve, and there is no single
+  point of failure.
+- Master-signed designations mean consumers never have to trust an
+  individual home hub — they verify the master signature.
+
+**What this supersedes**: the "Client connects directly to many hubs"
+entry below was correct *for community traffic* but forced
+personal-axis state into bad shapes. It is now scoped to community
+traffic only; personal state goes through home hubs.
+
+**Design docs**: [home-hub.md](home-hub.md) (storage layer) and
+[multi-device.md](multi-device.md) (identity + pairing protocol).
+
 ## Channels are unified text + voice
 
 **Decision**: every channel is both a chat room and a voice room. There
@@ -32,16 +67,25 @@ property* (e.g., `min_talk_power`) rather than a new channel kind.
 
 ## Client connects directly to many hubs
 
+**Status**: partially superseded — see "Personal state lives on a home
+hub list" above. This decision still holds for **community traffic**
+(channels, voice, alliances), but **personal-axis state** (devices,
+prefs, DMs, friends) now flows through a master-signed home hub list.
+
 **Decision**: the desktop client connects to each hub directly. Hubs
 are independent — they don't proxy each other's traffic.
 
 **Alternative considered**: a "home hub" model where your home hub
 proxies everything else.
 
-**Why direct**: simpler. Each hub is a self-contained community. Cross-
-hub features (alliances, federated DMs) are explicit opt-in protocols on
-top, not the default. Avoids the "pick a home" UX problem. The client
+**Why direct (for community traffic)**: simpler. Each hub is a self-
+contained community. Cross-hub features (alliances, federated DMs)
+are explicit opt-in protocols on top, not the default. The client
 becomes the multi-hub orchestrator, not the hub server.
+
+**Why this had to bend for personal-axis state**: see the home hub
+list decision above — multi-device, DM unification, and prefs sync
+all needed an anchor that "no home hub" couldn't provide.
 
 ## DM failover, not load-balanced routing
 
@@ -71,14 +115,11 @@ ships and is forward-compatible: the recovery phrase can later be
 treated as a master seed without breaking existing identities (migrate
 by deriving the existing key as "subkey 0").
 
-**Revisit when**: users actually want a phone + desktop with the same
-account, not just "I lost my laptop, recover." **This conversation has
-started** — the next architectural decision queued up is the multi-
-device pairing model. See
-[future-features.md → Multi-device pairing](future-features.md#multi-device-pairing)
-for the open choices (shared keypair vs master+subkey, plus state-sync
-options). The design doc has to land before any pairing code is
-written.
+**Revisit when**: design is now committed in
+[multi-device.md](multi-device.md) (identity model + QR pairing
+protocol) and [home-hub.md](home-hub.md) (storage layer). The
+implementation is phased; this entry stays accurate as a description
+of the *current shipped* behavior until phases 3-5 land.
 
 ## ROADMAP.md is gitignored
 

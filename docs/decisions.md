@@ -72,7 +72,13 @@ treated as a master seed without breaking existing identities (migrate
 by deriving the existing key as "subkey 0").
 
 **Revisit when**: users actually want a phone + desktop with the same
-account, not just "I lost my laptop, recover."
+account, not just "I lost my laptop, recover." **This conversation has
+started** — the next architectural decision queued up is the multi-
+device pairing model. See
+[future-features.md → Multi-device pairing](future-features.md#multi-device-pairing)
+for the open choices (shared keypair vs master+subkey, plus state-sync
+options). The design doc has to land before any pairing code is
+written.
 
 ## ROADMAP.md is gitignored
 

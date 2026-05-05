@@ -127,6 +127,84 @@ paint ourselves into a corner.
 
 ---
 
+## Multi-device pairing
+
+**Goal**: let one user have Voxply on multiple devices (phone + desktop)
+under a single identity. Today every device generates its own keypair
+and is treated as a separate user. Pasting the recovery phrase on a
+second device replaces that device's identity with the first device's,
+which works as a "I formatted my PC" recovery story but is awkward
+for "I want both devices online at the same time."
+
+**Status**: design pending. UX direction agreed (QR-code pairing flow,
+same model as the well-known messaging apps). Underlying protocol not
+yet picked — the two foundational choices below are the next thing to
+decide before we write any pairing code.
+
+### Identity model — pick one
+
+| Option | What it is | Cost |
+|---|---|---|
+| **Shared keypair** | All devices have the same private key. QR-pairing transfers the key. Hubs see one pubkey = one person. | Simple. ~1-2 weeks. **No revocation** — losing one device means rotating the key everywhere. |
+| **Master + device subkeys** | A master keypair (derived from the recovery phrase as a seed) signs per-device subkeys. Each device's subkey signs daily traffic; the master proves "this subkey is mine." | Proper revocation, proper sovereignty. Hub protocol changes (hubs verify subkey signatures). Multi-month. The recovery phrase becomes an HD-wallet seed; existing single-key identities migrate as "device 0." |
+
+The second option is what `decisions.md` calls "the right thing later"
+and is forward-compatible with today's keypair model. The first option
+is the dirty-but-fast v0 that gets users multi-device immediately at
+the cost of needing a rewrite when revocation comes up.
+
+### State sync — separate decision
+
+Each device today has its own JSON files for hub list, prefs, blocked
+users, friends, voice settings. Multi-device means these need to live
+*somewhere* shared. The choices, ranked from least invasive to most:
+
+1. **No sync** — each device keeps its own list. Same identity, but
+   you re-add hubs on each device. Simple but feels broken.
+2. **One of the user's hubs holds an encrypted prefs blob** — pick a
+   home hub (or the first one) to be the "sync hub." Encrypted with a
+   key derived from the master seed. Other devices fetch the blob.
+   Reintroduces "pick a primary," which we explicitly punted earlier.
+3. **Every hub the user is on replicates the blob** — fancy, invites
+   consistency bugs across hubs that don't agree on the blob version.
+4. **Separate identity service** — a central component. Conflicts with
+   the federated pillar. Off the table.
+
+Option 1 is the v0 path. Option 2 is the right destination. Option 3 is
+over-engineering. Option 4 is the wrong direction.
+
+### Recommended path forward
+
+1. Write a real design doc (likely `docs/multi-device.md` when it
+   grows past this section) that picks the identity model + the sync
+   model + sketches the QR pairing protocol message-by-message.
+2. Decide together; the call here matters because it's hard to undo.
+3. Build to that design.
+
+**Don't start coding before the doc.** The architectural choice is
+load-bearing — the "right" answer is multi-month and changes hub
+protocol; the "fast" answer is ~1-2 weeks but needs to be replaced
+when revocation matters. Both are real, neither is obviously correct.
+
+### What's already in place that helps
+
+- The recovery phrase already deterministically yields a keypair. If
+  we go master+subkey, the same phrase becomes the seed and existing
+  identities migrate cleanly.
+- `localStorage.voxply.recoveryAcknowledged` flag from the onboarding
+  block tracks whether the user has backed up their phrase — useful
+  precondition for "you can pair another device."
+- Per-device storage already isolates hub list, prefs, blocked users,
+  voice settings — these are the things that'd need to sync.
+
+### What's not done
+
+Everything except the identity primitives. No QR code generation, no
+pairing endpoint on the hub, no device list, no per-device revocation,
+no sync transport, no encrypted blob format.
+
+---
+
 ## Nested channels
 
 **Goal**: let users build an arbitrary tree of categories and channels.

@@ -1,8 +1,10 @@
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::RngCore;
 use voxply_identity::{
-    Identity, MasterIdentity, PairingComplete, PairingOffer, PairingStatus, SubkeyCert,
+    DeviceSubkey, Identity, MasterIdentity, PairingClaim, PairingComplete, PairingOffer,
+    PairingStatus, SubkeyCert,
 };
 
 const OFFER_LIFETIME_SECS: u64 = 240; // 4 minutes — under the hub's 5-minute cap.
@@ -258,6 +260,177 @@ pub fn home_hubs_from_offer(offer: PairingOffer) -> Vec<String> {
 #[tauri::command]
 pub fn fingerprint_pubkey(public_key_hex: String) -> String {
     fingerprint_inner(&public_key_hex)
+}
+
+// --- New-device side ---
+
+fn paired_identity_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("No home directory")?;
+    Ok(home.join(".voxply").join("paired_identity.json"))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PairedIdentity {
+    pub master_pubkey: String,
+    pub subkey_pubkey: String,
+    pub subkey_secret_hex: String,
+    pub device_label: String,
+    pub cert: SubkeyCert,
+    pub home_hubs: Vec<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct ClaimPairingResult {
+    pub home_hub_url: String,
+    pub master_pubkey: String,
+    pub subkey_pubkey: String,
+    pub subkey_secret_hex: String,
+    pub pairing_token: String,
+    pub home_hubs: Vec<String>,
+}
+
+/// N side — parse a QR payload back into a PairingOffer and verify
+/// the master signature. Surfaces a helpful error if the QR is junk
+/// or the signature doesn't match the embedded master pubkey.
+#[tauri::command]
+pub fn parse_pairing_offer(qr_payload: String) -> Result<PairingOffer, String> {
+    let offer: PairingOffer =
+        serde_json::from_str(&qr_payload).map_err(|e| format!("parse: {e}"))?;
+    offer
+        .verify()
+        .map_err(|e| format!("offer signature: {e}"))?;
+    let now = now_secs();
+    if offer.expires_at <= now {
+        return Err("offer is already expired".to_string());
+    }
+    Ok(offer)
+}
+
+/// N side — generate a fresh subkey for this device, sign a claim
+/// against the offer, and POST it to the first reachable home hub.
+/// Returns the URL it claimed against (the UI polls status there)
+/// plus the freshly-generated subkey material that the UI must hand
+/// back via `save_paired_identity` once the pairing completes.
+#[tauri::command]
+pub async fn claim_pairing_offer(
+    offer: PairingOffer,
+    device_label: String,
+) -> Result<ClaimPairingResult, String> {
+    offer
+        .verify()
+        .map_err(|e| format!("offer signature: {e}"))?;
+
+    let subkey = DeviceSubkey::generate(device_label.clone());
+    let subkey_pubkey = subkey.public_key_hex();
+    let subkey_secret_hex = hex::encode(subkey.secret_bytes());
+
+    let bytes =
+        PairingClaim::signing_bytes(&offer.pairing_token, &subkey_pubkey, &device_label);
+    let proof = hex::encode(subkey.sign(&bytes).to_bytes());
+
+    let claim = PairingClaim {
+        pairing_token: offer.pairing_token.clone(),
+        subkey_pubkey: subkey_pubkey.clone(),
+        device_label: device_label.clone(),
+        proof,
+    };
+    claim
+        .verify()
+        .map_err(|e| format!("claim self-verify: {e}"))?;
+
+    let client = http_client()?;
+    let mut last_error = String::new();
+    for url in &offer.home_hubs {
+        let endpoint = format!("{}/identity/pairing/claim", url.trim_end_matches('/'));
+        match client.post(&endpoint).json(&claim).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                return Ok(ClaimPairingResult {
+                    home_hub_url: url.clone(),
+                    master_pubkey: offer.master_pubkey,
+                    subkey_pubkey,
+                    subkey_secret_hex,
+                    pairing_token: offer.pairing_token,
+                    home_hubs: offer.home_hubs,
+                });
+            }
+            Ok(resp) => {
+                last_error = format!(
+                    "{}: HTTP {} {}",
+                    url,
+                    resp.status(),
+                    resp.text().await.unwrap_or_default()
+                );
+            }
+            Err(e) => last_error = format!("{url}: {e}"),
+        }
+    }
+    Err(format!(
+        "No home hub accepted the claim. Last error: {last_error}"
+    ))
+}
+
+/// N side — once `poll_pairing_status` reports Complete with a cert
+/// matching the offer, the UI calls this to persist the new identity
+/// at ~/.voxply/paired_identity.json. The cert's master signature is
+/// verified again here as a final guard.
+#[tauri::command]
+pub fn save_paired_identity(
+    master_pubkey: String,
+    subkey_pubkey: String,
+    subkey_secret_hex: String,
+    device_label: String,
+    cert: SubkeyCert,
+    home_hubs: Vec<String>,
+) -> Result<(), String> {
+    cert.verify()
+        .map_err(|e| format!("cert signature: {e}"))?;
+    if cert.master_pubkey != master_pubkey {
+        return Err("cert master_pubkey doesn't match expected".to_string());
+    }
+    if cert.subkey_pubkey != subkey_pubkey {
+        return Err("cert subkey_pubkey doesn't match the one we generated".to_string());
+    }
+
+    // Sanity-check the subkey bytes round-trip to the same pubkey we
+    // claimed under. If this fails the secret got mangled in transit
+    // through the UI layer.
+    let secret_bytes = hex::decode(&subkey_secret_hex)
+        .map_err(|e| format!("decode secret: {e}"))?;
+    let secret_array: [u8; 32] = secret_bytes
+        .try_into()
+        .map_err(|_| "subkey secret must be 32 bytes".to_string())?;
+    let reconstructed = DeviceSubkey::from_secret_bytes(&secret_array, device_label.clone());
+    if reconstructed.public_key_hex() != subkey_pubkey {
+        return Err("subkey secret doesn't match its pubkey".to_string());
+    }
+
+    let identity = PairedIdentity {
+        master_pubkey,
+        subkey_pubkey,
+        subkey_secret_hex,
+        device_label,
+        cert,
+        home_hubs,
+    };
+
+    let path = paired_identity_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
+    }
+    let text = serde_json::to_string_pretty(&identity).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("write: {e}"))?;
+    Ok(())
+}
+
+/// Read the locally-stored paired identity, if any.
+#[tauri::command]
+pub fn get_paired_identity() -> Option<PairedIdentity> {
+    let path = paired_identity_path().ok()?;
+    if !path.exists() {
+        return None;
+    }
+    let text = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 fn fingerprint_inner(public_key_hex: &str) -> String {

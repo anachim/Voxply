@@ -3509,6 +3509,10 @@ pub fn run() {
             pairing::complete_pairing,
             pairing::home_hubs_from_offer,
             pairing::fingerprint_pubkey,
+            pairing::parse_pairing_offer,
+            pairing::claim_pairing_offer,
+            pairing::save_paired_identity,
+            pairing::get_paired_identity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

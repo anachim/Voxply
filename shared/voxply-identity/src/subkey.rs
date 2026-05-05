@@ -32,6 +32,19 @@ impl DeviceSubkey {
         hex::encode(self.signing_key.verifying_key().as_bytes())
     }
 
+    /// Raw 32-byte secret. Persist this and reconstruct via
+    /// `from_secret_bytes` to round-trip a paired device's subkey.
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.signing_key.to_bytes()
+    }
+
+    pub fn from_secret_bytes(secret: &[u8; 32], label: String) -> Self {
+        Self {
+            signing_key: SigningKey::from_bytes(secret),
+            label,
+        }
+    }
+
     pub fn sign(&self, message: &[u8]) -> Signature {
         self.signing_key.sign(message)
     }

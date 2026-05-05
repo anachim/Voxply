@@ -282,6 +282,20 @@ mod tests {
     }
 
     #[test]
+    fn subkey_secret_bytes_roundtrip() {
+        let original = DeviceSubkey::generate("phone".to_string());
+        let secret = original.secret_bytes();
+        let restored = DeviceSubkey::from_secret_bytes(&secret, "phone".to_string());
+        assert_eq!(restored.public_key_hex(), original.public_key_hex());
+
+        // Both should produce the same signature on the same message.
+        let msg = b"identity check";
+        let sig_a = original.sign(msg).to_bytes();
+        let sig_b = restored.sign(msg).to_bytes();
+        assert_eq!(sig_a, sig_b);
+    }
+
+    #[test]
     fn home_hub_list_sign_and_verify_roundtrip() {
         let identity = Identity::generate();
         let master = identity.master().unwrap();

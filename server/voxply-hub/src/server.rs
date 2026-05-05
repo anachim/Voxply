@@ -116,6 +116,22 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             .post(routes::alliances::share_channel))
         .route("/alliances/{alliance_id}/channels/{channel_id}", axum::routing::delete(routes::alliances::unshare_channel))
         .route("/alliances/{alliance_id}/channels/{channel_id}/messages", get(routes::alliances::get_alliance_channel_messages).post(routes::alliances::post_alliance_channel_message))
+        .route(
+            "/identity/{master}/designation",
+            get(routes::identity::get_designation).post(routes::identity::put_designation),
+        )
+        .route(
+            "/identity/{master}/devices",
+            get(routes::identity::list_devices).post(routes::identity::post_device),
+        )
+        .route(
+            "/identity/{master}/revocations",
+            get(routes::identity::list_revocations).post(routes::identity::post_revocation),
+        )
+        .route(
+            "/identity/{master}/prefs",
+            get(routes::identity::get_prefs).put(routes::identity::put_prefs),
+        )
         .route("/federation/peers", get(federation::handlers::list_peers))
         .route("/federation/peers", post(federation::handlers::add_peer))
         .route("/federation/peers/{peer_key}/channels", get(federation::handlers::peer_channels))

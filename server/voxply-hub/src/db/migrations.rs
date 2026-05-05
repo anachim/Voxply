@@ -455,6 +455,65 @@ pub async fn run(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // ---- Multi-device / home-hub state (Phase 2) ----
+    // These tables store master-signed personal-axis state. The hub
+    // does not authenticate writes via session tokens; the master
+    // signature inside each row is the authorization.
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS home_hub_designations (
+            master_pubkey  TEXT PRIMARY KEY,
+            hubs_json      TEXT NOT NULL,
+            issued_at      INTEGER NOT NULL,
+            sequence       INTEGER NOT NULL,
+            signature      TEXT NOT NULL,
+            updated_at     INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS subkey_certs (
+            master_pubkey       TEXT NOT NULL,
+            subkey_pubkey       TEXT NOT NULL,
+            device_label        TEXT NOT NULL,
+            issued_at           INTEGER NOT NULL,
+            not_after           INTEGER,
+            fallback_hubs_json  TEXT NOT NULL,
+            signature           TEXT NOT NULL,
+            registered_at       INTEGER NOT NULL,
+            PRIMARY KEY (master_pubkey, subkey_pubkey)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS subkey_revocations (
+            master_pubkey  TEXT NOT NULL,
+            subkey_pubkey  TEXT NOT NULL,
+            revoked_at     INTEGER NOT NULL,
+            signature      TEXT NOT NULL,
+            registered_at  INTEGER NOT NULL,
+            PRIMARY KEY (master_pubkey, subkey_pubkey)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS prefs_blobs (
+            master_pubkey  TEXT PRIMARY KEY,
+            blob_version   INTEGER NOT NULL,
+            ciphertext_hex TEXT NOT NULL,
+            signature      TEXT NOT NULL,
+            updated_at     INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await?;
+
     tracing::info!("Database migrations complete");
     Ok(())
 }

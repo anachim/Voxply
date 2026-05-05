@@ -8,6 +8,7 @@ pub mod chat_models;
 pub mod games;
 pub mod health;
 pub mod hub;
+pub mod identity;
 pub mod me;
 pub mod messages;
 pub mod invite_models;

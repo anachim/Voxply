@@ -2,6 +2,7 @@ mod master;
 mod pow;
 mod recovery;
 mod subkey;
+mod wire;
 
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 pub use master::MasterIdentity;
 pub use pow::{compute_security_level, leading_zero_bits, verify_security_level};
 pub use subkey::DeviceSubkey;
+pub use wire::{HomeHubList, RevocationEntry, SignedPrefsBlob, SubkeyCert};
 
 pub struct Identity {
     signing_key: SigningKey,
@@ -274,5 +276,103 @@ mod tests {
         let a = DeviceSubkey::generate("a".to_string());
         let b = DeviceSubkey::generate("b".to_string());
         assert_ne!(a.public_key_hex(), b.public_key_hex());
+    }
+
+    #[test]
+    fn home_hub_list_sign_and_verify_roundtrip() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        let master_pubkey = master.public_key_hex();
+        let hubs = vec!["https://a.example".to_string(), "https://b.example".to_string()];
+        let issued_at = 1_700_000_000;
+        let sequence = 1;
+
+        let bytes = HomeHubList::signing_bytes(&master_pubkey, &hubs, issued_at, sequence);
+        let signature = hex::encode(master.sign(&bytes).to_bytes());
+
+        let entry = HomeHubList { master_pubkey, hubs, issued_at, sequence, signature };
+        assert!(entry.verify().is_ok());
+    }
+
+    #[test]
+    fn home_hub_list_rejects_tampered_payload() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        let master_pubkey = master.public_key_hex();
+        let hubs = vec!["https://a.example".to_string()];
+
+        let bytes = HomeHubList::signing_bytes(&master_pubkey, &hubs, 1, 1);
+        let signature = hex::encode(master.sign(&bytes).to_bytes());
+
+        let mut entry = HomeHubList { master_pubkey, hubs, issued_at: 1, sequence: 1, signature };
+        entry.hubs.push("https://attacker.example".to_string());
+        assert!(entry.verify().is_err());
+    }
+
+    #[test]
+    fn subkey_cert_sign_and_verify_roundtrip() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        let master_pubkey = master.public_key_hex();
+        let subkey = DeviceSubkey::generate("phone".to_string());
+        let subkey_pubkey = subkey.public_key_hex();
+
+        let bytes = SubkeyCert::signing_bytes(
+            &master_pubkey,
+            &subkey_pubkey,
+            "phone",
+            1_700_000_000,
+            None,
+            &[],
+        );
+        let signature = hex::encode(master.sign(&bytes).to_bytes());
+
+        let cert = SubkeyCert {
+            master_pubkey,
+            subkey_pubkey,
+            device_label: "phone".to_string(),
+            issued_at: 1_700_000_000,
+            not_after: None,
+            fallback_hubs: vec![],
+            signature,
+        };
+        assert!(cert.verify().is_ok());
+    }
+
+    #[test]
+    fn revocation_entry_sign_and_verify_roundtrip() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        let master_pubkey = master.public_key_hex();
+        let revoked_subkey = DeviceSubkey::generate("compromised".to_string()).public_key_hex();
+
+        let bytes = RevocationEntry::signing_bytes(&master_pubkey, &revoked_subkey, 1_700_000_500);
+        let signature = hex::encode(master.sign(&bytes).to_bytes());
+
+        let entry = RevocationEntry {
+            master_pubkey,
+            subkey_pubkey: revoked_subkey,
+            revoked_at: 1_700_000_500,
+            signature,
+        };
+        assert!(entry.verify().is_ok());
+    }
+
+    #[test]
+    fn signed_prefs_blob_sign_and_verify_roundtrip() {
+        let identity = Identity::generate();
+        let master = identity.master().unwrap();
+        let master_pubkey = master.public_key_hex();
+        let ciphertext = b"opaque ciphertext bytes";
+        let bytes = SignedPrefsBlob::signing_bytes(&master_pubkey, 7, ciphertext);
+        let signature = hex::encode(master.sign(&bytes).to_bytes());
+
+        let blob = SignedPrefsBlob {
+            master_pubkey,
+            blob_version: 7,
+            ciphertext_hex: hex::encode(ciphertext),
+            signature,
+        };
+        assert!(blob.verify().is_ok());
     }
 }

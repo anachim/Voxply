@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use voxply_identity::Identity;
 
+mod auth_creds;
 mod home_hub;
 mod pairing;
 
@@ -78,16 +79,6 @@ struct AudioDeviceList {
 }
 
 // --- DTOs ---
-
-#[derive(Serialize, Deserialize)]
-struct ChallengeResponse {
-    challenge: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct VerifyResponse {
-    token: String,
-}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct HubInfo {
@@ -704,9 +695,7 @@ async fn add_hub(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<HubInfo, String> {
-    let path = Identity::default_path().map_err(|e| e.to_string())?;
-    let (identity, _) = Identity::load_or_create(&path).map_err(|e| e.to_string())?;
-    let pub_key = identity.public_key_hex();
+    let creds = auth_creds::load_active_credentials()?;
 
     let client = reqwest::Client::new();
 
@@ -724,35 +713,9 @@ async fn add_hub(
     let hub_name = info.name.clone();
     let hub_icon = info.icon.clone();
 
-    // Authenticate
-    let challenge: ChallengeResponse = client
-        .post(format!("{hub_url}/auth/challenge"))
-        .json(&serde_json::json!({ "public_key": pub_key }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid challenge: {e}"))?;
-
-    let challenge_bytes = hex::decode(&challenge.challenge).map_err(|e| e.to_string())?;
-    let signature = identity.sign(&challenge_bytes);
-
-    let verify: VerifyResponse = client
-        .post(format!("{hub_url}/auth/verify"))
-        .json(&serde_json::json!({
-            "public_key": pub_key,
-            "challenge": challenge.challenge,
-            "signature": hex::encode(signature.to_bytes()),
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Failed: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid verify: {e}"))?;
-
-    let token = verify.token;
+    // Authenticate — paired-device clients include the master cert,
+    // legacy clients use the single-key flow unchanged.
+    let token = creds.authenticate(&hub_url, &client).await?;
 
     // Auto-apply the user's default profile to this hub whenever the hub
     // doesn't already have a value for the field. Lets a new hub inherit
@@ -1351,50 +1314,9 @@ async fn reauth_session(
         s.hub_url.clone()
     };
 
-    let path = Identity::default_path().map_err(|e| e.to_string())?;
-    let (identity, _) = Identity::load_or_create(&path).map_err(|e| e.to_string())?;
-    let pub_key = identity.public_key_hex();
-
+    let creds = auth_creds::load_active_credentials()?;
     let client = reqwest::Client::new();
-
-    let challenge: ChallengeResponse = client
-        .post(format!("{hub_url}/auth/challenge"))
-        .json(&serde_json::json!({ "public_key": pub_key }))
-        .send()
-        .await
-        .map_err(|e| format!("re-challenge: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("re-challenge decode: {e}"))?;
-
-    let challenge_bytes =
-        hex::decode(&challenge.challenge).map_err(|e| format!("bad challenge hex: {e}"))?;
-    let signature = identity.sign(&challenge_bytes);
-
-    let verify_resp = client
-        .post(format!("{hub_url}/auth/verify"))
-        .json(&serde_json::json!({
-            "public_key": pub_key,
-            "challenge": challenge.challenge,
-            "signature": hex::encode(signature.to_bytes()),
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("re-verify: {e}"))?;
-
-    if !verify_resp.status().is_success() {
-        return Err(format!(
-            "re-verify rejected ({}): {}",
-            verify_resp.status(),
-            verify_resp.text().await.unwrap_or_default()
-        ));
-    }
-
-    let verify: VerifyResponse = verify_resp
-        .json()
-        .await
-        .map_err(|e| format!("re-verify decode: {e}"))?;
-    let new_token = verify.token.clone();
+    let new_token = creds.authenticate(&hub_url, &client).await?;
 
     // Restart the WS task with the new token. Abort the stale one first.
     let (old_task, hub_id_clone) = {

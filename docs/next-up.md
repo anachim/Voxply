@@ -189,15 +189,6 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
       only if the deps object stays smaller than what it replaces.
   - Not worth extracting (checked 2026-07-27): message send/edit.
 
-- [ ] **List-endpoint pagination — remaining lists.** One keyset dialect
-  (`limit` + cursor) exists and everything new follows it; the first pass
-  landed 2026-08-08. Verified still unbounded 2026-08-20 — worth a sweep when
-  someone hits one: `/moderation/bans`, `/moderation/mutes`, `/invites`,
-  `/hub/pending`, `/conversations`, `/channels/{id}/pins`,
-  `/channels/{id}/polls`, `/roles`, `/channels`, the banlist trio, `/emojis`,
-  `/hub/icons`, `/badges`. None grow the way DM history does, hence not
-  urgent.
-
 - [ ] **First external operator pilot.** A hub is live on an external
   operator's own server, **wiped and rebuilt on v0.5.0 (2026-08-21)** after an
   in-place 0.3.2 → 0.5.0 upgrade proved the migration path; the old install

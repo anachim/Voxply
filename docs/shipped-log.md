@@ -4,6 +4,33 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **The list-endpoint pagination sweep is finished (2026-09-06)**: seven more
+  lists take `limit` and a keyset `cursor` — `/moderation/bans`,
+  `/moderation/mutes`, `/invites`, `/hub/pending`, `/conversations`,
+  `/channels/{id}/pins` and `/channels/{id}/polls` — with the shared query
+  shape in `routes/paging.rs` instead of an eighth copy of the same struct.
+  `/hub/pending` is the one that pages *forward*: an approval queue is worked
+  from the front, so its cursor moves the other way.
+  **The six left unpaged are a decision, not a remainder.** `/roles` and
+  `/channels` feed permission checks and the sidebar tree, `/emojis` and
+  `/hub/icons` feed pickers, `/badges` a profile: each is bounded by admin
+  action and consumed *whole* by the UI, so paging would only add a walk to a
+  caller that needs every row anyway. The banlist trio already caps at 1000.
+  Reopen only if one of them starts growing with member activity rather than
+  with configuration.
+  **A paginated endpoint without a client that pages is the same truncation at
+  a larger number**, so both clients walk: `platform/commands/paged.ts` on web
+  and `src-tauri/src/paging.rs` on desktop, each with the stall guard and the
+  capability branch that `fetchAllUsers` worked out first — a hub predating the
+  change ignores both parameters and answers with everything, and paging *that*
+  returns forty copies of every row. The web helper is now what `fetchAllUsers`
+  itself calls. Two desktop call sites were fetching every conversation to find
+  one by id and would have quietly stopped finding it past page one.
+  The capability is a **new** string, `list.cursor.lists`, rather than a wider
+  `list.cursor`: a client paging one of these against a hub that advertises only
+  the older one would get page one back forever.
+  `/channels/{channel_id}/polls` turned out to be undocumented in `openapi.yaml`
+  — the coverage check counts *paths*, and the path existed for its `POST`.
 - **The desktop app speaks four languages (2026-09-06)**: the last 190
   hardcoded English strings, all of them in `apps/desktop`, are keys. What the
   scan still lists is **34 findings and not one a UI string** — a MIME type, a

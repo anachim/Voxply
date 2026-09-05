@@ -775,7 +775,20 @@ paths:
   /hub/pending:
     get:
       summary: List users awaiting approval (admin)
+      description: |
+        Oldest first — the queue is worked from the front, so the cursor moves
+        forward through the list rather than back like the newest-first ones.
+        Paged only on hubs advertising `list.cursor.lists`.
       tags: [Hub]
+      parameters:
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `public_key` of the previous page's last row.
+          schema: { type: string }
 
   /hub/pending/{target_key}/approve:
     post:
@@ -1131,7 +1144,17 @@ paths:
   /conversations:
     get:
       summary: List DM conversations
+      description: Newest first. Paged only on hubs advertising `list.cursor.lists`.
       tags: [DMs]
+      parameters:
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `id` of the previous page's last row.
+          schema: { type: string }
       responses:
         "200":
           content:
@@ -1271,7 +1294,17 @@ paths:
   /invites:
     get:
       summary: List active invites (manage_invites)
+      description: Newest first. Paged only on hubs advertising `list.cursor.lists`.
       tags: [Invites]
+      parameters:
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `code` of the previous page's last row.
+          schema: { type: string }
       responses:
         "200":
           content:
@@ -1458,7 +1491,17 @@ paths:
   /moderation/bans:
     get:
       summary: List bans (manage_users)
+      description: Newest first. Paged only on hubs advertising `list.cursor.lists`.
       tags: [Moderation]
+      parameters:
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `target_public_key` of the previous page's last row.
+          schema: { type: string }
     post:
       summary: Ban a user (manage_users)
       tags: [Moderation]
@@ -1485,7 +1528,17 @@ paths:
   /moderation/mutes:
     get:
       summary: List mutes (manage_users)
+      description: Newest first. Paged only on hubs advertising `list.cursor.lists`.
       tags: [Moderation]
+      parameters:
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `target_public_key` of the previous page's last row.
+          schema: { type: string }
     post:
       summary: Mute a user (manage_users)
       tags: [Moderation]
@@ -3282,11 +3335,20 @@ paths:
   /channels/{channel_id}/pins:
     get:
       summary: List pinned messages in a channel
+      description: Newest pin first. Paged only on hubs advertising `list.cursor.lists`.
       tags: [Messages]
       parameters:
         - name: channel_id
           in: path
           required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `message_id` of the previous page's last row.
           schema: { type: string }
       responses:
         "200":
@@ -3959,6 +4021,44 @@ paths:
   # ── Polls ─────────────────────────────────────────────────────────────────
 
   /channels/{channel_id}/polls:
+    get:
+      summary: List polls in a channel
+      description: Newest first. Paged only on hubs advertising `list.cursor.lists`.
+      tags: [Polls]
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size, clamped to 1..500.
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          description: Keyset cursor — the `id` of the previous page's last row.
+          schema: { type: string }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    channel_id: { type: string }
+                    creator_pubkey: { type: string }
+                    question: { type: string }
+                    options: { type: string, description: "JSON-encoded array of {id, text}" }
+                    ends_at: { type: integer, nullable: true }
+                    max_choices: { type: integer }
+                    created_at: { type: integer }
+                    totals:
+                      type: object
+                      additionalProperties: { type: integer }
+                      description: option_id → vote count
     post:
       summary: Create a poll in a channel (send_messages)
       description: Also posts a system card message into the channel. At least 2 options required.

@@ -4,6 +4,23 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **Web and desktop can pair with each other (2026-09-06)**: they could not,
+  in either direction, and nothing said so — the paste was rejected as
+  invalid. Web handed the new device `base64({hub, token})`, a pointer to an
+  offer the hub holds; desktop's `parse_pairing_offer` wants the signed
+  `PairingOffer` JSON that [multi-device.md](multi-device.md) specified from
+  the start. The offer won (decisions.md, "The pairing code is the signed
+  offer itself, not a pointer to it"): it carries the master pubkey over the
+  channel the user actually trusts — their other device's screen — where the
+  pointer left the hub free to answer with a master of its own choosing, and
+  it carries the home hub list, so one unreachable hub cannot block pairing.
+  Web now shows the offer verbatim, and its claim verifies the signature,
+  checks expiry, tries every hub in `home_hubs` in turn, and refuses a
+  completion whose cert names a different master than the code did.
+  `verifyPairingOffer` in `packages/core`; the desktop client is unchanged.
+  `02-pairing-web-desktop` drives the whole thing across two real clients and
+  ends on the hub's own device registry holding the cert.
+
 - **A desktop DM reaches the hub, and reaches it encrypted (2026-09-06)**: the
   desktop client signed everything a hub verifies with the wrong key. It was
   found as "a DM sent from desktop reaches nothing, silently" and it was not a

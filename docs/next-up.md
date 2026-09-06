@@ -150,10 +150,10 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
   `connectOverCDP`, with `WAVVON_DESKTOP_HOME` keeping a run out of the
   developer's own `~/.wavvon`. It found three bugs on its first run, all in
   Known issues below. Left:
-  - **pairing**, which cannot be specced until the two clients can read each
-    other's pairing code at all (Known issues). The shape is now decided —
-    decisions.md, "The pairing code is the signed offer itself" — so what is
-    left is web emitting and parsing the offer, then the spec.
+  - the **desktop→web** pairing direction: `02-pairing-web-desktop` drives
+    web offering and desktop claiming, and the reverse — desktop generating
+    the code, a fresh browser claiming it — is the same protocol from the
+    other end and is not driven yet.
   - the desktop→web DM leg is done (shipped log): the fix was not in the DM
     path but in **which identity the desktop signs as**, and it left a
     question worth carrying — every hub-verified signature now routes through
@@ -233,17 +233,6 @@ Committed, cannot proceed.
 **Open, and not necessarily scheduled** — a bug being listed here says it is
 real and unfixed, not that anyone is on it. When one is fixed its entry moves
 to the [shipped log](shipped-log.md).
-
-- **Web and desktop cannot pair with each other, in either direction.** Found
-  2026-09-06 while writing the pairing half of that harness. The two clients
-  speak different pairing payloads: web's code is
-  `base64({hub, token})` (`DevicesSection.tsx` and `IdentitySetupScreen.tsx`),
-  while desktop's claim runs the pasted text through `parse_pairing_offer`,
-  which expects a full signed `PairingOffer` JSON. Neither can read the other's
-  code, so multi-device across the two clients does not work at all today —
-  and nothing says so: the paste is simply rejected as invalid. Deciding which
-  shape wins is a design question, not a fix: desktop's carries a signature and
-  the home hub list, web's is short enough to hand around.
 
 - **Desktop has no way to set a display name while onboarding.** The nickname
   step (`ProfileSetupStep`) and the post-join prompt (`showDisplayNamePrompt`)

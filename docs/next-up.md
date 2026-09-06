@@ -144,14 +144,16 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
     restore-with-new path it names has never been walked end to end, because
     doing that needs two hub binaries carrying two PostgreSQL majors.
 
-- [ ] **Desktop live-drive verification — DMs and pairing.** Both are pinned
-  by cross-language vector tests and neither has been driven in a real desktop
-  app: a web↔desktop DM exchange, and web↔desktop *pairing* (Mechanism A,
-  shipped 2026-08-08). Same session, same harness — Tauri dev +
+- [ ] **Desktop live-drive verification — the tail.** The harness exists
+  (2026-09-06, shipped log): `clients/apps/web/e2e/desktop/`, Tauri dev +
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port` + Playwright
-  `connectOverCDP`. A paired device is where a wrong DH scalar fails silently
-  rather than loudly, and this missing harness is why the DM bugs survived so
-  long. Build it reusable.
+  `connectOverCDP`, with `WAVVON_DESKTOP_HOME` keeping a run out of the
+  developer's own `~/.wavvon`. It found three bugs on its first run, all in
+  Known issues below. Left:
+  - the **desktop→web DM** leg, which is one of those bugs rather than a
+    missing spec — D01 reproduces it and is left failing;
+  - **pairing**, which cannot be specced until the two clients can read each
+    other's pairing code at all (Known issues).
 
 - [ ] **App.tsx refactor — desktop parity + convergence.** Web 1,665 lines /
   desktop 1,793, counted 2026-09-06. The hook-extraction phase landed
@@ -224,6 +226,34 @@ Committed, cannot proceed.
 **Open, and not necessarily scheduled** — a bug being listed here says it is
 real and unfixed, not that anyone is on it. When one is fixed its entry moves
 to the [shipped log](shipped-log.md).
+
+- **A DM sent from the desktop app reaches nothing, silently.** Found
+  2026-09-06 by the new desktop harness. The composer takes the text and
+  clears on Enter, the hub gains no `dm_messages` row, and no error, toast or
+  encryption warning appears anywhere. The same spec passes web→desktop in the
+  same conversation — the desktop app receives and decrypts what the web client
+  encrypted — so the keys, the session and the conversation are all fine and
+  the failure is one-directional. Reproduced twice against the database;
+  `clients/apps/web/e2e/desktop/01-dm-web-desktop.spec.ts` is left failing as
+  the reproduction. Not yet diagnosed: the send path is
+  `apps/desktop/src/hooks/useDms.ts` into the `send_dm` Tauri command.
+
+- **Web and desktop cannot pair with each other, in either direction.** Found
+  2026-09-06 while writing the pairing half of that harness. The two clients
+  speak different pairing payloads: web's code is
+  `base64({hub, token})` (`DevicesSection.tsx` and `IdentitySetupScreen.tsx`),
+  while desktop's claim runs the pasted text through `parse_pairing_offer`,
+  which expects a full signed `PairingOffer` JSON. Neither can read the other's
+  code, so multi-device across the two clients does not work at all today —
+  and nothing says so: the paste is simply rejected as invalid. Deciding which
+  shape wins is a design question, not a fix: desktop's carries a signature and
+  the home hub list, web's is short enough to hand around.
+
+- **Desktop has no way to set a display name while onboarding.** The nickname
+  step (`ProfileSetupStep`) and the post-join prompt (`showDisplayNamePrompt`)
+  are both web-only, so a fresh desktop identity joins every hub with an empty
+  `display_name` and appears in the member list as `public_key.slice(0, 16)`
+  until the user finds the profile editor. Found 2026-09-06.
 
 - **Voice audio was choppy across the internet** — cause found and fixed
   2026-08-21 (no playout scheduling in the web client; see shipped log). The

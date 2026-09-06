@@ -4,6 +4,29 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **Playwright drives the real desktop app now (2026-09-06)**: WebView2 is
+  Chromium, so the Tauri window speaks CDP when it is started with
+  `--remote-debugging-port`. `clients/apps/web/e2e/desktop/` sets that through
+  `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, spawns `tauri dev`, waits for the
+  port and connects — the app's own page, its real IPC and Rust commands and
+  its file-backed account store, none of which a browser context touches. It
+  lives beside the web suite because half of every spec is the web client, and
+  it is a separate Playwright project (`desktop`) that CI never runs.
+  `accounts.rs` gained `WAVVON_DESKTOP_HOME` for it: without a way to move that
+  root, the harness drives the developer's own `~/.wavvon`.
+  **It found three things before it was green, which is the whole argument for
+  it.** A DM sent *from* desktop reaches nothing — the composer clears, the hub
+  gains no `dm_messages` row, and no error or encryption warning appears
+  anywhere; web→desktop passes in the same spec, so the Rust side decrypts what
+  TypeScript encrypted and the failure is one-directional and silent. Web and
+  desktop **cannot pair with each other at all**: web's pairing code is
+  `base64({hub, token})` and desktop's claim wants a signed `PairingOffer`
+  JSON, so neither reads the other's code in either direction and the pairing
+  spec this item asked for cannot be written yet. And desktop has no way to set
+  a display name while onboarding — the nickname step and the post-join prompt
+  are both web-only — so a fresh desktop identity joins as a bare pubkey.
+  The DM spec is **left failing on purpose**: it is the reproduction, in a
+  project nothing else runs.
 - **The list-endpoint pagination sweep is finished (2026-09-06)**: seven more
   lists take `limit` and a keyset `cursor` — `/moderation/bans`,
   `/moderation/mutes`, `/invites`, `/hub/pending`, `/conversations`,

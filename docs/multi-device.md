@@ -125,6 +125,13 @@ User taps "Pair a device" on E. E:
    reachable home hub.
 4. Renders the QR code from the JSON payload.
 
+The **pairing code both clients read is that JSON**, verbatim — signature
+included — whether it travels as a QR or as text someone copies. A shorter
+form that names only the hub and the token was tried on web and removed
+(decisions.md, "The pairing code is the signed offer itself, not a pointer to
+it"): it left the master pubkey to be learned from the hub, which is the one
+party the code exists to be independent of.
+
 ### Step 3 — N scans
 
 N decodes the QR. It now knows: master pubkey, home hub list,

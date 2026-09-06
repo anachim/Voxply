@@ -4,6 +4,39 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A desktop DM reaches the hub, and reaches it encrypted (2026-09-06)**: the
+  desktop client signed everything a hub verifies with the wrong key. It was
+  found as "a DM sent from desktop reaches nothing, silently" and it was not a
+  DM bug: an entropy-holding identity presents a **self-signed cert** at
+  `/auth/verify` so the hub learns which master its roster pubkey belongs to
+  (without that link no hub can resolve a home hub list), and a hub meeting
+  that identity for the first time seats the **master** as the user — the
+  hub's `resolve_canonical_identity`, "brand-new paired device" branch. The
+  desktop client never learned that: it claimed and signed as its own device
+  key everywhere. So the hub rejected the DM envelope
+  (`Invalid envelope signature`), and `publish_dh_key` wrote the DH record
+  under a pubkey with no `users` row — which is why the *other* direction
+  arrived in **plaintext**: web looked up a key that was never stored.
+  Web has none of this because a primary web device authenticates with no
+  cert, so its canonical *is* its own key, and it already carries
+  `canonical_pubkey` for the paired case.
+  The fix is one resolver, `auth_creds::hub_identity`, and every hub-verified
+  signature routed through it: the DR envelope, the group envelope, group
+  sender-key distribution, the DH key record (published per hub now, since the
+  canonical differs per hub), and `get_my_public_key`, which is what the UI
+  compares against to answer "is this mine". A paired device signs with its
+  subkey and the envelope carries its cert, which is the shape web has sent
+  since paired-device DMs landed. Two envelope-shape bugs died on the way: the
+  v2 envelope omitted `nonce_hex` entirely, which the hub requires, so every
+  desktop DM 422'd before any of the above was reachable.
+  `01-dm-web-desktop` passes both legs, and both rows are stored encrypted.
+  The harness itself needed two fixes to be believed: `beforeAll` inherits the
+  test timeout, so its 300-second wait for the debug port was being killed at
+  30, and the app survived the kill — three windows were left running, and the
+  next run attached to one of *them* and reported what a stale build did. It
+  now refuses to start when the debug port already answers, and kills by pid
+  every app process that appeared since launch.
+
 - **Playwright drives the real desktop app now (2026-09-06)**: WebView2 is
   Chromium, so the Tauri window speaks CDP when it is started with
   `--remote-debugging-port`. `clients/apps/web/e2e/desktop/` sets that through

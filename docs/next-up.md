@@ -150,10 +150,17 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
   `connectOverCDP`, with `WAVVON_DESKTOP_HOME` keeping a run out of the
   developer's own `~/.wavvon`. It found three bugs on its first run, all in
   Known issues below. Left:
-  - the **desktop→web DM** leg, which is one of those bugs rather than a
-    missing spec — D01 reproduces it and is left failing;
   - **pairing**, which cannot be specced until the two clients can read each
-    other's pairing code at all (Known issues).
+    other's pairing code at all (Known issues). The shape is now decided —
+    decisions.md, "The pairing code is the signed offer itself" — so what is
+    left is web emitting and parsing the offer, then the spec.
+  - the desktop→web DM leg is done (shipped log): the fix was not in the DM
+    path but in **which identity the desktop signs as**, and it left a
+    question worth carrying — every hub-verified signature now routes through
+    `auth_creds::hub_identity`, but a *paired* desktop device still signs
+    group envelopes and sender-key distributions with its subkey, which the
+    hub verifies against the canonical with no cert tier. Same gap on web.
+    Nothing exercises it yet.
 
 - [ ] **App.tsx refactor — desktop parity + convergence.** Web 1,665 lines /
   desktop 1,793, counted 2026-09-06. The hook-extraction phase landed
@@ -226,17 +233,6 @@ Committed, cannot proceed.
 **Open, and not necessarily scheduled** — a bug being listed here says it is
 real and unfixed, not that anyone is on it. When one is fixed its entry moves
 to the [shipped log](shipped-log.md).
-
-- **A DM sent from the desktop app reaches nothing, silently.** Found
-  2026-09-06 by the new desktop harness. The composer takes the text and
-  clears on Enter, the hub gains no `dm_messages` row, and no error, toast or
-  encryption warning appears anywhere. The same spec passes web→desktop in the
-  same conversation — the desktop app receives and decrypts what the web client
-  encrypted — so the keys, the session and the conversation are all fine and
-  the failure is one-directional. Reproduced twice against the database;
-  `clients/apps/web/e2e/desktop/01-dm-web-desktop.spec.ts` is left failing as
-  the reproduction. Not yet diagnosed: the send path is
-  `apps/desktop/src/hooks/useDms.ts` into the `send_dm` Tauri command.
 
 - **Web and desktop cannot pair with each other, in either direction.** Found
   2026-09-06 while writing the pairing half of that harness. The two clients

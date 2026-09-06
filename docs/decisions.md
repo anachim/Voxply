@@ -6,6 +6,61 @@ the top. This file holds the most recent entries; older ones are
 relocated verbatim to [decisions-archive.md](decisions-archive.md)
 so this file stays small enough to read whole.
 
+## The pairing code is the signed offer itself, not a pointer to it
+
+**Decision** (2026-09-06): the string an existing device shows and a new device
+pastes is the whole master-signed `PairingOffer` — `master_pubkey`,
+`home_hubs`, `pairing_token`, `issued_at`, `expires_at`, `signature` — as
+JSON, which is what [multi-device.md](multi-device.md) §"QR pairing protocol"
+specified all along and what the desktop client already builds and parses.
+The web client's shorter `base64({hub, token})` is the one that goes.
+
+This was found as a bug rather than chosen as a design: the two clients emitted
+different payloads, so **web and desktop could not pair in either direction**
+and the paste was simply rejected as invalid (2026-09-06, desktop harness).
+Something had to win; this is the reasoning for which.
+
+**The offer carries the master pubkey out of band, and the pointer does not.**
+With a pointer, everything the new device learns about *whose* identity it is
+joining comes from the hub: it claims with a token, and accepts whatever
+`SubkeyCert` comes back, verifying that cert against the master pubkey named
+inside the cert. A hostile or compromised hub can therefore answer with a cert
+under a master of its own choosing, and the new device pairs into the
+attacker's identity while showing the user a successful pairing. With the offer
+in the code, the master pubkey travelled over the same out-of-band channel the
+user already trusts — their own screen — so the cert is checked against a
+pubkey the hub never got to choose.
+
+**The offer also carries the home hub list**, which is what lets the claiming
+device try each hub in turn. The pointer names one hub, so a single unreachable
+or hostile home hub blocks pairing — the property multi-device.md §"Security
+properties" spends a line rejecting.
+
+**Alternatives considered.**
+
+*The pointer wins, and both clients shorten to it.* Rejected on the two points
+above. It is genuinely shorter — ~60 characters against ~400 — but nothing in
+either client asks a human to retype the code: it is copied, or it is a QR.
+
+*Both clients accept both shapes.* Rejected. It is the smallest diff and it
+leaves two wire shapes for one thing forever, with the weaker one still
+reachable — a pairing that quietly loses the master binding depending on which
+client generated the code.
+
+*Keep base64 around the JSON so the code stays one opaque token.* Not taken:
+the desktop client already emits raw JSON and reads raw JSON, so raw JSON costs
+one client no change at all. The payload is single-line either way.
+
+**Tradeoff.** The code is long, and it looks like machine output rather than
+something a person could read aloud. That is the honest shape of it: a pairing
+code that a person *could* retype would not be carrying a signature.
+
+**Outcome.** Web builds the offer already (`buildPairingOffer` in
+`packages/core`) — it just never showed it. The change is which string the
+pairing UI displays, plus a `verifyPairingOffer` on the claiming side, plus
+claiming against `home_hubs` in order instead of one hub. The desktop client
+is unchanged.
+
 ## Leaving a hub clears the profile and the membership, and keeps the pubkey as an anchor
 
 **Decision** (2026-09-05, design; execution in next-up.md): a person can ask a

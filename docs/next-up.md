@@ -149,11 +149,8 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port` + Playwright
   `connectOverCDP`, with `WAVVON_DESKTOP_HOME` keeping a run out of the
   developer's own `~/.wavvon`. It found three bugs on its first run and all
-  three are fixed (shipped log). Left:
-  - the **desktop→web** pairing direction: `02-pairing-web-desktop` drives
-    web offering and desktop claiming, and the reverse — desktop generating
-    the code, a fresh browser claiming it — is the same protocol from the
-    other end and is not driven yet.
+  three are fixed (shipped log). DM and pairing are driven in both directions
+  (`01`–`03`). Left:
   - the desktop→web DM leg is done (shipped log): the fix was not in the DM
     path but in **which identity the desktop signs as**, and it left a
     question worth carrying — every hub-verified signature now routes through

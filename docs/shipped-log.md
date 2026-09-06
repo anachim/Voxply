@@ -14,6 +14,12 @@ the roadmap; design rationale lives in [decisions.md](decisions.md).
   identity joins with no name, and applies the default profile silently
   instead when there is one, the same condition web uses.
 
+- **Pairing is driven in both directions (2026-09-06)**:
+  `03-pairing-desktop-web` has the desktop app issue the code and a fresh
+  browser claim it, which is the shape of "I installed the web client on a
+  second machine". With `02` it says the two clients agree on the payload
+  both ways rather than happening to meet one way.
+
 - **Web and desktop can pair with each other (2026-09-06)**: they could not,
   in either direction, and nothing said so — the paste was rejected as
   invalid. Web handed the new device `base64({hub, token})`, a pointer to an

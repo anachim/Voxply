@@ -110,6 +110,13 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
     accept the hub's self-signed cert through `serverCertificateHashes`. What
     no spec here can do is prove a datagram carried audio, and two clients on a
     real network remains the only thing that does;
+  - **`54-ttt-game` fails on the runner, every run.** It waits 30s for the
+    bot to come up and gives up (line 58), so the workflow has been red on
+    every push for days regardless of what the push contained. It is skipped
+    locally, which is why nothing local sees it. Until it is fixed or skipped
+    in CI too, a red live run says nothing — the useful signal is the *list*
+    of failures, not the colour: the 2026-09-06 pairing work took the run from
+    three failures to this one.
 
 - [ ] **Topology e2e — the stages not yet built.** `e2e-topology/` at the
   monorepo root drives real hub binaries plus the discovery site: alliance

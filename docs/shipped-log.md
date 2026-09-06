@@ -4,6 +4,16 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A desktop identity gets asked its name (2026-09-06)**: the display-name
+  prompt was web-only, and so was the onboarding nickname step, so a fresh
+  desktop identity joined every hub with an empty `display_name` and sat in
+  the roster as a slice of its pubkey until the user found the profile editor.
+  The prompt is now `DisplayNamePrompt` in `packages/ui`, holding its own
+  draft — which is what makes it reusable, and what let web drop the three
+  props it threaded through `App.tsx` for it. Desktop asks on the first hub an
+  identity joins with no name, and applies the default profile silently
+  instead when there is one, the same condition web uses.
+
 - **Web and desktop can pair with each other (2026-09-06)**: they could not,
   in either direction, and nothing said so — the paste was rejected as
   invalid. Web handed the new device `base64({hub, token})`, a pointer to an

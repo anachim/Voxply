@@ -148,8 +148,8 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
   (2026-09-06, shipped log): `clients/apps/web/e2e/desktop/`, Tauri dev +
   `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port` + Playwright
   `connectOverCDP`, with `WAVVON_DESKTOP_HOME` keeping a run out of the
-  developer's own `~/.wavvon`. It found three bugs on its first run, all in
-  Known issues below. Left:
+  developer's own `~/.wavvon`. It found three bugs on its first run and all
+  three are fixed (shipped log). Left:
   - the **desktop→web** pairing direction: `02-pairing-web-desktop` drives
     web offering and desktop claiming, and the reverse — desktop generating
     the code, a fresh browser claiming it — is the same protocol from the
@@ -233,12 +233,6 @@ Committed, cannot proceed.
 **Open, and not necessarily scheduled** — a bug being listed here says it is
 real and unfixed, not that anyone is on it. When one is fixed its entry moves
 to the [shipped log](shipped-log.md).
-
-- **Desktop has no way to set a display name while onboarding.** The nickname
-  step (`ProfileSetupStep`) and the post-join prompt (`showDisplayNamePrompt`)
-  are both web-only, so a fresh desktop identity joins every hub with an empty
-  `display_name` and appears in the member list as `public_key.slice(0, 16)`
-  until the user finds the profile editor. Found 2026-09-06.
 
 - **Voice audio was choppy across the internet** — cause found and fixed
   2026-08-21 (no playout scheduling in the web client; see shipped log). The

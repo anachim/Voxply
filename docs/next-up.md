@@ -203,9 +203,24 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
       browser reloads), the custom-theme store and the recovery phrase;
       desktop handles those in `AccountRoot` and `ManageAccountsTab`. The
       union would be mostly `if (web)`.
-    - `useDms` (141/358), `useScreenShare` (146/327), `useVideo` (144/331) —
-      the size gap is platform transport, not drift. Worth doing last, and
-      only if the deps object stays smaller than what it replaces.
+    - `useDms` (142/361) — **the one real pair left.** Web reaches for four
+      platform functions; desktop's eleven `invoke`s are the same operations
+      plus its local store. Seven returned keys match outright and several
+      more differ only in name (`handleSelectConversation`/`selectConversation`,
+      `handleStartConversation`/`startDmWith`, `onDm`/`onDmEvent`), so the
+      deps object would be smaller than what it replaces. One union item is
+      already visible: `encryptionWarning` ships on desktop and not on web.
+    - `useScreenShare` (16 returned keys web / 5 desktop, **1 in common**) and
+      `useVideo` (9 / 16, **1 in common**) — **not pairs at all, and the
+      earlier note here claiming "the size gap is platform transport, not
+      drift" was wrong** (measured 2026-09-07). They have diverged in
+      *features*, in both directions: web owns screen-share viewing, hub
+      streams, subscriptions and watch/stop-watch while desktop owns only
+      start/stop; desktop owns video backgrounds, camera switching, device
+      selection and pinning while web owns the remote-stream plumbing.
+      Converging them means building the missing halves first — that is
+      **parity work, filed above**, not a hoist, and treating it as a hoist
+      would silently drop whichever side went second.
   - Not worth extracting (checked 2026-07-27): message send/edit.
 
 - [ ] **First external operator pilot.** A hub is live on an external

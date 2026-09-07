@@ -17,6 +17,22 @@ the roadmap; design rationale lives in [decisions.md](decisions.md).
   second answer to the same missing feature. Not a leak (it was encrypted, to
   the wrong subset) but a silent wrong answer.
 
+- **A desktop moderator can see the report queue (2026-09-08)**: desktop had
+  **no moderation surface at all** — its admin page did not pass
+  `renderModerationTab`, because there was nothing to put in it — so a hub
+  moderated from the desktop app could not see what its members had flagged.
+  `ContentReportsSection` is now in `packages/ui`, prop-only: web passes its
+  platform functions, desktop passes new `list_reports` / `review_report`
+  commands on the active session. One section rather than the whole tab: the
+  automod webhook, federated ban lists, the outgoing-webhook manager and the
+  full-archive export each need their own transport half, and four at once is
+  a diff nobody can review. Neither client had e2e coverage for this, which
+  matters more once one component serves two transports — `18-admin-cluster`
+  now opens the tab and asserts the queue renders (an error would render in
+  its place). Re-auditing the parity list on the way found most of it stale:
+  link previews, role categories, passkeys and trusted devices are on both
+  clients already, and the moderation suite is the whole of what is left.
+
 - **The sensitivity slider applies, and is where you can reach it
   (2026-09-07)**: the other half of the VAD known issue, and it was a
   **divergence rather than a missing feature**. `effectiveVad`'s own comment

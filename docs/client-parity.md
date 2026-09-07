@@ -167,13 +167,25 @@ Everything here is **portable** (no native API) unless marked native-only.
 
 ### Where web is ahead of desktop (parity is bidirectional)
 
-Web should not regress these; desktop should catch up:
-events with role slots + reminders, soundboard, full encrypted
-data-export archive, channel permission-overwrite tab, role categories +
-per-role color/icon, the quiet-hours schedule (deferred everywhere; DND
-itself is on web + desktop now), the moderation suite (content reports,
-automod webhook, outgoing webhooks, federated ban lists), link previews,
-and passkeys + hub trusted-devices.
+**Re-audited 2026-09-08 against the code, and most of this list was stale** —
+it dated from the 2026-07-04 audit and later waves closed items without
+updating it. Present on **both** clients now: link previews, role categories
+with per-role colour/icon, passkeys, hub trusted devices. Not present on
+either under any name: the channel permission-overwrite tab, event role slots,
+the quiet-hours schedule.
+
+What is genuinely still web-only is **the moderation suite**, and it is the
+whole of desktop's remaining admin gap: `AutomodWebhookSection`,
+`FederatedBanlistSection`, `FullArchiveSection`, `OutgoingWebhooksSection` —
+about 1,200 lines of web-local components plus the Tauri commands each needs.
+`ContentReportsSection` was the fifth and **shipped to desktop 2026-09-08**
+(shipped log): hoisted to `packages/ui`, desktop gained `list_reports` /
+`review_report` and a moderation tab to hold them. The rest follow one
+section at a time, for the same reason — each is its own transport half.
+
+Still web-only beyond that: events with role slots + reminders, the full
+encrypted data-export archive.
+
 
 Added 2026-09-07: **the mic test's verdict** — web's meter now names the case
 where your voice never crosses the transmit gate. Not a gap to close: the

@@ -4,6 +4,19 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A web group DM is refused rather than encrypted to one member
+  (2026-09-07)**: group DMs use sender keys, which the web client does not
+  implement — and it knows, because reading one renders "🔒 Encrypted message
+  (upgrade client to read)". Sending had no such check: `sendDm` took
+  `members.find(m => m !== me)`, which in a group is whichever member comes
+  first, opened a 1:1 ratchet with them and posted that. One member could
+  read it, everyone else got an undecryptable message, and the sender was told
+  it was sent. Reachable, because a desktop client can create a group
+  containing a web user. Now refused with a sentence saying why and what to
+  use instead — the same answer the read path already gave, rather than a
+  second answer to the same missing feature. Not a leak (it was encrypted, to
+  the wrong subset) but a silent wrong answer.
+
 - **The mic test says whether anyone would actually hear you (2026-09-07)**:
   gating transmission on speech turned the VAD threshold from something that
   controlled an *indicator* into something that controls audibility, and the

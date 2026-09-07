@@ -4,6 +4,26 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A rate-limited bot no longer dies waiting to be invited (2026-09-07)**:
+  `ttt-bot` retried only `403 bot_not_invited`; any other failure escaped
+  through `?` and ended `main`. The one that happens is `429` — the hub's auth
+  limiter is per-IP (burst 10, refill 1/s) and shared with everything else
+  authenticating from that address, and in CI the hub, the bot and the whole
+  browser suite are all on `localhost`. About five minutes into its wait the
+  bot collected a 429 it had done nothing to earn and exited, so when
+  `54-ttt-game` invited it moments later there was no process left to accept:
+  the poll for its registered `ttt` command timed out on every run and the
+  live workflow was red on every push, whatever the push contained. An attempt
+  is now `try_authenticate` — `Ok(None)` for "not invited yet", `Err` for a
+  failed attempt — and the caller logs and retries either way;
+  `/auth/challenge` gained `error_for_status()` so a rate-limited response
+  says 429 instead of failing to parse its own body as JSON, which is the
+  shape the failure took first. Proven against a real hub with the auth bucket
+  deliberately drained: the bot logs the 429s, keeps waiting, authenticates
+  when the bucket refills, and the spec passes end to end. That was also
+  `54-ttt-game`'s **first local run** — it skips itself without
+  `TTT_BOT_PUBKEY`, which is exactly why nothing local had ever seen this.
+
 - **A desktop identity gets asked its name (2026-09-06)**: the display-name
   prompt was web-only, and so was the onboarding nickname step, so a fresh
   desktop identity joined every hub with an empty `display_name` and sat in

@@ -4,6 +4,24 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **An unreadable outbox row bounces instead of going out hollow
+  (2026-09-07)**: follow-through on the loud-but-not-correct change made
+  earlier the same day. A queued federated DM whose stored envelope would not
+  parse had that envelope dropped and was delivered anyway — an encrypted DM
+  carrying nothing, indistinguishable at the far end from a tampered message,
+  and recorded here as delivered. Refusing was only half the job: `tick`
+  propagated `load_envelope`'s error, so refusing there would abort the whole
+  pass and the next pass would start on the same row, parking every other
+  queued DM behind one bad one. The two failures are now distinct — a
+  database that cannot be read still ends the pass, because that is about
+  every message; an unreadable row bounces alone with the reason in
+  `last_error`, exactly as a delivery that kept failing already does. Still
+  nothing observed producing one (this code wrote the JSON on send), but this
+  crate changes envelope formats without migrating what is already queued,
+  which is that shape precisely, and both the old symptom and the naive fix
+  were silent. Tested with one unreadable row and one healthy row in the same
+  tick: the first bounces named, the second still gets its attempt.
+
 - **A web DM can no longer leave unencrypted without being asked
   (2026-09-07)**: `sendDm` looked up the recipient's DH key and, on a null
   answer, posted the message to the hub **in the clear and said nothing**. Two

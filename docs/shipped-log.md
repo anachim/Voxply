@@ -17,6 +17,25 @@ the roadmap; design rationale lives in [decisions.md](decisions.md).
   second answer to the same missing feature. Not a leak (it was encrypted, to
   the wrong subset) but a silent wrong answer.
 
+- **The sensitivity slider applies, and is where you can reach it
+  (2026-09-07)**: the other half of the VAD known issue, and it was a
+  **divergence rather than a missing feature**. `effectiveVad`'s own comment
+  said it mirrored `effective_config` in the desktop pipeline; on the standard
+  profile it did not — desktop reads
+  `self.vad_threshold.unwrap_or(DEFAULT_VAD_THRESHOLD)`, web ignored the
+  user's value and always used the constant. So the setting that decides
+  whether anyone hears you behaved differently on the two clients, and web's
+  only control for it lived inside the *custom* audio panel: reachable by
+  switching profile, and inert until you did. Web now takes desktop's model —
+  `vadThreshold` applies under every gating profile, `customVadThreshold`
+  overrides it inside custom, and custom **inherits** the general value when it
+  has none of its own (`custom_vad_threshold.or(vad_threshold)`, rather than
+  resetting to the constant and undoing a setting made outside the panel).
+  The control sits directly under the mic meter, because it is the line drawn
+  on it; when custom is overriding it, the panel says so with the value rather
+  than letting the slider look broken. Worth naming the direction: **desktop
+  was ahead**, and the parity doc had this filed the other way round.
+
 - **The mic test says whether anyone would actually hear you (2026-09-07)**:
   gating transmission on speech turned the VAD threshold from something that
   controlled an *indicator* into something that controls audibility, and the

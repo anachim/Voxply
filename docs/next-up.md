@@ -273,24 +273,6 @@ to the [shipped log](shipped-log.md).
   jitter only exists on a real network, so **the audible confirmation is still
   outstanding** — it needs a session on the pilot. Reopen this if it persists.
 
-- **The VAD threshold now decides audibility, and only the custom profile can
-  change it.** Gating transmission on speech (2026-08-22) turned a threshold
-  that used to control an *indicator* into one that controls whether anyone
-  hears you. 0.02 RMS sits comfortably between room noise and normal speech, and
-  the 400 ms release means no clipped syllables, so this is a risk rather than a
-  known failure — but a quiet mic that used to be heard without lighting up the
-  speaking indicator is now a quiet mic nobody hears. The sensitivity slider
-  exists only under the **custom** audio profile; standard gets a fixed
-  constant and no way to lower it.
-  **The second half of that is done on web (2026-09-07, shipped log)**: the
-  mic test draws the gate on its bar and, after four seconds, says which of
-  three things happened — nothing arriving (a device), arriving but never
-  crossing (the sensitivity, the case nothing could previously express), or
-  crossing it. So someone in this situation is now told, in the place they
-  would go to check. What is still open: **the slider is still custom-only**,
-  and **desktop's own copy of the meter says none of this**. Reopen as a bug
-  the first time someone reports going silent anyway.
-
 - **Discord importer needs a live run** — `export` with a real bot token +
   `apply` against a running hub never exercised live.
 

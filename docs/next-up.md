@@ -203,13 +203,22 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
       browser reloads), the custom-theme store and the recovery phrase;
       desktop handles those in `AccountRoot` and `ManageAccountsTab`. The
       union would be mostly `if (web)`.
-    - `useDms` (142/361) — **the one real pair left.** Web reaches for four
-      platform functions; desktop's eleven `invoke`s are the same operations
-      plus its local store. Seven returned keys match outright and several
-      more differ only in name (`handleSelectConversation`/`selectConversation`,
-      `handleStartConversation`/`startDmWith`, `onDm`/`onDmEvent`), so the
-      deps object would be smaller than what it replaces. One union item is
-      already visible: `encryptionWarning` ships on desktop and not on web.
+    - `useDms` (142/361) — **converges everywhere except the send.** The
+      returned keys line up (seven outright, three more differing only in
+      name), but that reading flattered it: reading the bodies, the two hooks
+      sit at *different layers*. Web's encryption is entirely in
+      `platform/commands/dms.ts` and the hook is a state container; desktop
+      keeps the whole decision tree inline — group vs 1:1, the `no_sender_key`
+      retry, `fetch_dh_key`, `init_dr_session`. Converging the send means
+      first moving desktop's tree into its own command layer, which is a
+      refactor of the DM path rather than a hoist. The state, selection,
+      loading and WS arms would converge cheaply, and save about as many lines
+      as the shared hook plus two adapters would add — so **not worth doing
+      for its own sake**; do it if the send path is being reworked anyway.
+      The union item that *was* visible is done: `encryptionWarning` shipped
+      on desktop only, and closing that gap is what surfaced the unencrypted
+      DM fallback (shipped log, 2026-09-07). `EncryptionWarningModal` now
+      lives in `packages/ui` and both clients use it.
     - `useScreenShare` (16 returned keys web / 5 desktop, **1 in common**) and
       `useVideo` (9 / 16, **1 in common**) — **not pairs at all, and the
       earlier note here claiming "the size gap is platform transport, not
@@ -272,9 +281,15 @@ to the [shipped log](shipped-log.md).
   known failure — but a quiet mic that used to be heard without lighting up the
   speaking indicator is now a quiet mic nobody hears. The sensitivity slider
   exists only under the **custom** audio profile; standard gets a fixed
-  constant and no way to lower it. Either surface the slider outside custom, or
-  have the mic-test meter say plainly when the level never crosses the gate.
-  Reopen as a bug the first time someone reports going silent.
+  constant and no way to lower it.
+  **The second half of that is done on web (2026-09-07, shipped log)**: the
+  mic test draws the gate on its bar and, after four seconds, says which of
+  three things happened — nothing arriving (a device), arriving but never
+  crossing (the sensitivity, the case nothing could previously express), or
+  crossing it. So someone in this situation is now told, in the place they
+  would go to check. What is still open: **the slider is still custom-only**,
+  and **desktop's own copy of the meter says none of this**. Reopen as a bug
+  the first time someone reports going silent anyway.
 
 - **Discord importer needs a live run** — `export` with a real bot token +
   `apply` against a running hub never exercised live.

@@ -4,6 +4,25 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **The mic test says whether anyone would actually hear you (2026-09-07)**:
+  gating transmission on speech turned the VAD threshold from something that
+  controlled an *indicator* into something that controls audibility, and the
+  level meter went on answering the old question — it moves cheerfully for a
+  microphone sitting below the gate, which is exactly the "it works, nobody
+  can hear me" case. The gate is now drawn on the bar at the threshold
+  actually in force (`effectiveVad`, so a custom profile is judged by its own
+  value), and after four seconds the meter gives one of **three** verdicts,
+  three because they send someone to three different places: nothing arriving
+  at all is a device or a permission; arriving but never crossing is the
+  sensitivity, and is the case nothing in the UI could previously express;
+  crossing it means the problem is elsewhere. Profiles with no gate (music,
+  custom with VAD off) say nothing rather than invent a sentence about a gate
+  that is not there. Verified in a browser — which also disproved the existing
+  spec's header claim that Chromium's fake capture device would not move the
+  bar. It does; that claim had only ever been checked against a meter that
+  said nothing either way. Still open: the sensitivity slider remains
+  custom-only, and desktop's own copy of the meter has none of this.
+
 - **An unreadable outbox row bounces instead of going out hollow
   (2026-09-07)**: follow-through on the loud-but-not-correct change made
   earlier the same day. A queued federated DM whose stored envelope would not

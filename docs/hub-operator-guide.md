@@ -304,11 +304,19 @@ is very likely fine and is not something we test. Take the backup.
   (UDP). No SSH from the internet.
 - [ ] **Service user**: run the hub as a dedicated non-root user.
   `hub_identity.json` must be readable only by that user (`chmod 600`).
-- [ ] **Backups**: schedule daily `sqlite3 hub.db ".backup ..."` + off-site copy
-  of `hub_identity.json`.
-- [ ] **Auth rate limiting**: the hub limits auth attempts to 10 per IP per
-  60-second window automatically. For additional protection, put a WAF in front
-  (e.g., Cloudflare, rate-limit at nginx).
+- [ ] **Backups**: schedule daily `wavvon-hub backup FILE` + an off-site copy of
+  `hub_identity.json`. (This line used to name a `sqlite3` command; SQLite has
+  never been a backend of this hub — see `decisions.md`, 2026-08-08 — and
+  `backup` goes through PostgreSQL's own `pg_dump`, bundled or not.)
+- [ ] **Auth rate limiting**: automatic, per IP, and a **token bucket** rather
+  than a fixed window: `WAVVON_AUTH_RATE_BURST` tokens (default 10) refilling
+  `WAVVON_AUTH_RATE_PER_SEC` per second (default 1). One login spends **two**
+  tokens — `/auth/challenge` then `/auth/verify` — so the default admits a
+  crowd of five arriving at once and one login every two seconds after that.
+  **Raise both if your members share an address** (an office, a school, a
+  campus, CGNAT): the limiter cannot tell them apart, and to someone who is
+  rate-limited the hub looks like one that will not have them. For additional
+  protection put a WAF in front (Cloudflare, or rate-limit at nginx).
 - [ ] **Approval gate**: consider enabling *require approval* in Hub Settings
   so new members are vetted before joining a community hub.
 - [ ] **PoW level**: set a minimum proof-of-work level (Hub Settings → Auth)

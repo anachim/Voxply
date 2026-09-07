@@ -110,6 +110,10 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
     accept the hub's self-signed cert through `serverCertificateHashes`. What
     no spec here can do is prove a datagram carried audio, and two clients on a
     real network remains the only thing that does;
+  - **[done 2026-09-07]** the residual flakiness — four specs, one cause, and
+    it was a product bug rather than a test one: a hub whose startup re-auth
+    met a 429 was dropped from the restored list silently, which is the
+    welcome screen (shipped log).
   - **[done 2026-09-07]** `54-ttt-game`, which had failed on the runner on
     every push for days: the demo bot exited on a `429` from the shared per-IP
     auth limiter while waiting to be invited, so the invite the spec sent

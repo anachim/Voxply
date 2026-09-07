@@ -4,6 +4,29 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A rate-limited startup no longer loses every hub (2026-09-07)**:
+  `restorePersistedHubs` skipped a hub on *any* error, in a `catch` with no
+  binding and a one-line comment about unreachable hubs. Right for a hub that
+  is gone, wrong for one answering "not now" — and the web client keeps its
+  token in `sessionStorage` unless asked to remember it, which nothing in the
+  UI asks, so that path re-authenticates on **every page load** against a
+  limiter the hub keys by IP (burst 10, refill 1/s) and shares with every
+  other tab and everyone else behind the same address. The user's hub vanished
+  and the welcome screen came back, with nothing said anywhere. A transient
+  failure (429, 5xx) is now retried at 1s and 2s — short, because the limiter
+  refills continuously and this is waiting for a token, not backing off from
+  an outage — while anything else still fails on the first attempt, so an
+  unreachable hub costs no extra startup time. The `catch` names the hub and
+  the error now instead of swallowing them. This was also the entirety of the
+  live suite's residual flakiness: all four flaky specs failed in
+  `expectInHub` with "Join hub" still visible, which is what an empty restored
+  hub list looks like. Reproduced by draining the hub's auth bucket and
+  running `33-moderation` — the trace pins a 429 on `/auth/challenge` — and
+  the same drained-bucket run passes with the fix. The Playwright report now
+  uploads on `always()`: a flaky run counts as success, so the traces of the
+  failed attempts were being thrown away, which is why the diagnosis had to
+  start from a local reproduction instead of from CI.
+
 - **A rate-limited bot no longer dies waiting to be invited (2026-09-07)**:
   `ttt-bot` retried only `403 bot_not_invited`; any other failure escaped
   through `?` and ended `main`. The one that happens is `429` — the hub's auth

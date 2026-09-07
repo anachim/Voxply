@@ -4,6 +4,37 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A failed re-auth no longer ends the session in place (2026-09-07)**: two
+  more dead ends of the same shape as the one below, on the live-connection
+  path. `ws.ts`'s `scheduleReconnect` handed over completely once the socket
+  had failed `REAUTH_AFTER_FAILURES` times — it called `onReauthNeeded` and
+  returned **without arming its own retry** — and the handler swallowed the
+  outcome (`.catch(() => {})`). A re-auth that failed for reasons that say
+  nothing about the session left no timer, no socket and no further attempt,
+  for as long as the tab stayed open; nothing else revives it, since the web
+  client listens for neither `online` nor `visibilitychange`. Meanwhile
+  `useHubConnection` had already announced "Disconnected from X.
+  Reconnecting…", so the UI kept promising a retry that no longer existed —
+  worse than silence. **Desktop never had this**: `useReconnectBackoff` keeps
+  trying and a failed manual attempt hands control back to the auto loop, a
+  divergence where desktop was ahead. The socket now arms its retry
+  regardless (a successful re-auth calls `close()`, which cancels that timer,
+  so no double socket), and the handler logs and guards against stacking
+  re-auths. Covered by a fake-WebSocket test that fails if the `return` comes
+  back.
+  The same commit widens the startup restore retry from [1s, 2s] to
+  [2s, 4s, 8s], and the reason is arithmetic rather than caution: **a
+  handshake is two limited requests** (`/auth/challenge`, then
+  `/auth/verify`) against a bucket that refills 1/s, so a 1s wait buys one
+  token, the challenge spends it, and verify meets an empty bucket again — a
+  1s retry against a drained limiter cannot succeed however often it runs.
+  That is what kept two specs flaky after the first fix (4 → 2, not 4 → 0):
+  the CI trace reads 200/429, wait 1s, 200/429, wait 2s, 429, give up.
+  `39-soundboard` met it directly and `46-badges` through the app's own
+  once-per-load reload, which runs the restore again *after* a successful
+  join. Reading that trace was only possible because the report upload had
+  just moved to `always()`.
+
 - **A rate-limited startup no longer loses every hub (2026-09-07)**:
   `restorePersistedHubs` skipped a hub on *any* error, in a `catch` with no
   binding and a one-line comment about unreachable hubs. Right for a hub that

@@ -4,6 +4,35 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **A web DM can no longer leave unencrypted without being asked
+  (2026-09-07)**: `sendDm` looked up the recipient's DH key and, on a null
+  answer, posted the message to the hub **in the clear and said nothing**. Two
+  ways to reach that null, and the second is the serious one:
+  1. the recipient genuinely has published no key — a real case, and the
+     user's call to make, which is what desktop had always done by stopping to
+     ask;
+  2. **the lookup merely failed.** `fetchDhKey` ended in `catch { return
+     null; }`, so a 429 off the hub's shared limiter, a hub mid-restart or a
+     blink of network was indistinguishable from "this person cannot receive
+     encrypted messages" — and the message went out readable, to the one
+     party end-to-end encryption exists to keep it from
+     ([decisions.md](decisions.md), "a hub holds what you signed or
+     encrypted"). It federates onward to the recipient's home hubs in the
+     clear too.
+  Now: `lookupDhKey` answers null **only** when the hub says there is no key
+  and throws on anything else, so a failed lookup surfaces as an error with
+  the composer untouched instead of a disclosure. A genuine absence asks —
+  web gained desktop's prompt, hoisted to `packages/ui` as
+  `EncryptionWarningModal` with its strings finally in the four catalogs
+  rather than hardcoded English, and desktop switched to it. **No callback
+  means no consent means no send**: refusing is the one direction that cannot
+  leak, so it is the default. The lenient `fetchDhKey` survives for voice key
+  distribution, where a missing key and a failed lookup genuinely do mean the
+  same thing (skip the peer, retry at the next rekey) — with a comment saying
+  never to decide encryption with it.
+  Four tests cover the branches; reintroducing the old lenient lookup turns
+  the 429 case from a rejection into `"sent"`, which is the bug, exactly.
+
 - **One `useAlliances` for both clients (2026-09-07)**: the fourth converged
   hook pair, and the one `next-up` had flagged as entangled — rightly. Unlike
   the first three these had not drifted in behaviour; they had split the same

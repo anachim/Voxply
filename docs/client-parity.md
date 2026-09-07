@@ -175,6 +175,21 @@ itself is on web + desktop now), the moderation suite (content reports,
 automod webhook, outgoing webhooks, federated ban lists), link previews,
 and passkeys + hub trusted-devices.
 
+Added 2026-09-07: **the mic test's verdict.** Web's meter draws the transmit
+gate on its bar and says which of three things happened after four seconds —
+nothing arriving, arriving but never crossing (the case that means nobody
+hears you, and the one the bar alone cannot show), or crossing it. Desktop
+has its own copy of `MicLevelMeter` with none of that. The decision itself is
+`micTestVerdict` beside `effectiveVad`, so the port is the rendering, not the
+thinking.
+
+Closed the same day, in the other direction: **the DM encryption warning.**
+Desktop stopped to ask before sending to a recipient with no published key;
+web did not, and sent in the clear. Now `EncryptionWarningModal` in
+`packages/ui`, used by both, with its strings in the catalogs rather than
+hardcoded English — and web's refusal is stricter than desktop's, since a
+*failed* key lookup is not a missing key (shipped-log, 2026-09-07).
+
 ### Present under a different name (NOT gaps)
 
 Badges/tags → `ServerTagsSection`; cert admin → `CertificationsSection`;

@@ -175,15 +175,20 @@ itself is on web + desktop now), the moderation suite (content reports,
 automod webhook, outgoing webhooks, federated ban lists), link previews,
 and passkeys + hub trusted-devices.
 
-Added 2026-09-07: **the mic test's verdict.** Web's meter draws the transmit
-gate on its bar and says which of three things happened after four seconds —
-nothing arriving, arriving but never crossing (the case that means nobody
-hears you, and the one the bar alone cannot show), or crossing it. Desktop
-has its own copy of `MicLevelMeter` with none of that. The decision itself is
-`micTestVerdict` beside `effectiveVad`, so the port is the rendering, not the
-thinking.
+Added 2026-09-07: **the mic test's verdict** — web's meter now names the case
+where your voice never crosses the transmit gate. Not a gap to close: the
+"False twin" row above already has it right, and desktop's meter answers the
+same question continuously with a draggable threshold. What *was* a gap ran
+the other way and is closed — see below.
 
-Closed the same day, in the other direction: **the DM encryption warning.**
+The gap that ran the other way, closed 2026-09-07: **the VAD sensitivity.**
+Desktop's `effective_config` had always honoured the user's threshold under
+the standard profile; web's `effectiveVad` ignored it while its comment
+claimed to mirror desktop, so web's only control lived inside the custom audio
+panel and did nothing until you switched to it. Web took desktop's two-field
+model (shipped-log). One of the few places desktop was ahead.
+
+Closed the same day, also in that direction: **the DM encryption warning.**
 Desktop stopped to ask before sending to a recipient with no published key;
 web did not, and sent in the clear. Now `EncryptionWarningModal` in
 `packages/ui`, used by both, with its strings in the catalogs rather than

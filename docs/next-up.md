@@ -180,8 +180,9 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
   App.tsx by removing duplication, not by moving plumbing. Left:
   - **desktop parity pass** on the web slices desktop still lacks;
   - **convergence** — the actual payoff: web/desktop hook pairs (`useDms`, `useScreenShare`, `useWhisper`, …) differ mainly in platform access, which can travel in via an injected actions object like `packages/ui` components already do. Hoist converged pairs into `packages/ui`, delete both app copies. App.tsx stays app-local orchestration by design.
-    **Three pairs are converged (2026-09-05, shipped log): `useUnreadCounts`,
-    `useWhisper`, `useTypingIndicators`.** The pattern they set: platform
+    **Four pairs are converged: `useUnreadCounts`, `useWhisper`,
+    `useTypingIndicators` (2026-09-05) and `useAlliances` (2026-09-07) —
+    shipped log.** The pattern they set: platform
     access injected as deps, pure logic in `utils/` where it can be tested
     without a renderer (`packages/ui` has no jsdom), and each merge is a
     *union* — the copies had drifted in both directions, so there is no
@@ -189,11 +190,13 @@ moves to [shipped-log.md](shipped-log.md); design rationale to
     plumbing: two of the three fixed a real desktop bug on the way.
     **The remaining pairs were surveyed and are not the same job**, so do not
     plan them as more of the above:
-    - `useAlliances` (97/48) — **entangled, converge with `useChannelMessages`
-      or not at all.** Desktop is not missing the federated-channel feature;
-      it keeps selection and messages in `useChannelMessages` while web keeps
-      them here. Same drift shape as `unreadDms`, and splitting the pair means
-      touching both hooks anyway.
+    - ~~`useAlliances` (97/48)~~ — **done 2026-09-07** (shipped log). It was
+      the entangled one, and the entanglement was the point: desktop's
+      selection and messages moved out of `useChannelMessages` into the hook
+      before the two could merge. Two behaviour questions surfaced on the way
+      (a composer cleared before a send could be refused; a failed *refresh*
+      reported as a failed send), and one desktop branch turned out to be
+      unreachable and was deleted.
     - `useSettingsProfile` (197/133) — **not a pair worth merging.** Only the
       theme/skin state is shared. Web additionally owns multi-account
       switching (including a sessionStorage hand-off that exists because a

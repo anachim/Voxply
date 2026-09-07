@@ -4,6 +4,31 @@ Full historical record of shipped work, moved out of [ROADMAP.md](../ROADMAP.md)
 to keep the roadmap slim. Newest entries first. Forward-looking work lives in
 the roadmap; design rationale lives in [decisions.md](decisions.md).
 
+- **One `useAlliances` for both clients (2026-09-07)**: the fourth converged
+  hook pair, and the one `next-up` had flagged as entangled — rightly. Unlike
+  the first three these had not drifted in behaviour; they had split the same
+  work differently. Web kept alliance selection and messages in
+  `useAlliances`, desktop kept them inline in `useChannelMessages` and left
+  its `useAlliances` holding only the list, so the merge began by moving
+  desktop's half out. Web's split won: the alliance IO belongs with the
+  alliance state, and it leaves `useChannelMessages` taking the same props on
+  both clients. State and flow now live in `packages/ui`; each app keeps a
+  thin adapter for its own platform calls, and the send/refresh sequence went
+  to `utils/allianceSend.ts` where it can be tested without a renderer.
+  Two behaviour questions surfaced, as this pattern keeps promising: desktop
+  cleared the composer **only on a successful send** while web cleared it
+  first, so a refused send (an alliance revoked, the far hub down) took the
+  message with it — the union keeps desktop's; and posting to an allied
+  channel is two independent round trips (relay, then re-read through our own
+  hub), so a send that landed with a refresh that did not was being reported
+  as a failed send, which invites a double post. One desktop branch was
+  **deleted rather than merged**: opening a shared channel as a local one
+  cannot fire, because `ChannelSidebar` builds the alliance group as
+  `remoteOnly` and filters out exactly those channels. The apps shed 186
+  lines. Verified past the unit suites, since nothing in-process covers a
+  federated read: `e2e-topology alliance alliancebrowser`, 5/5, including a
+  real browser on one hub reading a channel its ally hosts.
+
 - **A failed re-auth no longer ends the session in place (2026-09-07)**: two
   more dead ends of the same shape as the one below, on the live-connection
   path. `ws.ts`'s `scheduleReconnect` handed over completely once the socket
